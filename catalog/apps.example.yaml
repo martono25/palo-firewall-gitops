@@ -1,0 +1,16 @@
+# EXAMPLE catalog entry — app name → resolution data. Not live config.
+apps:
+  web-tier:
+    environment: prod
+    folder: prod-edge            # SCM folder the compiler targets
+    zone: trust
+    addresses:
+      - 10.20.1.0/24
+  payments-api:
+    environment: prod
+    folder: prod-edge
+    zone: app
+    addresses:
+      - 10.20.9.10/32
+    fqdns:
+      - payments.internal

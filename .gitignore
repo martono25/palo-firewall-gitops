@@ -1,0 +1,69 @@
+# ── Terraform ─────────────────────────────────────────────
+# State is sensitive and lives in a remote backend, never in Git.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+# Commit the provider lock file for reproducible plans:
+!.terraform.lock.hcl
+
+# NOTE: rules.auto.tfvars.json is GENERATED DESIRED-STATE (rules, no secrets)
+# and is intentionally TRACKED — it is part of the Git source of truth and the
+# PR diff. Do not ignore *.auto.tfvars.json.
+# Secret-bearing tfvars (conventional) stay out:
+terraform.tfvars
+*.secret.tfvars
+secrets.auto.tfvars
+
+# ── Secrets / credentials ─────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+*_service_account*.json
+sa-key*.json
+gcp-*.json
+aws-credentials*
+credentials.json
+# Rendered bootstrap packages carry device/vm auth-keys — never commit rendered
+# artifacts; templates under provisioning/bootstrap/ ARE tracked.
+provisioning/bootstrap/*.rendered
+*.rendered.txt
+*.rendered.xml
+
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# NOTE: evidence/ is intentionally TRACKED — evidence bundles are Git-resident
+# (Git = single source of truth for audit). Do not ignore evidence/.
+
+# ── OS / editor ───────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

@@ -1,0 +1,25 @@
+# EXAMPLE intent — the Day-2 request surface. Requesters speak app-language;
+# the compiler derives folder, zones, objects, rule position. See docs/DESIGN.md.
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0417            # unique; the change record key
+  requester: jane.doe@corp     # or derived from PR author (Git = identity)
+  ticket: JIRA-12345           # mandatory — audit linkage
+  justification: "Web tier needs to reach the payments API"
+  requested: 2026-07-19
+  expires: 2026-10-19          # optional; null = permanent (higher review tier)
+spec:
+  environment: prod            # → resolves to SCM folder + zone context
+  action: allow                # allow | deny
+  source:
+    - app: web-tier            # named catalog entity …OR…
+    - cidr: 10.20.1.0/24       # explicit fallback
+  destination:
+    - app: payments-api        # named catalog entity …OR…
+    - fqdn: payments.internal  # explicit fallback
+  service:
+    - name: https              # service catalog → tcp/443 …OR…
+    - protocol: tcp
+      port: 8443
+  log: true
