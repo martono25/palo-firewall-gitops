@@ -1,25 +1,29 @@
-# EXAMPLE intent — the Day-2 request surface. Requesters speak app-language;
-# the compiler derives folder, zones, objects, rule position. See docs/DESIGN.md.
+# EXAMPLE intent — a request you can submit in PHASE 1 (explicit forms).
+# Requesters declare intent; the compiler derives folder, zones, objects, rule
+# position. Validated by fwgitops.intent.load_intent (see tests/test_intent.py).
+#
+# Phase 2 adds catalog resolution, which unlocks the friendlier forms:
+#   source:    - app: web-tier      (instead of an explicit cidr)
+#   service:   - name: https        (instead of protocol + port)
+# Until then, use the explicit forms below.
 apiVersion: fw-intent/v1
 kind: AccessRequest
 metadata:
-  id: REQ-2026-0417            # unique; the change record key
-  requester: jane.doe@corp     # or derived from PR author (Git = identity)
+  id: REQ-2026-0417            # unique; the change record key (also a tag)
+  requester: jane.doe@corp
   ticket: JIRA-12345           # mandatory — audit linkage
   justification: "Web tier needs to reach the payments API"
   requested: 2026-07-19
-  expires: 2026-10-19          # optional; null = permanent (higher review tier)
+  expires: 2026-10-19          # optional; omit for a permanent rule
 spec:
-  environment: prod            # → resolves to SCM folder + zone context
+  environment: prod            # compiler resolves this to the SCM folder + zones
   action: allow                # allow | deny
   source:
-    - app: web-tier            # named catalog entity …OR…
-    - cidr: 10.20.1.0/24       # explicit fallback
+    - cidr: 10.20.1.0/24
   destination:
-    - app: payments-api        # named catalog entity …OR…
-    - fqdn: payments.internal  # explicit fallback
+    - fqdn: payments.internal
+    - cidr: 10.20.9.10/32
   service:
-    - name: https              # service catalog → tcp/443 …OR…
     - protocol: tcp
-      port: 8443
+      port: 443
   log: true

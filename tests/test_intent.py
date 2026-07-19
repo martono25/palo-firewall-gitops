@@ -1,0 +1,200 @@
+"""Tests for the intent schema + fail-closed loader (Day-2, Phase 1)."""
+
+from __future__ import annotations
+
+import copy
+from datetime import date
+
+import pytest
+
+from fwgitops.intent import (
+    AccessRequest,
+    Endpoint,
+    IntentError,
+    Service,
+    load_intent,
+)
+
+
+def valid_doc() -> dict:
+    return {
+        "apiVersion": "fw-intent/v1",
+        "kind": "AccessRequest",
+        "metadata": {
+            "id": "REQ-2026-0417",
+            "requester": "jane.doe@corp",
+            "ticket": "JIRA-12345",
+            "justification": "Web tier needs to reach the payments API",
+            "requested": "2026-07-19",
+            "expires": "2026-10-19",
+        },
+        "spec": {
+            "environment": "prod",
+            "action": "allow",
+            "source": [{"cidr": "10.20.1.0/24"}],
+            "destination": [{"fqdn": "payments.internal"}, {"cidr": "10.20.9.10/32"}],
+            "service": [{"protocol": "tcp", "port": "443"}, {"protocol": "tcp", "port": "8000-8100"}],
+            "log": True,
+        },
+    }
+
+
+def problems(doc: dict) -> list[str]:
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc)
+    return [p.path for p in ei.value.problems]
+
+
+# ── Happy path ────────────────────────────────────────────────────────────
+def test_valid_intent_parses():
+    ar = load_intent(valid_doc())
+    assert isinstance(ar, AccessRequest)
+    assert ar.metadata.id == "REQ-2026-0417"
+    assert ar.metadata.expires == date(2026, 10, 19)
+    assert ar.spec.action == "allow"
+    assert ar.spec.source == [Endpoint("cidr", "10.20.1.0/24")]
+    assert Endpoint("fqdn", "payments.internal") in ar.spec.destination
+    assert Service("tcp", "443") in ar.spec.service
+    assert ar.spec.log is True
+
+
+def test_log_defaults_true_and_expires_optional():
+    doc = valid_doc()
+    del doc["spec"]["log"]
+    del doc["metadata"]["expires"]
+    ar = load_intent(doc)
+    assert ar.spec.log is True
+    assert ar.metadata.expires is None
+
+
+# ── Envelope ──────────────────────────────────────────────────────────────
+def test_wrong_api_version_and_kind():
+    doc = valid_doc()
+    doc["apiVersion"] = "v0"
+    doc["kind"] = "Nope"
+    assert set(problems(doc)) >= {"apiVersion", "kind"}
+
+
+def test_non_mapping_document():
+    with pytest.raises(IntentError):
+        load_intent(["not", "a", "mapping"])
+
+
+# ── Metadata ──────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("missing", ["id", "requester", "ticket", "justification", "requested"])
+def test_required_metadata_fields(missing):
+    doc = valid_doc()
+    del doc["metadata"][missing]
+    assert f"metadata.{missing}" in problems(doc)
+
+
+def test_ticket_is_mandatory_audit_linkage():
+    doc = valid_doc()
+    del doc["metadata"]["ticket"]
+    assert "metadata.ticket" in problems(doc)
+
+
+@pytest.mark.parametrize("field", ["id", "ticket"])
+def test_unsafe_tag_value_rejected(field):
+    doc = valid_doc()
+    doc["metadata"][field] = "has:colon"
+    assert f"metadata.{field}" in problems(doc)
+
+
+def test_bad_date_rejected():
+    doc = valid_doc()
+    doc["metadata"]["requested"] = "19-07-2026"
+    assert "metadata.requested" in problems(doc)
+
+
+# ── Spec ──────────────────────────────────────────────────────────────────
+def test_invalid_action():
+    doc = valid_doc()
+    doc["spec"]["action"] = "permit"
+    assert "spec.action" in problems(doc)
+
+
+def test_missing_environment():
+    doc = valid_doc()
+    del doc["spec"]["environment"]
+    assert "spec.environment" in problems(doc)
+
+
+def test_empty_source_rejected():
+    doc = valid_doc()
+    doc["spec"]["source"] = []
+    assert "spec.source" in problems(doc)
+
+
+def test_endpoint_needs_exactly_one_key():
+    doc = valid_doc()
+    doc["spec"]["source"] = [{"cidr": "10.0.0.0/8", "fqdn": "x.y"}]
+    assert "spec.source[0]" in problems(doc)
+
+
+def test_app_endpoint_deferred_to_phase2_with_guidance():
+    doc = valid_doc()
+    doc["spec"]["source"] = [{"app": "web-tier"}]
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc)
+    prob = next(p for p in ei.value.problems if p.path == "spec.source[0].app")
+    assert "Phase 2" in prob.message and "cidr" in prob.message
+
+
+def test_cidr_host_bits_hint():
+    doc = valid_doc()
+    doc["spec"]["source"] = [{"cidr": "10.20.1.5/24"}]  # host bits set
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc)
+    prob = next(p for p in ei.value.problems if p.path == "spec.source[0].cidr")
+    assert "host bits" in prob.message
+
+
+def test_invalid_fqdn():
+    doc = valid_doc()
+    doc["spec"]["destination"] = [{"fqdn": "not a domain"}]
+    assert "spec.destination[0].fqdn" in problems(doc)
+
+
+# ── Service ───────────────────────────────────────────────────────────────
+def test_service_name_deferred_to_phase2():
+    doc = valid_doc()
+    doc["spec"]["service"] = [{"name": "https"}]
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc)
+    prob = next(p for p in ei.value.problems if p.path == "spec.service[0].name")
+    assert "Phase 2" in prob.message and "protocol" in prob.message
+
+
+def test_invalid_protocol():
+    doc = valid_doc()
+    doc["spec"]["service"] = [{"protocol": "icmp", "port": "0"}]
+    assert "spec.service[0].protocol" in problems(doc)
+
+
+@pytest.mark.parametrize("port,expected", [
+    ("70000", True),      # out of range
+    ("8100-8000", True),  # descending
+    ("abc", True),        # non-numeric
+    ("443", False),       # ok
+    ("8000-8100", False), # ok range
+])
+def test_port_validation(port, expected):
+    doc = valid_doc()
+    doc["spec"]["service"] = [{"protocol": "tcp", "port": port}]
+    if expected:
+        assert "spec.service[0].port" in problems(doc)
+    else:
+        load_intent(doc)  # should not raise
+
+
+# ── Multi-problem collection ──────────────────────────────────────────────
+def test_all_problems_collected_not_just_first():
+    doc = valid_doc()
+    doc["apiVersion"] = "v0"
+    del doc["metadata"]["ticket"]
+    doc["spec"]["action"] = "permit"
+    doc["spec"]["source"] = []
+    paths = problems(doc)
+    # Envelope, metadata, and spec problems all surface in one IntentError.
+    assert {"apiVersion", "metadata.ticket", "spec.action", "spec.source"} <= set(paths)
