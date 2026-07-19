@@ -1,0 +1,34 @@
+# EXAMPLE bootstrap init-cfg.txt (the ZTP phone-home config).
+# Rendered per device (substitute ${...}) and delivered via the bootstrap package
+# (AWS: user-data or S3 bootstrap bucket; GCP: instance metadata or GCS). The
+# rendered file carries auth material — NEVER commit rendered output (.gitignore
+# excludes *.rendered.*). This template is safe; the values are not.
+#
+# ⚠️ We are SCM-managed. The exact SCM onboarding keys differ from the classic
+#    Panorama keys and MUST be confirmed during the scm/onboarding spike. Both
+#    forms are shown; keep the SCM block and delete the Panorama block once
+#    verified.
+
+type=dhcp-client
+hostname=${HOSTNAME}
+dns-primary=${DNS_PRIMARY}
+dns-secondary=${DNS_SECONDARY}
+dhcp-accept-server-hostname=yes
+
+# Cloud dataplane/mgmt options (VERIFY per cloud + instance type):
+#   op-command-modes=jumbo-frame        # common on VM-Series
+#   plugin-op-commands=set-dp-cores:... # sizing, if applicable
+op-command-modes=
+
+# ── SCM-managed onboarding (KEEP — verify keys) ──────────────────────────
+# VERIFY: the exact init-cfg keys SCM uses to claim a device (device auth-key /
+# tenant / cloud-manager endpoint). Confirm against the SCM onboarding docs.
+# vm-auth-key=${SCM_DEVICE_AUTH_KEY}
+# cloud-manager=${SCM_ENDPOINT}
+
+# ── Panorama onboarding (DELETE once on SCM) ─────────────────────────────
+# panorama-server=${PANORAMA_PRIMARY}
+# panorama-server-2=${PANORAMA_SECONDARY}
+# vm-auth-key=${VM_AUTH_KEY}
+# dgname=${DEVICE_GROUP}
+# tplname=${TEMPLATE_STACK}

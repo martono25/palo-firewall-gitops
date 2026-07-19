@@ -14,11 +14,22 @@ Shared spine: SCM onboard (device auth-key → folder/label) → baseline snippe
 Steps: instantiate → phone-home/bootstrap → license/subscriptions (retry loop) → SCM onboard
 → baseline snippet stack (start from Iron-Skillet / BPA) → content + PAN-OS floor.
 
-- `terraform/` — VM instance + mgmt networking + bootstrap storage; SCM folders + snippet stacks (`scm` provider)
-- `bootstrap/` — `init-cfg.txt` / minimal `bootstrap.xml` templates (ZTP handshake)
-- `python/` — auth-key gen, licensing activation, content updates, registration glue,
-  "wait until connected" verification, and any SCM object the `scm` provider doesn't cover
+## What's built vs scaffolded
+
+- **Orchestration (BUILT + TESTED):** `src/fwgitops/provision.py` — the re-entrant state
+  machine (resume from any stage), the license retry loop (the flaky step), and the bounded
+  connect poll (T3). 8 tests with a fake SCM client. The **real SCM client** behind the
+  `ProvisionClient` protocol is the unvalidated part (built during the SCM spike).
+- **`bootstrap/` (SCAFFOLD):** `init-cfg.sample.txt` — the ZTP phone-home template. SCM
+  onboarding keys marked VERIFY (rendered files with auth material are gitignored).
+- **`terraform/aws|gcp/` (POINTERS, not blind HCL):** do NOT hand-roll VM-Series cloud
+  modules. Use Palo's maintained reference modules:
+  - AWS: `PaloAltoNetworks/terraform-aws-vmseries-modules`
+  - GCP: `PaloAltoNetworks/terraform-google-vmseries-modules`
+  Wire their bootstrap input to `bootstrap/init-cfg`, then hand the running device to
+  `fwgitops.provision`.
 
 **Sequencing:** build the spine on VM-Series first (disposable, loop-in-code), then add the
 PA-series ZTP front door. Idempotency: re-runs must not re-bootstrap — onboard/baseline state
-is a runtime SCM query, not TF state. Evidence: emits CM-2 (baseline) + CM-6 (settings).
+is a runtime SCM query (see `provision.current_stage`), not TF state. Evidence: emits CM-2
+(baseline) + CM-6 (settings).
