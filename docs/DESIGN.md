@@ -775,25 +775,22 @@ dependency; do it first, then A ∥ B, then C.
 ## Implementation Tasks
 
 Synthesized from this review. Full JSONL at `~/.gstack/projects/Projects/tasks-eng-review-*.jsonl`.
+**Build status as of 2026-07-19 — see `BUILD_STATUS.md` in the repo.** Legend: `[x]` built+tested ·
+`[~]` scaffolded/unvalidated · `[ ]` not started. (The core Day-2 engine — intent schema, compiler,
+CLI, TF module — is not a numbered task; it's built+tested except the TF module which is scaffolded.)
 
-- [ ] **T6 (P1, human: ~0.5d / CC: ~1h)** — tags — Consolidate identity/tag convention into one canonical spec
-  - Surfaced by: Code Quality — tag referenced by rule synthesis, for_each, drift, evidence
-  - Do first: it's the shared dependency for Lanes B and C.
-- [ ] **T1 (P1, human: ~1d / CC: ~2h)** — ci-auth — Single SCM service account + per-run short-lived token
-- [ ] **T2 (P1, human: ~0.5d / CC: ~30m)** — terraform — Remote backend, native locking, one state per folder
-- [ ] **T4 (P1, human: ~3d / CC: ~6h)** — state-model — Effective-rulebase model as golden-fixture-tested library
-- [ ] **T3 (P2, human: ~2d / CC: ~4h)** — provisioning — Re-entrant provisioning workflow + bounded poll
-- [ ] **T5 (P2, human: ~1d / CC: ~2h)** — compiler — Uniform fail-closed error contract
-- [ ] **T7 (P2, human: ~0.5d / CC: ~1h)** — perf — Cache effective rulebase with explicit invalidation
-- [ ] **T8 (P2, human: ~1d / CC: ~2h)** — catalog — Derive catalog from authoritative IPAM + validation
-- [ ] **T9 (P1, human: ~1.5d / CC: ~3h)** — pipeline — Split apply into stage (TF) + atomic commit/push; cancel-before-commit discards candidate; git-revert post-apply; objects-before-rules ordering
-  - Surfaced by: Topic 1 — mid-apply cancel can leave a half-placed rule enforced
-- [ ] **T10 (P2, human: ~2d / CC: ~4h)** — drift-l2 — Level-2 device drift: baseline mgmt lockdown (tiered→hard) + SCM sync-status polling + crown-jewel running-config diff
-  - Surfaced by: Topic 2 — device edits below SCM are invisible to Level-1 drift detection
-- [ ] **T11 (P3, human: ~0.5d / CC: ~1h)** — lifecycle — Scheduled expiry job: remove rules past `expires:` (auto low-risk, gated otherwise)
-  - Surfaced by: Topic 1 — expiry auto-rollback keeps temporary rules from becoming permanent
-- [ ] **T12 (P2, human: ~1.5d / CC: ~3h)** — scheduler — Tier-driven, window-aware apply scheduler: LOW continuous, HIGH change-hours sequential, CRITICAL maintenance-window isolated; 1:1 per commit, batching off
-  - Surfaced by: Issue 8 — apply cadence was an implicit assumption (continuous on-merge)
+- [x] **T6 (P1)** — tags — Canonical tag/identity convention — **BUILT+TESTED** (`fwgitops.tags`, 22 tests)
+- [x] **T5 (P2)** — compiler — Uniform fail-closed error contract — **BUILT** (intent/resolve/cli)
+- [x] **T3 (P2)** — provisioning — Re-entrant orchestration + bounded poll — **BUILT+TESTED** (`fwgitops.provision`, 8 tests); real SCM client + workflow wiring pending
+- [~] **T9 (P1)** — pipeline — apply stage + atomic commit/push; objects-before-rules — **SCAFFOLDED** (`apply.yml` boundary + module `depends_on`); commit step is a TODO
+- [~] **T1 (P1)** — ci-auth — Single SCM service account + per-run short-lived token — **SCAFFOLDED** (workflow stub)
+- [~] **T2 (P1)** — terraform — Remote backend, native locking, one state per folder — **SCAFFOLDED** (`backend.tf` stub)
+- [~] **T12 (P2)** — scheduler — Tier-driven, window-aware apply scheduler — **SCAFFOLDED slot** (Phase-2 markers in `apply.yml`)
+- [ ] **T4 (P1→P2)** — state-model — Effective-rulebase model as golden-fixture-tested library — **NOT STARTED** (Phase 2)
+- [ ] **T7 (P2)** — perf — Cache effective rulebase with explicit invalidation — **NOT STARTED** (Phase 2)
+- [ ] **T8 (P2)** — catalog — Derive catalog from authoritative IPAM + validation — **NOT STARTED** (Phase 2)
+- [ ] **T10 (P2)** — drift-l2 — Level-2 device drift: mgmt lockdown + SCM sync polling + config diff — **NOT STARTED** (Phase 2)
+- [ ] **T11 (P3)** — lifecycle — Scheduled expiry job — **NOT STARTED** (Phase 3)
 
 ## GSTACK REVIEW REPORT
 
