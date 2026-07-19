@@ -1,0 +1,16 @@
+# Review gates. In the design's tier model, HIGH changes require the folder's
+# CODEOWNERS as the standard approver; Phase 1 requires review on every change.
+# VERIFY: replace the placeholder team with your real GitHub team(s).
+
+# Firewall rule intent + generated desired-state + policy
+/intent/        @REPLACE-org/firewall-team
+/terraform/     @REPLACE-org/firewall-team
+/catalog/       @REPLACE-org/firewall-team
+/policy/        @REPLACE-org/firewall-team
+
+# The compile/classify engine — changes here affect every rule, so require
+# platform + security review.
+/src/fwgitops/  @REPLACE-org/firewall-platform @REPLACE-org/firewall-team
+
+# CRITICAL-tier changes (Phase 2) additionally route to the firewall-security
+# environment for dual-control sign-off (see .github/workflows/apply.yml).

@@ -1,0 +1,89 @@
+# ─────────────────────────────────────────────────────────────────────────
+# UNVALIDATED SCAFFOLDING. Wires fwgitops compile + terraform plan into the PR
+# gate. Auth (T1 short-lived SCM token) and the remote backend (Arch-2) are
+# stubbed with `# VERIFY:` markers — resolve during setup. Cannot be run in the
+# design environment (no SCM/cloud creds).
+# ─────────────────────────────────────────────────────────────────────────
+name: pr-validate
+
+on:
+  pull_request:
+    paths:
+      - "intent/**"
+      - "catalog/**"
+      - "terraform/**"
+      - "src/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write # OIDC to cloud for the TF state backend (Arch-2)
+
+jobs:
+  compile-and-plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+
+      # 1. Fail-closed intent validation. Any invalid intent fails the PR here
+      #    with an actionable report — the requester sees exactly what to fix.
+      - name: Validate intent (fail-closed)
+        run: fwgitops compile intent --check
+
+      # 2. The committed rules.auto.tfvars.json must match a fresh compile, so
+      #    the artifact reviewed in the PR is exactly what apply will use.
+      - name: Check generated tfvars is up to date
+        run: |
+          fwgitops compile intent --out terraform
+          if ! git diff --quiet -- 'terraform/**/rules.auto.tfvars.json'; then
+            echo "::error::rules.auto.tfvars.json is stale. Run: fwgitops compile intent --out terraform, then commit."
+            git --no-pager diff -- 'terraform/**/rules.auto.tfvars.json'
+            exit 1
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+
+      # VERIFY (T1): mint a short-lived SCM token for this run and export the
+      # provider's auth env vars. Single service account, per-run token — never
+      # a long-lived secret. Exact mechanism confirmed during the scm spike.
+      - name: Mint short-lived SCM token
+        run: |
+          echo "TODO(T1) exchange service-account creds for a short-lived token; export SCM_* env"
+
+      # 3. terraform plan per changed folder → the PR preview + drift signal.
+      - name: terraform plan (per folder)
+        run: |
+          set -euo pipefail
+          for dir in terraform/*/; do
+            [ -f "$dir/main.tf" ] || continue
+            echo "::group::plan $dir"
+            terraform -chdir="$dir" init -input=false
+            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode | tee "plan-$(basename "$dir").txt" || true
+            echo "::endgroup::"
+          done
+
+      - name: Upload plans
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plans
+          path: plan-*.txt
+
+      - name: Comment plan summary on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Terraform plan (PR preview)"
+            for f in plan-*.txt; do
+              [ -f "$f" ] || continue
+              echo "<details><summary>$f</summary>"
+              echo '```'; tail -c 60000 "$f"; echo '```'
+              echo "</details>"
+            done
+          } > body.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file body.md

@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────────────────
+# UNVALIDATED SCAFFOLDING. Applies the reviewed desired-state after merge.
+#
+# PHASE 1: human approval on EVERY change via the `firewall-apply` environment's
+# required reviewers (there is no risk classifier yet). PHASE 2 slots for the
+# tier-driven routing (LOW auto / HIGH review / CRITICAL security sign-off) and
+# the window-aware scheduler are marked below. Auth (T1) + backend (Arch-2) are
+# stubbed with `# VERIFY:`.
+# ─────────────────────────────────────────────────────────────────────────
+name: apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "intent/**"
+      - "catalog/**"
+
+permissions:
+  contents: read
+  id-token: write # OIDC to cloud for the TF state backend (Arch-2)
+
+# Never cancel an in-flight apply. Intentional mid-apply cancellation is handled
+# by the candidate/commit boundary (discard candidate), NOT by killing the job.
+concurrency:
+  group: fw-apply-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── PHASE 2 (slot): classify each change and route to the right gate ──────
+  # classify:
+  #   outputs: { tier: LOW|HIGH|CRITICAL }
+  #   run: fwgitops classify ...        # risk classifier (Phase 2, fail-closed)
+  # Then `apply` picks its `environment:` from the tier:
+  #   LOW      -> no required reviewer (auto)
+  #   HIGH     -> firewall-review  (folder CODEOWNERS)
+  #   CRITICAL -> firewall-security (dual-control), maintenance-window only
+  # and the window-aware scheduler gates WHEN (tier-driven cadence, 1:1 isolation).
+
+  apply:
+    runs-on: ubuntu-latest
+    # PHASE 1: single protected environment = human approval on every change.
+    environment: firewall-apply
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+
+      - uses: hashicorp/setup-terraform@v3
+
+      # VERIFY (T1): short-lived SCM token, same as pr-validate.
+      - name: Mint short-lived SCM token
+        run: |
+          echo "TODO(T1) exchange service-account creds for a short-lived token; export SCM_* env"
+
+      # Applies the COMMITTED tfvars (exactly what was reviewed). The module's
+      # depends_on enforces objects-before-rules. One folder at a time keeps the
+      # 1:1 isolation / clean per-change rollback.
+      - name: terraform apply (stage) — per folder
+        run: |
+          set -euo pipefail
+          for dir in terraform/*/; do
+            [ -f "$dir/main.tf" ] || continue
+            echo "::group::apply $dir"
+            terraform -chdir="$dir" init -input=false
+            terraform -chdir="$dir" apply -input=false -auto-approve
+            echo "::endgroup::"
+          done
+
+      # Candidate/commit boundary (Topic-1 rollback): if the scm provider stages
+      # config rather than committing on apply, the atomic commit/push is HERE.
+      # Reaching this step means every folder staged cleanly.
+      # VERIFY: whether the provider auto-commits on apply, or a push is needed.
+      - name: SCM commit/push (atomic boundary)
+        run: |
+          echo "TODO commit/push staged config to SCM (or confirm provider auto-commits)"
