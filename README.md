@@ -36,6 +36,24 @@ human approval → every change emits a NIST-mapped evidence bundle.
 Intent (YAML) → Python compiler → risk classifier → Terraform plan → tier gate → apply → SCM/PAN-OS
 ```
 
+## Quickstart (Phase-1 compiler)
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e '.[dev]'
+
+# Compile intent → rules.auto.tfvars.json (per SCM folder)
+fwgitops compile intent --env-map catalog/environments.yaml --out terraform
+fwgitops compile intent --check      # validate only, write nothing
+
+pytest -q                            # 75 tests
+```
+
+Fail-closed and all-or-nothing: if any intent is invalid, the compiler prints an
+actionable report and writes nothing (exit 2). What's built so far: the tag/identity
+convention, the intent schema + validator, the compiler, and this CLI. Terraform
+module, pipeline, and provisioning are next (see `docs/DESIGN.md`).
+
 ## Roadmap
 
 - **Phase 1 — Walking skeleton:** provision ONE pilot firewall end-to-end + one Day-2 rule

@@ -1,0 +1,9 @@
+# Phase-1 environment resolution map (the thin catalog).
+# environment -> SCM folder + default zone-pair. Per-IP zone inference and the
+# full app/service catalog arrive in Phase 2 (see docs/DESIGN.md).
+#
+# This file is platform-maintained config; changes to it are PRs.
+prod:
+  folder: prod-edge
+  from_zone: trust
+  to_zone: app
