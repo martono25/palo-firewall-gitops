@@ -1,25 +1,21 @@
 """SCM REST implementations of the PushClient and ProvisionClient protocols.
 
-⚠️ ENDPOINT MAPPING IS PARTIALLY VALIDATED (provider-binary analysis, 2026-07-19).
+SCM PUSH PATH (T13) IS FULLY CONFIRMED (2026-07-19):
+  * auth/session layer verified live (fwgitops.scmapi)
+  * PENDING + JOB paths confirmed by live probe (GET 200)
+  * PUSH path confirmed by live POST (400 = path+verb correct, body wrong) and by
+    the SDK method PushCandidateConfigVersions
+  * PUSH BODY confirmed from the SDK struct PushCandidateConfigVersionsRequest:
+    field is `folder` (singular key, array value), plus optional devices/admin/
+    description. `folders` (plural) is rejected — see ScmPushClient.push.
+  * JOB status uses the PAN-OS two-field model: status_str (done?) + result_str
+    (ok?). Sources: pkg.go.dev/github.com/paloaltonetworks/scm-go, live tenant.
 
-  EVIDENCED in provider v1.0.11: auth URL exactly as used here; API hosts
-  `api.sase.paloaltonetworks.com` (default) and `api.strata.paloaltonetworks.com`;
-  base paths `/config/objects/v1`, `/config/security/v1`, `/config/setup/v1`,
-  `/config/network/v1`, `/config/deployment/v1`; resource segments `/addresses`,
-  `/services`, `/tags/{id}`, `/security-rules`, `/folders`, `/devices`,
-  `/snippets`, `/labels`. ProvisionClient paths below are corrected to match.
-
-  DISPROVEN: the earlier push-endpoint guesses. "config/operations",
-  "config-versions", "candidate-config" and "jobs/" appear ZERO times in the
-  provider. Push paths are genuinely unknown — see ScmPushClient.
-
-  STILL UNVERIFIED: payload shapes, per-device sub-paths, and licensing.
-
-The auth/session layer (`fwgitops.scmapi`) is fully verified — it is the exact
-exchange the spike exercised. Everything still marked `# VERIFY:` / ⛔ below
-should be confirmed against the SCM API reference (or by watching the SCM UI's
-network calls) before being relied on. Same honest posture the Terraform module
-had before its spike, and the same fix: one place to correct.
+ScmProvisionClient paths (Day-1) are EVIDENCED from provider-binary analysis
+(base `/config/setup/v1` + segments `/devices`, `/folders`, `/snippets` all
+present in v1.0.11) but the per-device sub-paths, payload shapes, and licensing
+remain `# VERIFY:` — the device-onboarding sub-spike (needs a VM-Series) closes
+those, same honest posture the Terraform module had before its spike.
 
 The orchestration that consumes these — `fwgitops.push.push_folder` and
 `fwgitops.provision.provision` — is fully built and tested against fakes, so
@@ -54,14 +50,11 @@ class ScmPushClient:
     the folder-scoped push semantics, and the bounded job poll.
     """
 
-    # ✅ CONFIRMED by live probe (2026-07-19, GET returned 200):
+    # ✅ ALL CONFIRMED (2026-07-19):
+    #   PENDING/JOB by live probe (GET 200); PUSH path by live POST (400 = path
+    #   + verb correct, body wrong) and by the SDK method PushCandidateConfigVersions.
     PENDING_PATH = "/config/operations/v1/config-versions/candidate"
     JOB_PATH = "/config/operations/v1/jobs/{job_id}"
-    # ⚠️ MOST LIKELY but not confirmed: GET is permissive on this route (any
-    # trailing segment returns the candidate), so GET-probing cannot distinguish
-    # the push verb. `candidate:push` is the AIP custom-method form and the best
-    # candidate. CONFIRM from the SCM UI's network call on "Push Config" before
-    # relying on it. Injectable below — no code edit needed once known.
     PUSH_PATH = "/config/operations/v1/config-versions/candidate:push"
 
     def __init__(
@@ -97,37 +90,19 @@ class ScmPushClient:
                     out.append(str(name))
         return out
 
-    #: Ordered candidates for the push route, best guess first. GET-probing
-    #: cannot distinguish them (the route is permissive), so the first real POST
-    #: is the test. A wrong path fails loudly with these listed — a 30-second fix.
-    PUSH_PATH_CANDIDATES = (
-        "/config/operations/v1/config-versions/candidate:push",
-        "/config/operations/v1/config-versions/push",
-        "/config/operations/v1/config-versions:push",
-        "/config/operations/v1/push",
-    )
-
-    def push(self, folder: str) -> str:
+    def push(self, folder: str, *, description: str = "fwgitops") -> str:
         """Start a folder-scoped push. Returns the job id.
 
-        SCM's push target is the FOLDER (spike finding #10). If PUSH_PATH is
-        wrong the API answers 404/405 and we re-raise with the remaining
-        candidates so the fix is obvious and one line.
+        Body shape is authoritative — from the SDK struct
+        PushCandidateConfigVersionsRequest: the field is `folder` (SINGULAR key,
+        array value), NOT `folders`. Sending `folders` fails with a 400
+        ("push-to unexpected node"), the same singular-vs-plural class of bug as
+        `tag` vs `tags` in the Terraform module. Optional siblings: `devices`
+        (numeric ids), `admin`, `description`.
         """
-        try:
-            payload = self.session.request("POST", self.PUSH_PATH, body={"folders": [folder]})
-        except ScmApiError as e:
-            if e.status in (404, 405):
-                others = [c for c in self.PUSH_PATH_CANDIDATES if c != self.PUSH_PATH]
-                raise ScmApiError(
-                    e.status,
-                    f"push path {self.PUSH_PATH!r} rejected ({e.status}). This path is the one "
-                    f"part of the SCM API we could not confirm by probing. Try one of: "
-                    f"{', '.join(others)} — pass it as ScmPushClient(session, push_path=...), "
-                    f"no code change needed. Confirm definitively from the SCM UI's network "
-                    f"call on 'Push Config'."
-                ) from e
-            raise
+        payload = self.session.request(
+            "POST", self.PUSH_PATH, body={"folder": [folder], "description": description}
+        )
         job_id = _first_present(payload, "job_id", "jobId", "id")
         if not job_id:
             raise ScmApiError(200, f"push response contained no job id: {payload}")

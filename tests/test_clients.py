@@ -135,10 +135,18 @@ def test_is_connected(status, expected):
     assert c.is_connected("vm-1") is expected
 
 
-def test_wrong_push_path_names_the_alternatives():
-    # The one unconfirmed endpoint: make being wrong cheap and obvious.
-    c = ScmPushClient(session_for({"message": "not found"}, statuses={0: 404}))
-    with pytest.raises(ScmApiError) as ei:
-        c.push("GitOps")
-    msg = str(ei.value)
-    assert "could not confirm" in msg and "push_path=" in msg
+def test_push_body_uses_singular_folder_key():
+    # Authoritative from the SDK struct PushCandidateConfigVersionsRequest: the
+    # key is `folder` (singular), array value. Sending `folders` returns 400
+    # ("push-to unexpected node") — the same singular/plural bug class as tag/tags.
+    bodies = []
+
+    def transport(method, url, headers, body):
+        bodies.append(body)
+        payload = {"access_token": "t"} if "oauth2" in url else {"job_id": "j1"}
+        return 200, json.dumps(payload).encode()
+
+    ScmPushClient(ScmSession(GOOD, transport=transport)).push("GitOps")
+    sent = json.loads(bodies[-1])
+    assert sent["folder"] == ["GitOps"]      # singular key
+    assert "folders" not in sent

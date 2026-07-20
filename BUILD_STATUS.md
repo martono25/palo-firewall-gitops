@@ -66,7 +66,8 @@ Every assumption is marked `# VERIFY:`. Resolve before first `apply`.
 | Review gate | `.github/CODEOWNERS` | real team handles |
 | Bootstrap | `provisioning/bootstrap/init-cfg.sample.txt` | SCM onboarding keys |
 | Cloud instantiate | (pointers) | use Palo's `terraform-aws/google-vmseries-modules`, not blind HCL |
-| **SCM REST clients** | `src/fwgitops/clients.py` | ✅ pending-changes + jobs paths CONFIRMED by live probe; PAN-OS job model (`status_str` + `result_str`) confirmed and implemented. ⚠️ ONE unknown remains: the push verb — a wrong value fails loudly and names the alternatives (one-line fix, no code change). |
+| **SCM push client (T13)** | `src/fwgitops/clients.py` | ✅ FULLY CONFIRMED — pending/job paths (live probe), push path (live POST + SDK), push body `{"folder":[...]}` singular (SDK struct), PAN-OS two-field job model. Track B closed for Day-2. |
+| SCM provision client (T3) | `src/fwgitops/clients.py` | ⚠️ base path + segments evidenced; per-device sub-paths + licensing need the device sub-spike (a VM-Series) |
 
 The Python↔Terraform contract (`rules.auto.tfvars.json` shape) **is** verified end-to-end:
 compiler output type-checks through Terraform's variable types against the real provider
