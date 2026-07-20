@@ -56,15 +56,29 @@ Every assumption is marked `# VERIFY:`. Resolve before first `apply`.
 
 | Area | Path | Blocking dependency |
 |---|---|---|
-| Terraform module | `terraform/modules/security_folder/` | **`scm` provider spike** — the module README is the checklist |
+| ~~Terraform module~~ | `terraform/modules/security_folder/` | ✅ **SCHEMA-VERIFIED** against scm v1.0.11 — `terraform validate` passes (Part A done) |
 | Per-folder root | `terraform/prod-edge/` | remote backend (Arch-2), provider auth (T1) |
 | CI pipeline | `.github/workflows/{pr-validate,apply}.yml` | T1 auth, Arch-2 backend, `firewall-apply` environment |
 | Review gate | `.github/CODEOWNERS` | real team handles |
 | Bootstrap | `provisioning/bootstrap/init-cfg.sample.txt` | SCM onboarding keys |
 | Cloud instantiate | (pointers) | use Palo's `terraform-aws/google-vmseries-modules`, not blind HCL |
 
-The Python↔Terraform contract (`rules.auto.tfvars.json` shape) **is** verified —
-it is produced and consumed on both sides. Only the provider mapping is unverified.
+The Python↔Terraform contract (`rules.auto.tfvars.json` shape) **is** verified end-to-end:
+compiler output type-checks through Terraform's variable types against the real provider
+schema (a `plan` reaches provider auth — `ClientId must be specified` — with no type errors).
+
+### Part-A spike results (2026-07-19) — provider `PaloAltoNetworks/scm` v1.0.11
+
+Four assumptions were wrong and are now fixed: `scm_address_object`→**`scm_address`**,
+`scm_security_policy_rule`→**`scm_security_rule`**, `tags`→**`tag`** (singular,
+`list(string)`), and `protocol` is a **nested attribute** (`protocol = { tcp = { port } }`)
+not a block. Provider pin corrected `~> 0.9`→**`~> 1.0`**. Tags are free-form strings at the
+Terraform layer, so `fwgitops.tags` needed no change. Provider does the OAuth
+client-credentials→JWT exchange itself (feeds T1). Schema dump: `spike/schema.json`.
+
+**Remaining (Part B, needs the tenant):** commit/push model · whether SCM requires tags to
+pre-exist as `scm_tag` objects · auth end-to-end · `depends_on` ordering. Run
+`spike/smoke/` — it exercises the real module and creates the rule **disabled** for safety.
 
 ## ⬜ Not started (Phase 2 / 3 — deferred by review)
 

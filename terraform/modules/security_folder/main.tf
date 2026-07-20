@@ -58,9 +58,10 @@ resource "scm_security_rule" "this" {
   # Phase 1 is service/port-based; App-ID is a known Phase-2 gap (docs/DESIGN.md).
   application = ["any"]
 
-  action  = each.value.action
-  log_end = each.value.log_end
-  tag     = each.value.tags
+  action   = each.value.action
+  log_end  = each.value.log_end
+  disabled = each.value.disabled
+  tag      = each.value.tags
 
   # Objects before rules — a rule must never reference an object that does not
   # yet exist (design: Change Rollback & Cancellation, ordering rule).

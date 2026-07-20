@@ -37,6 +37,7 @@ variable "security_rules" {
     services     = list(string)
     action       = string
     log_end      = bool
+    disabled     = optional(bool, false)
     tags         = list(string)
   }))
   default = {}
