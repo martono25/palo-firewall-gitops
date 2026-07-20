@@ -10,9 +10,8 @@ terraform {
 
   required_providers {
     scm = {
-      source = "PaloAltoNetworks/scm"
-      # VERIFY: pin the exact provider version during the spike.
-      version = "~> 0.9"
+      source  = "PaloAltoNetworks/scm"
+      version = "~> 1.0" # resolved 1.0.11 in the Part-A spike
     }
   }
 }

@@ -8,40 +8,43 @@ The module is authored + reviewed once; only the generated data changes per PR.
 rules.auto.tfvars.json ──▶ root module vars ──▶ module "security_folder" ──▶ scm_* resources
 ```
 
-## ⚠️ Status: UNVALIDATED against the live provider
+## ✅ Status: schema-VERIFIED (Part A done, 2026-07-19)
 
-The variable types (the compiler contract) are correct and stable. The **`scm`
-provider resource/attribute schema is not verified** — no `scm` provider or SCM
-credentials are available in the build environment. This module is the concrete
-output of, and input to, the **scm provider coverage spike** (the #1 de-risker
-in docs/DESIGN.md → The Assignment).
+Verified against **`PaloAltoNetworks/scm` v1.0.11**. `terraform validate` passes.
+Schema dump: [`spike/schema.json`](../../../spike/schema.json).
 
-## Spike checklist — resolve every `# VERIFY:` before first apply
+### Part-A findings (what changed vs the original guesses)
 
-Run `terraform providers schema -json` against a pinned `scm` provider and
-confirm each item, then delete the corresponding `# VERIFY:` comment:
+| Assumed | Actual | Impact |
+|---|---|---|
+| `scm_address_object` | **`scm_address`** | resource renamed |
+| `scm_security_policy_rule` | **`scm_security_rule`** | resource renamed |
+| `tags` | **`tag`** (singular, `list(string)`) | all three resources |
+| `protocol { tcp { port } }` block | **nested ATTRIBUTE**: `protocol = { tcp = { port } }` | `dynamic` block would have failed |
+| provider `~> 0.9` | **1.0.11** (`~> 1.0`) | wrong pin would have failed `init` |
 
-- [ ] **Provider version** — pin the exact `PaloAltoNetworks/scm` version (`versions.tf`).
-- [ ] **Scope attribute** — object/rule scope is `folder` vs `snippet` vs `device`;
-      confirm exactly one is required and that `folder` is right for this design.
-- [ ] **`scm_address_object`** — attribute for CIDR (`ip_netmask`?) and FQDN (`fqdn`?),
-      and that they are mutually exclusive.
-- [ ] **Tags** — attribute name (`tags` vs `tag`) and element type on every resource.
-      Confirm the tag *strings* our convention emits (`gitops:managed`, …) are legal
-      SCM tag names, or whether tags must be pre-created `scm_tag` objects (if so, add
-      a `scm_tag` for_each over the distinct tags and a dependency).
-- [ ] **`scm_service`** — protocol block shape (`protocol { tcp { port } }`?) and
-      whether a port *range* string (`8000-8100`) is accepted as-is.
-- [ ] **Security rule resource name** — `scm_security_policy_rule` vs `scm_security_rule`.
-- [ ] **Rule member attrs** — `from` / `to` / `source` / `destination` / `service`
-      names and whether they take plain string lists or object references.
-- [ ] **`application`** — attribute name and the correct "any" literal (Phase-1 default).
-- [ ] **Logging** — `log_end` vs `log_setting` / `log_start`, and default.
-- [ ] **Commit/push model** — does the provider push config to SCM on `apply`, or is a
-      separate commit/push needed? This drives the candidate/commit boundary
-      (docs/DESIGN.md → Change Rollback) and the pipeline's atomic step.
-- [ ] **Ordering** — confirm `depends_on` (objects before rules) is sufficient, or
-      whether the provider needs explicit references for ordering.
+Confirmed as designed: scope is exactly one of `folder`/`snippet`/`device`;
+address type is exactly one of `ip_netmask`/`fqdn`/`ip_range`/`ip_wildcard`;
+rule members (`from`/`to`/`source`/`destination`/`service`/`application`) are all
+`list(string)`; `action` is a string; `log_end` is a bool.
+
+Useful extras discovered: the rule also exposes `position` / `relative_position`
+(relevant to the Phase-2 sectioned-placement design), plus `disabled`,
+`negate_source`/`negate_destination`, `source_user`, `schedule`, and
+`profile_setting`. There are 129 `scm_*` resources total, including `scm_folder`,
+`scm_snippet`, `scm_label`, `scm_variable`, and `scm_zone` (useful for Day-1).
+
+## ⚠️ Still open — Part B (needs the tenant + folder)
+
+- [ ] **Commit/push model** — does `apply` push config to devices, or is a separate
+      commit/push required? This is the candidate/commit boundary (docs/DESIGN.md →
+      Change Rollback) and wires the atomic step in `.github/workflows/apply.yml`.
+- [ ] **Tag pre-existence** — the provider takes `tag` as free-form `list(string)`,
+      but SCM may reject tags that don't exist as `scm_tag` objects. If it does, add
+      an `scm_tag` `for_each` over distinct tags + a dependency.
+- [ ] **Auth end-to-end** — provider exposes `client_id`, `client_secret`, `scope`,
+      `auth_url`, `host`, `auth_file` (feeds T1 short-lived token design).
+- [ ] **Ordering** — confirm `depends_on` (objects before rules) is sufficient in practice.
 
 ## Inputs
 

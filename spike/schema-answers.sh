@@ -46,10 +46,13 @@ echo "── All scm_* resources ───────────────�
 ALL=$(q ".provider_schemas[\"$PK\"].resource_schemas // {} | keys[]")
 echo "${ALL:-  (none)}" | sed 's/^/  /'
 
-ADDR=$(first_match 'address_object$|_address$|address')
-SVC=$(first_match 'service$|_service_object$')
+ADDR=$(first_match '^scm_address$|address_object$|^scm_address')
+SVC=$(first_match '^scm_service$|service$')
 RULE=$(first_match 'security.*rule')
-TAG=$(first_match '_tag$')
+# Prefer the exact scm_tag resource; only fall back to a looser match (avoids
+# picking up e.g. scm_link_tag, which is a different thing).
+TAG=$(q ".provider_schemas[\"$PK\"].resource_schemas // {} | keys[]" | grep -Ex 'scm_tag' | head -1 || true)
+[ -n "$TAG" ] || TAG=$(first_match '_tag$')
 
 echo
 echo "── Q: resource NAMES (checklist item 1) ──────────────────────────"

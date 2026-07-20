@@ -4,22 +4,25 @@
 # for_each keys are the compiler's stable keys (address/service object name, rule
 # key), so editing one entry never churns the others (design: Topic-1 rollback).
 #
-# ⚠️  Every `# VERIFY:` line is a schema assumption to confirm against the scm
-#     provider docs during the spike. The mapping is intentionally centralized
-#     here so corrections are a single-file edit.
+# Schema verified against PaloAltoNetworks/scm v1.0.11 (Part-A spike, 2026-07-19).
+# Resolved: resource names are scm_address / scm_service / scm_security_rule;
+# the tag attribute is `tag` (list(string), singular); `protocol` is a nested
+# ATTRIBUTE (object), not a block; scope is exactly one of folder/snippet/device.
+# Still open (Part B, needs the tenant): whether SCM requires tag strings to
+# pre-exist as scm_tag objects, and the commit/push model.
 
 # ── Address objects ───────────────────────────────────────────────────────
-resource "scm_address_object" "this" {
+resource "scm_address" "this" {
   for_each = var.address_objects
 
   name   = each.value.name
-  folder = each.value.folder # VERIFY: scope attr — exactly one of folder/snippet/device
+  folder = each.value.folder # exactly one of folder/snippet/device
 
-  # VERIFY: scm_address_object expresses type via exactly one of these attrs.
+  # Exactly one of fqdn / ip_netmask / ip_range / ip_wildcard.
   ip_netmask = each.value.type == "ip-netmask" ? each.value.value : null
   fqdn       = each.value.type == "fqdn" ? each.value.value : null
 
-  tags = each.value.tags # VERIFY: attribute name (tag vs tags) and element type
+  tag = each.value.tags # provider attr is `tag`, list(string)
 }
 
 # ── Service objects ───────────────────────────────────────────────────────
@@ -29,34 +32,23 @@ resource "scm_service" "this" {
   name   = each.value.name
   folder = each.value.folder
 
-  # VERIFY: scm_service protocol shape. Commonly a nested block:
-  #   protocol { tcp { port = "443" } }  /  protocol { udp { port = "..." } }
-  protocol {
-    dynamic "tcp" {
-      for_each = each.value.protocol == "tcp" ? [1] : []
-      content {
-        port = each.value.port
-      }
-    }
-    dynamic "udp" {
-      for_each = each.value.protocol == "udp" ? [1] : []
-      content {
-        port = each.value.port
-      }
-    }
+  # `protocol` is a nested attribute (object), NOT a block. Exactly one of
+  # tcp/udp must be set; the other is null.
+  protocol = {
+    tcp = each.value.protocol == "tcp" ? { port = each.value.port } : null
+    udp = each.value.protocol == "udp" ? { port = each.value.port } : null
   }
 
-  tags = each.value.tags
+  tag = each.value.tags
 }
 
 # ── Security rules ────────────────────────────────────────────────────────
-resource "scm_security_policy_rule" "this" { # VERIFY: resource name (…_policy_rule vs …_rule)
+resource "scm_security_rule" "this" {
   for_each = var.security_rules
 
   name   = each.value.name
   folder = each.value.folder
 
-  # VERIFY: attribute names for zones/members (from/to/source/destination/service).
   from        = each.value.from_zones
   to          = each.value.to_zones
   source      = each.value.sources
@@ -64,16 +56,16 @@ resource "scm_security_policy_rule" "this" { # VERIFY: resource name (…_policy
   service     = each.value.services
 
   # Phase 1 is service/port-based; App-ID is a known Phase-2 gap (docs/DESIGN.md).
-  application = ["any"] # VERIFY: attr name + whether "any" is the correct literal
+  application = ["any"]
 
   action  = each.value.action
-  log_end = each.value.log_end # VERIFY: log_end vs log_setting/log_start
-  tags    = each.value.tags
+  log_end = each.value.log_end
+  tag     = each.value.tags
 
   # Objects before rules — a rule must never reference an object that does not
   # yet exist (design: Change Rollback & Cancellation, ordering rule).
   depends_on = [
-    scm_address_object.this,
+    scm_address.this,
     scm_service.this,
   ]
 }
