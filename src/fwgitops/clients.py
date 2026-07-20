@@ -1,11 +1,25 @@
 """SCM REST implementations of the PushClient and ProvisionClient protocols.
 
-⚠️ ENDPOINT MAPPING IS UNVERIFIED. The auth/session layer (`fwgitops.scmapi`) is
-verified — it is the exact exchange the spike exercised. The API *paths and
-payload shapes* below are best-effort and marked `# VERIFY:`; confirm each
-against the SCM API reference (or by watching the calls the Terraform provider
-makes) before relying on them. This is the same honest posture the Terraform
-module had before the spike, and the fix is the same: one place to correct.
+⚠️ ENDPOINT MAPPING IS PARTIALLY VALIDATED (provider-binary analysis, 2026-07-19).
+
+  EVIDENCED in provider v1.0.11: auth URL exactly as used here; API hosts
+  `api.sase.paloaltonetworks.com` (default) and `api.strata.paloaltonetworks.com`;
+  base paths `/config/objects/v1`, `/config/security/v1`, `/config/setup/v1`,
+  `/config/network/v1`, `/config/deployment/v1`; resource segments `/addresses`,
+  `/services`, `/tags/{id}`, `/security-rules`, `/folders`, `/devices`,
+  `/snippets`, `/labels`. ProvisionClient paths below are corrected to match.
+
+  DISPROVEN: the earlier push-endpoint guesses. "config/operations",
+  "config-versions", "candidate-config" and "jobs/" appear ZERO times in the
+  provider. Push paths are genuinely unknown — see ScmPushClient.
+
+  STILL UNVERIFIED: payload shapes, per-device sub-paths, and licensing.
+
+The auth/session layer (`fwgitops.scmapi`) is fully verified — it is the exact
+exchange the spike exercised. Everything still marked `# VERIFY:` / ⛔ below
+should be confirmed against the SCM API reference (or by watching the SCM UI's
+network calls) before being relied on. Same honest posture the Terraform module
+had before its spike, and the same fix: one place to correct.
 
 The orchestration that consumes these — `fwgitops.push.push_folder` and
 `fwgitops.provision.provision` — is fully built and tested against fakes, so
@@ -40,13 +54,31 @@ class ScmPushClient:
     the folder-scoped push semantics, and the bounded job poll.
     """
 
-    # VERIFY: all three paths below.
-    PENDING_PATH = "/config/operations/v1/config-versions/candidate"
-    PUSH_PATH = "/config/operations/v1/config-versions/push"
-    JOB_PATH = "/config/operations/v1/jobs/{job_id}"
+    # ⛔ UNKNOWN — these are placeholders, NOT guesses to trust.
+    # Binary analysis of provider v1.0.11 found ZERO occurrences of
+    # "config/operations", "config-versions", "candidate-config" or "jobs/", and
+    # no push/job path segments at all. That is consistent with spike finding #9
+    # (the provider cannot push) but it also means the provider gives us NO
+    # evidence for the real push endpoints. Find them from the SCM API reference,
+    # or by watching the network calls the SCM UI makes when you click
+    # "Push Config", then pass them in (no code edit needed).
+    PENDING_PATH = "/PLACEHOLDER/pending-changes"
+    PUSH_PATH = "/PLACEHOLDER/push"
+    JOB_PATH = "/PLACEHOLDER/jobs/{job_id}"
 
-    def __init__(self, session: ScmSession):
+    def __init__(
+        self,
+        session: ScmSession,
+        *,
+        pending_path: Optional[str] = None,
+        push_path: Optional[str] = None,
+        job_path: Optional[str] = None,
+    ):
         self.session = session
+        # Injectable so the discovered paths need no code change.
+        self.PENDING_PATH = pending_path or self.PENDING_PATH
+        self.PUSH_PATH = push_path or self.PUSH_PATH
+        self.JOB_PATH = job_path or self.JOB_PATH
 
     def list_staged(self, folder: str) -> Iterable[str]:
         """Identifiers of changes currently staged (uncommitted) in `folder`.
@@ -105,11 +137,19 @@ class ScmProvisionClient:
     unknown stage never advances past what it can prove.
     """
 
-    # VERIFY: every path below.
-    DEVICE_PATH = "/config/setup/v1/devices/{device_id}"
-    DEVICES_PATH = "/config/setup/v1/devices"
-    LICENSE_PATH = "/config/setup/v1/devices/{device_id}/licenses"
+    # Base path and resource segments are EVIDENCED in provider v1.0.11
+    # ("/config/setup/v1" + "/devices", "/folders", "/snippets" all present in
+    # the binary). The per-device sub-paths and payload shapes are still VERIFY.
+    DEVICE_PATH = "/config/setup/v1/devices/{device_id}"      # evidenced base+segment
+    DEVICES_PATH = "/config/setup/v1/devices"                  # evidenced
+    FOLDERS_PATH = "/config/setup/v1/folders"                  # evidenced (Day-1 owns folders)
+    SNIPPETS_PATH = "/config/setup/v1/snippets"                # evidenced
+    # VERIFY: sub-path shape for binding a snippet to a device.
     SNIPPET_BIND_PATH = "/config/setup/v1/devices/{device_id}/snippets"
+    # ⛔ NO EVIDENCE: licensing is very likely NOT an SCM API operation at all —
+    # activation runs through the CSP / deployment profiles. Confirm in the
+    # device-onboarding sub-spike; this may become a no-op here.
+    LICENSE_PATH = "/config/setup/v1/devices/{device_id}/licenses"
 
     def __init__(self, session: ScmSession):
         self.session = session
