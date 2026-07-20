@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Callable
 
+from fwgitops._poll import PollConfig, bounded_poll
+
 try:  # Protocol is stdlib on 3.8+
     from typing import Protocol
 except ImportError:  # pragma: no cover
@@ -63,10 +65,8 @@ class ProvisionClient(Protocol):
     def is_connected(self, device_id: str) -> bool: ...
 
 
-@dataclass(frozen=True)
-class PollConfig:
-    max_attempts: int = 30
-    backoff_seconds: float = 10.0
+# PollConfig lives in _poll (shared with the Day-2 push step); re-exported here
+# so `from fwgitops.provision import PollConfig` keeps working.
 
 
 def provision(
@@ -137,11 +137,8 @@ def _wait_connected(
     poll: PollConfig,
     sleep: Callable[[float], None],
 ) -> None:
-    for attempt in range(1, poll.max_attempts + 1):
-        if client.is_connected(device_id):
-            return
-        if attempt < poll.max_attempts:
-            sleep(poll.backoff_seconds)
-    raise ProvisionTimeout(
-        f"{device_id!r} not connected after {poll.max_attempts} attempts"
-    )
+    got = bounded_poll(lambda: True if client.is_connected(device_id) else None, poll, sleep)
+    if got is None:
+        raise ProvisionTimeout(
+            f"{device_id!r} not connected after {poll.max_attempts} attempts"
+        )

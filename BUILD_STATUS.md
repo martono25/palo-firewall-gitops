@@ -8,8 +8,8 @@ what is built and verified, what is scaffolded but unvalidated, and what remains
 
 ## TL;DR
 
-- **Verified on any machine:** the entire Day-2 compile path and the Day-1
-  provisioning orchestration — pure Python, **83 passing tests**, no live access needed.
+- **Verified on any machine:** the entire Day-2 compile path, the Day-1 provisioning
+  orchestration, and the SCM push boundary — pure Python, **93 passing tests**.
 - **Scaffolded, marked `# VERIFY:`:** the Terraform module, the GitHub Actions
   pipeline, and the bootstrap template — structurally sound, but not runnable
   without the `scm` provider + SCM/cloud credentials.
@@ -39,6 +39,7 @@ what is built and verified, what is scaffolded but unvalidated, and what remains
 | Compiler | `src/fwgitops/compiler.py` | 17 | intent → objects + rule → byte-stable tfvars |
 | CLI | `src/fwgitops/cli.py`, `io.py` | 8 | `fwgitops compile`, all-or-nothing |
 | Provisioning orchestration (T3) | `src/fwgitops/provision.py` | 8 | re-entrant, license retry, bounded poll |
+| SCM push / commit boundary (T13) | `src/fwgitops/push.py` | 10 | fail-closed guard, folder-scoped push, bounded job poll |
 
 Run it:
 
@@ -93,8 +94,11 @@ Four more findings, all fixed or recorded:
   (that delta is Level-1 drift).
 - Folder ownership stays with Day-1 (`scm_folder`); the Day-2 module must never own it.
 
-Full write-up: `docs/SPIKE-scm.md` → RESULTS. **Last remaining piece of the Phase-1 apply
-path: T13, the SCM push step.**
+Full write-up: `docs/SPIKE-scm.md` → RESULTS.
+
+**T13 (SCM push):** orchestration + fail-closed guard are BUILT and TESTED
+(`src/fwgitops/push.py`, 10 tests). Remaining: the thin `PushClient` implementation against
+the SCM REST API (`list_staged` / `push` / `job_status`) — needs tenant access to verify.
 
 ## ⬜ Not started (Phase 2 / 3 — deferred by review)
 

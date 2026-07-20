@@ -91,10 +91,13 @@ jobs:
       #      folder (e.g. an out-of-band GUI edit), abort rather than commit
       #      someone else's unreviewed change under our audit trail. That staged
       #      delta is Level-1 drift and must go through the drift flow instead.
+      # Orchestration is BUILT + TESTED in fwgitops.push (push_folder): it lists
+      # staged changes, FAILS CLOSED on anything we did not stage, pushes with
+      # target=folder, polls the job, and returns an evidence-shaped result.
+      # REMAINING: the thin PushClient implementation against the SCM REST API
+      # (list_staged / push / job_status) — needs tenant access to verify.
       - name: SCM push (atomic boundary, folder-scoped)
         run: |
-          echo "TODO(T13) implement via SCM REST API in Python:"
-          echo "  a) list pending/staged changes for the folder"
-          echo "  b) FAIL CLOSED if anything beyond this change's objects is staged"
-          echo "  c) push config with target=folder, then poll the push job to completion"
-          echo "  d) emit the push result into the evidence bundle"
+          echo "TODO(T13) wire: fwgitops.push.push_folder(client, folder, expected=...)"
+          echo "  orchestration + fail-closed guard: DONE (see tests/test_push.py)"
+          echo "  remaining: PushClient against the SCM REST API"
