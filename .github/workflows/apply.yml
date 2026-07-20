@@ -76,10 +76,25 @@ jobs:
             echo "::endgroup::"
           done
 
-      # Candidate/commit boundary (Topic-1 rollback): if the scm provider stages
-      # config rather than committing on apply, the atomic commit/push is HERE.
-      # Reaching this step means every folder staged cleanly.
-      # VERIFY: whether the provider auto-commits on apply, or a push is needed.
-      - name: SCM commit/push (atomic boundary)
+      # ── Candidate/commit boundary (Topic-1 rollback) — CONFIRMED REQUIRED ──
+      # Spike finding (2026-07-19): the scm provider has NO push/commit resource
+      # (0 of 129 resources, 0 of 252 data sources). `terraform apply` only STAGES
+      # config in SCM; a separate push is required to make it live. SCM's push
+      # target is the FOLDER.
+      #
+      # Because push is folder-scoped it commits EVERYTHING staged in that folder,
+      # not just our change. Two safeguards:
+      #   1. The job-level `concurrency` group above serializes applies, so our own
+      #      pipeline never stages two changes into a folder at once (preserves the
+      #      1:1 isolation and clean per-change rollback).
+      #   2. FAIL CLOSED before pushing: if anything unexpected is staged in the
+      #      folder (e.g. an out-of-band GUI edit), abort rather than commit
+      #      someone else's unreviewed change under our audit trail. That staged
+      #      delta is Level-1 drift and must go through the drift flow instead.
+      - name: SCM push (atomic boundary, folder-scoped)
         run: |
-          echo "TODO commit/push staged config to SCM (or confirm provider auto-commits)"
+          echo "TODO(T13) implement via SCM REST API in Python:"
+          echo "  a) list pending/staged changes for the folder"
+          echo "  b) FAIL CLOSED if anything beyond this change's objects is staged"
+          echo "  c) push config with target=folder, then poll the push job to completion"
+          echo "  d) emit the push result into the evidence bundle"

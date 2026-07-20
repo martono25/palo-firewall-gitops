@@ -97,3 +97,51 @@ Resolve what a schema dump can't:
 object type we need, that reshapes the single-plane bet *before* time goes into the pipeline.
 
 See also: `docs/DESIGN.md` (design + engineering review), `BUILD_STATUS.md` (what's built).
+
+---
+
+# RESULTS — spike complete (2026-07-19)
+
+Provider: **`PaloAltoNetworks/scm` v1.0.11**. Part A (schema) and Part B (live
+apply against the `GitOps` lab folder) both done. Module verified end-to-end:
+`terraform validate` passes and a real apply created tag + address + service +
+rule successfully.
+
+## Findings
+
+| # | Finding | Impact | Status |
+|---|---|---|---|
+| 1 | Resources are `scm_address` / `scm_service` / `scm_security_rule` (not `_object` / `_policy_rule`) | module | fixed |
+| 2 | Tag attribute is `tag` (singular, `list(string)`) | module | fixed |
+| 3 | `protocol` is a nested ATTRIBUTE (`protocol = { tcp = { port } }`), not a block | module | fixed |
+| 4 | Provider is **1.0.11**; the `~> 0.9` guess would have failed `init` | pin | fixed |
+| 5 | Scope must be **`tsg_id:<TSG_ID>`** — bare TSG is rejected (`invalid_scope`) | T1 / CI secret | documented |
+| 6 | client_id is the full **`name@<tsg>.iam.panserviceaccount.com`** form | T1 | documented |
+| 7 | **apply requires `-parallelism=1`** — the provider cannot handle concurrent token acquisition; fails with a misleading `unauthorized_client` | pipeline | fixed in `apply.yml` |
+| 8 | **Tags must pre-exist as `scm_tag` objects** — the API validates them as references (`INVALID_REFERENCE`) despite the schema accepting `list(string)` | module | fixed (module creates `scm_tag`) |
+| 9 | Provider has **no push/commit** capability (0/129 resources, 0/252 data sources) — `apply` only STAGES config | architecture | confirms the candidate/commit boundary |
+| 10 | **Push target is the FOLDER** — a push commits everything staged in that folder, not just our change | architecture | see below |
+| 11 | Folder itself must pre-exist (Day-1 owns `scm_folder`); the Day-2 module must never own it (destroy blast radius) | design | recorded |
+
+## Consequence of #10 — folder-scoped push
+
+Push is not per-change. Safeguards now in `apply.yml`:
+1. Job-level `concurrency` serializes applies so our pipeline never stages two
+   changes into one folder simultaneously (preserves 1:1 isolation + rollback).
+2. **Fail closed before pushing:** if anything unexpected is staged in the folder
+   (an out-of-band GUI edit), abort rather than commit someone else's unreviewed
+   change under our audit trail. That staged delta is Level-1 drift and goes
+   through the drift flow.
+
+## Confirmed as designed
+
+`tag` accepted `gitops:managed` (colon is legal in a tag name, once the object
+exists) → **`fwgitops.tags` needed no change**. Rule defaults observed:
+`position = "pre"`, `policy_type = "Security"` — relevant to Phase-2 sectioned
+placement, which must map onto `position` / `relative_position`.
+
+## Remaining work (not spike blockers)
+
+- **T13** — implement the SCM push step (list staged → fail-closed check → push
+  target=folder → poll job → evidence). This is now the last piece of the
+  Phase-1 apply path.

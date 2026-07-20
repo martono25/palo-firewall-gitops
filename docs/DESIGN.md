@@ -587,7 +587,10 @@ back-fill break-glass into Git.
 | **Post-apply** (bad change found later) | fully live | `git revert` intent → recompile → plan removes it → apply |
 | **Expiry** (`expires:` date passes) | live, stale | scheduled job removes the expired rule |
 
-**Mid-apply atomicity — candidate/commit transaction boundary.** Terraform `apply` **stages** config;
+**Mid-apply atomicity — candidate/commit transaction boundary. CONFIRMED by the spike
+(2026-07-19):** the `scm` provider has NO push/commit capability, so Terraform can only
+stage config — a separate push (**target = folder**) makes it live. The boundary is
+structurally forced, not just a design preference. Terraform `apply` **stages** config;
 a separate controlled **commit/push** step is the atomic point.
 - Cancel **before** commit → discard the candidate → nothing was ever enforced (clean auto-rollback).
 - Cancel **after** commit → change is live → post-apply path (git-revert + re-apply), with an SCM
@@ -595,6 +598,12 @@ a separate controlled **commit/push** step is the atomic point.
 
 **Ordering rule:** create objects before rules, so a rule never references a half-built object; orphan
 objects from a cancel are harmless and swept by the next reconcile.
+
+**Folder-scoped push (spike finding #10).** A push commits EVERYTHING staged in the folder,
+not just our change. Two safeguards: (a) applies are serialized per folder so the pipeline
+never stages two changes at once (preserves 1:1 isolation + clean rollback); (b) the push
+step FAILS CLOSED if unexpected staged changes are present — committing an out-of-band GUI
+edit under our audit trail would be worse than stopping. That staged delta is Level-1 drift.
 
 **Expiry auto-rollback:** a scheduled job finds rules past `expires:` and generates a removal change
 (auto for low-risk, gated otherwise) — expiry metadata drives lifecycle, keeping temporary rules from
@@ -785,6 +794,7 @@ CLI, TF module — is not a numbered task; it's built+tested except the TF modul
 - [~] **T9 (P1)** — pipeline — apply stage + atomic commit/push; objects-before-rules — **SCAFFOLDED** (`apply.yml` boundary + module `depends_on`); commit step is a TODO
 - [~] **T1 (P1)** — ci-auth — Single SCM service account + per-run short-lived token — **SCAFFOLDED** (workflow stub)
 - [~] **T2 (P1)** — terraform — Remote backend, native locking, one state per folder — **SCAFFOLDED** (`backend.tf` stub)
+- [ ] **T13 (P1)** — push — Implement the SCM push step (list staged → fail-closed check → push target=folder → poll job → evidence). **Last piece of the Phase-1 apply path.** Confirmed required: the provider cannot push.
 - [~] **T12 (P2)** — scheduler — Tier-driven, window-aware apply scheduler — **SCAFFOLDED slot** (Phase-2 markers in `apply.yml`)
 - [ ] **T4 (P1→P2)** — state-model — Effective-rulebase model as golden-fixture-tested library — **NOT STARTED** (Phase 2)
 - [ ] **T7 (P2)** — perf — Cache effective rulebase with explicit invalidation — **NOT STARTED** (Phase 2)

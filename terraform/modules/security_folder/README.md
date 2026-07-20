@@ -34,17 +34,30 @@ Useful extras discovered: the rule also exposes `position` / `relative_position`
 `profile_setting`. There are 129 `scm_*` resources total, including `scm_folder`,
 `scm_snippet`, `scm_label`, `scm_variable`, and `scm_zone` (useful for Day-1).
 
-## ⚠️ Still open — Part B (needs the tenant + folder)
+## ✅ Part B done — live apply against a lab tenant (2026-07-19)
 
-- [ ] **Commit/push model** — does `apply` push config to devices, or is a separate
-      commit/push required? This is the candidate/commit boundary (docs/DESIGN.md →
-      Change Rollback) and wires the atomic step in `.github/workflows/apply.yml`.
-- [ ] **Tag pre-existence** — the provider takes `tag` as free-form `list(string)`,
-      but SCM may reject tags that don't exist as `scm_tag` objects. If it does, add
-      an `scm_tag` `for_each` over distinct tags + a dependency.
-- [ ] **Auth end-to-end** — provider exposes `client_id`, `client_secret`, `scope`,
-      `auth_url`, `host`, `auth_file` (feeds T1 short-lived token design).
-- [ ] **Ordering** — confirm `depends_on` (objects before rules) is sufficient in practice.
+- [x] **Commit/push model** — the provider has **no push/commit capability** (0/129
+      resources, 0/252 data sources). `apply` only **stages** config; a separate push
+      (**target = folder**) makes it live. The candidate/commit boundary is therefore
+      structurally forced, and the push step in `apply.yml` becomes real Python (T13).
+- [x] **Tag pre-existence** — SCM rejects free-form tags (`INVALID_REFERENCE`); tags
+      must exist as `scm_tag` objects. The module now creates them and orders
+      tags → objects → rules. `gitops:managed` (with the colon) is a valid tag name.
+- [x] **Auth end-to-end** — works with `SCM_CLIENT_ID` / `SCM_CLIENT_SECRET` /
+      `SCM_SCOPE`. Scope must be `tsg_id:<TSG_ID>`; client_id is the full
+      `name@<tsg>.iam.panserviceaccount.com` form.
+- [x] **Ordering** — `depends_on` is sufficient; tag/address/service created before the rule.
+- [x] **Concurrency** — apply MUST use `-parallelism=1`; the provider cannot handle
+      concurrent token acquisition and fails with a misleading `unauthorized_client`.
+
+⚠️ **Folder-scoped push:** a push commits *everything* staged in the folder, not just
+our change. Applies must be serialized per folder, and the push step must fail closed
+if unexpected staged changes are present (that delta is Level-1 drift). See
+`docs/SPIKE-scm.md` → RESULTS.
+
+**Folder ownership:** the folder must pre-exist — Day-1 provisioning owns `scm_folder`.
+This module must never own it, or a Day-2 `destroy` could take the folder and all the
+brownfield rules in it.
 
 ## Inputs
 

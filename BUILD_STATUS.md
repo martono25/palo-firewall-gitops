@@ -76,9 +76,25 @@ not a block. Provider pin corrected `~> 0.9`→**`~> 1.0`**. Tags are free-form 
 Terraform layer, so `fwgitops.tags` needed no change. Provider does the OAuth
 client-credentials→JWT exchange itself (feeds T1). Schema dump: `spike/schema.json`.
 
-**Remaining (Part B, needs the tenant):** commit/push model · whether SCM requires tags to
-pre-exist as `scm_tag` objects · auth end-to-end · `depends_on` ordering. Run
-`spike/smoke/` — it exercises the real module and creates the rule **disabled** for safety.
+### Part-B results (2026-07-19) — live apply against the `GitOps` lab folder ✅ SPIKE COMPLETE
+
+Module verified end-to-end against a real tenant (tag + address + service + rule created).
+Four more findings, all fixed or recorded:
+
+- **Tags must pre-exist as `scm_tag` objects** — SCM validates them as references
+  (`INVALID_REFERENCE`). The module now creates them and orders tags → objects → rules.
+- **apply requires `-parallelism=1`** — the provider cannot handle concurrent token
+  acquisition; it fails with a misleading `unauthorized_client`. Baked into `apply.yml`.
+- **No push/commit in the provider** (0/129 resources) — `apply` only *stages* config; a
+  separate push (**target = folder**) makes it live. The candidate/commit boundary is
+  structurally forced, not just a design preference.
+- **Folder-scoped push** — a push commits everything staged in the folder, so applies must be
+  serialized per folder and the push must **fail closed** on unexpected staged changes
+  (that delta is Level-1 drift).
+- Folder ownership stays with Day-1 (`scm_folder`); the Day-2 module must never own it.
+
+Full write-up: `docs/SPIKE-scm.md` → RESULTS. **Last remaining piece of the Phase-1 apply
+path: T13, the SCM push step.**
 
 ## ⬜ Not started (Phase 2 / 3 — deferred by review)
 
