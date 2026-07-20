@@ -153,9 +153,12 @@ auto-apply; hard dependency on owning the tool + vendor coupling.
   human approval on every change, detect-only drift, documented break-glass. Goal: prove
   the pipeline enforces correctly with tiny blast radius. Ships in weeks.
 - **Phase 2 — Risk-tiering + evidence (toward B).** Build the Python risk classifier (no
-  commercial tool to borrow), turn on risk-tiered auto-apply for low-risk classes, generate
-  NIST-mapped evidence bundles per change, add detect-and-alert drift with scheduled
-  reconcile-with-approval. Heaviest phase — the classifier is the critical-path build here.
+  commercial tool to borrow), turn on risk-tiered auto-apply for low-risk classes, ENRICH the evidence
+  bundle with the risk section (tier, fired checks, classifier + threshold versions), add
+  detect-and-alert drift with scheduled reconcile-with-approval.
+  *(Correction 2026-07-19: the evidence bundle BASELINE is Phase 1, not Phase 2 — the
+  Phase-1 success criterion requires it, and it is the audit story that justifies the
+  platform. Built and tested in `fwgitops.evidence`; Phase 2 only fills `risk`.)* Heaviest phase — the classifier is the critical-path build here.
 - **Phase 3 — Scale + self-service (full B).** Expand compiler to SCM + Panorama backends
   and multi-device-group targeting, widen intent schema, add self-service intake surface,
   onboard additional device groups, formalize break-glass with automated evidence capture.

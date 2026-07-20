@@ -10,7 +10,7 @@ what is built and verified, what is scaffolded but unvalidated, and what remains
 
 - **Verified on any machine:** the entire Day-2 compile path, the Day-1 provisioning
   orchestration, the SCM push boundary, and the SCM auth/session layer — pure Python,
-  **134 passing tests**.
+  **154 passing tests**.
 - **Scaffolded, marked `# VERIFY:`:** the Terraform module, the GitHub Actions
   pipeline, and the bootstrap template — structurally sound, but not runnable
   without the `scm` provider + SCM/cloud credentials.
@@ -41,6 +41,7 @@ what is built and verified, what is scaffolded but unvalidated, and what remains
 | CLI | `src/fwgitops/cli.py`, `io.py` | 8 | `fwgitops compile`, all-or-nothing |
 | Provisioning orchestration (T3) | `src/fwgitops/provision.py` | 8 | re-entrant, license retry, bounded poll |
 | SCM push / commit boundary (T13) | `src/fwgitops/push.py` | 10 | fail-closed guard, folder-scoped push, bounded job poll |
+| Evidence bundle (NIST) | `src/fwgitops/evidence.py` | 20 | Git-resident audit record; hashes not copies; failures recorded; byte-stable |
 | SCM auth/session | `src/fwgitops/scmapi.py` | 17 | VERIFIED flow: basic auth → client_credentials + `tsg_id:` scope → JWT, cached w/ early refresh |
 
 Run it:
@@ -48,7 +49,7 @@ Run it:
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
-pytest -q                                              # 134 tests
+pytest -q                                              # 154 tests
 fwgitops compile intent --check                        # validate-only
 fwgitops compile intent --out terraform                # emit rules.auto.tfvars.json
 ```
