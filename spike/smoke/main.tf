@@ -42,6 +42,8 @@ locals {
 module "smoke" {
   source = "../../terraform/modules/security_folder"
 
+  folder = var.folder
+
   address_objects = {
     (local.addr_name) = {
       name   = local.addr_name

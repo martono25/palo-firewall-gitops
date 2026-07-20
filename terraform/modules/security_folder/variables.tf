@@ -1,3 +1,8 @@
+variable "folder" {
+  description = "SCM folder these objects/rules live in. Also scopes the scm_tag objects."
+  type        = string
+}
+
 # Variable types mirror the compiler's rules.auto.tfvars.json contract exactly
 # (src/fwgitops/compiler.py :: to_tfvars). This part IS verified — it is the
 # stable interface between the Python compiler and Terraform.

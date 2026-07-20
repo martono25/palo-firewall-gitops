@@ -4,12 +4,34 @@
 # for_each keys are the compiler's stable keys (address/service object name, rule
 # key), so editing one entry never churns the others (design: Topic-1 rollback).
 #
-# Schema verified against PaloAltoNetworks/scm v1.0.11 (Part-A spike, 2026-07-19).
-# Resolved: resource names are scm_address / scm_service / scm_security_rule;
-# the tag attribute is `tag` (list(string), singular); `protocol` is a nested
-# ATTRIBUTE (object), not a block; scope is exactly one of folder/snippet/device.
-# Still open (Part B, needs the tenant): whether SCM requires tag strings to
-# pre-exist as scm_tag objects, and the commit/push model.
+# Verified against PaloAltoNetworks/scm v1.0.11 (spike, 2026-07-19), including a
+# live apply against a lab tenant. Findings baked in here:
+#   * resources are scm_address / scm_service / scm_security_rule
+#   * the tag attribute is `tag` (list(string), singular)
+#   * `protocol` is a nested ATTRIBUTE (object), not a block
+#   * TAGS MUST PRE-EXIST AS scm_tag OBJECTS — the API validates them as
+#     references and rejects free-form strings (INVALID_REFERENCE). Hence the
+#     scm_tag resource + dependency below.
+#   * the provider cannot handle concurrent token acquisition; apply must run
+#     with -parallelism=1 (see .github/workflows/apply.yml)
+
+locals {
+  # Every distinct tag used by any object or rule must exist as an scm_tag.
+  managed_tags = toset(flatten(concat(
+    [for o in values(var.address_objects) : o.tags],
+    [for o in values(var.service_objects) : o.tags],
+    [for r in values(var.security_rules) : r.tags],
+  )))
+}
+
+# ── Tag objects (must exist before anything references them) ──────────────
+resource "scm_tag" "this" {
+  for_each = local.managed_tags
+
+  name     = each.value
+  folder   = var.folder
+  comments = "Managed by fwgitops"
+}
 
 # ── Address objects ───────────────────────────────────────────────────────
 resource "scm_address" "this" {
@@ -23,6 +45,8 @@ resource "scm_address" "this" {
   fqdn       = each.value.type == "fqdn" ? each.value.value : null
 
   tag = each.value.tags # provider attr is `tag`, list(string)
+
+  depends_on = [scm_tag.this]
 }
 
 # ── Service objects ───────────────────────────────────────────────────────
@@ -40,6 +64,8 @@ resource "scm_service" "this" {
   }
 
   tag = each.value.tags
+
+  depends_on = [scm_tag.this]
 }
 
 # ── Security rules ────────────────────────────────────────────────────────
@@ -63,9 +89,10 @@ resource "scm_security_rule" "this" {
   disabled = each.value.disabled
   tag      = each.value.tags
 
-  # Objects before rules — a rule must never reference an object that does not
-  # yet exist (design: Change Rollback & Cancellation, ordering rule).
+  # Objects (and their tags) before rules — a rule must never reference
+  # something that does not yet exist (design: Change Rollback, ordering rule).
   depends_on = [
+    scm_tag.this,
     scm_address.this,
     scm_service.this,
   ]

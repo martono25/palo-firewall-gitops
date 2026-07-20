@@ -1,3 +1,9 @@
+variable "folder" {
+  description = "SCM folder for this state (one state per folder)."
+  type        = string
+  default     = "prod-edge"
+}
+
 # These variables are auto-populated from rules.auto.tfvars.json (written by
 # `fwgitops compile`) because Terraform auto-loads *.auto.tfvars.json. Defaults
 # to empty so `plan` works for a folder with no rules yet.

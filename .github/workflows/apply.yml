@@ -67,7 +67,12 @@ jobs:
             [ -f "$dir/main.tf" ] || continue
             echo "::group::apply $dir"
             terraform -chdir="$dir" init -input=false
-            terraform -chdir="$dir" apply -input=false -auto-approve
+            # -parallelism=1 is REQUIRED: the scm provider cannot handle
+            # concurrent token acquisition and fails with a misleading
+            # "unauthorized_client" auth error under the default parallelism.
+            # Confirmed in the spike (2026-07-19) — plan works, parallel apply
+            # fails, serial apply succeeds.
+            terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1
             echo "::endgroup::"
           done
 
