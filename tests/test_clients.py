@@ -1,7 +1,7 @@
 """Tests for the SCM REST clients.
 
-⚠️ These do NOT verify endpoint correctness — the paths are unverified guesses.
-What they DO verify is the parsing tolerance and, most importantly, the
+Endpoint paths are now CONFIRMED by live probe for pending-changes and jobs
+(only the push verb remains unconfirmed). These tests cover parsing and the
 fail-safe defaults: an unknown job status must keep polling rather than claim
 success, and an unknown device state must read as an EARLIER stage so the
 re-entrant orchestrator redoes an idempotent step instead of skipping one.
@@ -68,21 +68,39 @@ def test_push_without_job_id_raises():
         ScmPushClient(session_for({"nothing": True})).push("GitOps")
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("success", PushStatus.SUCCESS),
-    ("completed", PushStatus.SUCCESS),
-    ("failed", PushStatus.FAILED),
-    ("error", PushStatus.FAILED),
-    ("pending", PushStatus.PENDING),
-    ("running", PushStatus.RUNNING),
+# SCM uses the PAN-OS two-field model (confirmed live): status_str says whether
+# the job is DONE, result_str says whether it SUCCEEDED. A FIN job with a FAIL
+# result must NEVER read as success.
+@pytest.mark.parametrize("payload,expected", [
+    ({"status_str": "FIN", "result_str": "OK"}, PushStatus.SUCCESS),
+    ({"status_str": "FIN", "result_str": "FAIL"}, PushStatus.FAILED),
+    ({"status_str": "FIN"}, PushStatus.FAILED),            # finished, result unknown -> not success
+    ({"status_str": "PEND"}, PushStatus.PENDING),
+    ({"status_str": "ACT"}, PushStatus.RUNNING),
+    ({"status_str": "wibble"}, PushStatus.RUNNING),        # unknown -> keep polling
 ])
-def test_job_status_vocabulary(raw, expected):
-    assert ScmPushClient(session_for({"status": raw})).job_status("j1").status is expected
+def test_job_status_panos_two_field_model(payload, expected):
+    assert ScmPushClient(session_for(payload)).job_status("j1").status is expected
 
 
-def test_unknown_job_status_keeps_polling_not_success():
-    # Fail-safe: never claim a success we cannot prove.
-    assert ScmPushClient(session_for({"status": "wibble"})).job_status("j1").status is PushStatus.RUNNING
+def test_finished_but_failed_is_never_success():
+    # The bug this guards: treating "finished" as "succeeded" would silently
+    # report a failed push as a successful one.
+    st = ScmPushClient(session_for({"status_str": "FIN", "result_str": "FAIL"})).job_status("j1")
+    assert st.status is PushStatus.FAILED
+
+
+def test_job_record_unwrapped_from_data_envelope():
+    # SCM list responses use {data, limit, offset, total}.
+    payload = {"data": [{"status_str": "FIN", "result_str": "OK"}], "total": 1}
+    assert ScmPushClient(session_for(payload)).job_status("j1").status is PushStatus.SUCCESS
+
+
+def test_candidate_editors_extracted_for_the_fail_closed_guard():
+    # The real guard signal: who touched the pending candidate config.
+    payload = [{"edited_by": "human@corp", "admin": "GitOps@1198884949.iam.panserviceaccount.com"}]
+    editors = ScmPushClient(session_for(payload)).candidate_editors("GitOps")
+    assert "human@corp" in editors
 
 
 # ── ScmProvisionClient ────────────────────────────────────────────────────

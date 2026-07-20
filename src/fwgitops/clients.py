@@ -54,17 +54,15 @@ class ScmPushClient:
     the folder-scoped push semantics, and the bounded job poll.
     """
 
-    # ⛔ UNKNOWN — these are placeholders, NOT guesses to trust.
-    # Binary analysis of provider v1.0.11 found ZERO occurrences of
-    # "config/operations", "config-versions", "candidate-config" or "jobs/", and
-    # no push/job path segments at all. That is consistent with spike finding #9
-    # (the provider cannot push) but it also means the provider gives us NO
-    # evidence for the real push endpoints. Find them from the SCM API reference,
-    # or by watching the network calls the SCM UI makes when you click
-    # "Push Config", then pass them in (no code edit needed).
-    PENDING_PATH = "/PLACEHOLDER/pending-changes"
-    PUSH_PATH = "/PLACEHOLDER/push"
-    JOB_PATH = "/PLACEHOLDER/jobs/{job_id}"
+    # ✅ CONFIRMED by live probe (2026-07-19, GET returned 200):
+    PENDING_PATH = "/config/operations/v1/config-versions/candidate"
+    JOB_PATH = "/config/operations/v1/jobs/{job_id}"
+    # ⚠️ MOST LIKELY but not confirmed: GET is permissive on this route (any
+    # trailing segment returns the candidate), so GET-probing cannot distinguish
+    # the push verb. `candidate:push` is the AIP custom-method form and the best
+    # candidate. CONFIRM from the SCM UI's network call on "Push Config" before
+    # relying on it. Injectable below — no code edit needed once known.
+    PUSH_PATH = "/config/operations/v1/config-versions/candidate:push"
 
     def __init__(
         self,
@@ -109,18 +107,59 @@ class ScmPushClient:
         return str(job_id)
 
     def job_status(self, job_id: str) -> JobState:
+        """Map SCM's PAN-OS-style job record to a JobState.
+
+        ⚠️ SCM uses TWO fields (confirmed live): `status_str` says whether the job
+        is DONE (PEND / ACT / FIN), `result_str` says whether it SUCCEEDED
+        (OK / FAIL). A job can be FIN with result FAIL — treating "finished" as
+        "succeeded" would silently report a failed push as success, so the
+        result field is authoritative for the outcome.
+        """
         payload = self.session.request("GET", self.JOB_PATH.format(job_id=job_id))
-        raw = str(_first_present(payload, "status", "state", "result", default="")).lower()
-        message = str(_first_present(payload, "message", "details", "error", default=""))
-        # VERIFY the vocabulary. Unknown -> RUNNING so we keep polling; we never
-        # claim success we cannot prove.
-        if raw in ("success", "succeeded", "completed", "finished", "ok"):
-            return JobState(PushStatus.SUCCESS, message)
-        if raw in ("failed", "failure", "error", "cancelled", "canceled"):
-            return JobState(PushStatus.FAILED, message or f"job reported {raw!r}")
-        if raw in ("pending", "queued", "submitted"):
+        body = payload.get("data", payload)
+        if isinstance(body, list):
+            body = body[0] if body else {}
+
+        status = str(_first_present(body, "status_str", "job_status", "status", default="")).lower()
+        result = str(_first_present(body, "result_str", "job_result", "result", default="")).lower()
+        message = str(_first_present(body, "summary", "description", "message", default=""))
+        pct = _first_present(body, "percent")
+        if pct is not None and not message:
+            message = f"{pct}%"
+
+        if status in ("fin", "finished", "completed", "done"):
+            if result in ("ok", "success", "succeeded"):
+                return JobState(PushStatus.SUCCESS, message)
+            # FIN but not OK (or result unknown) -> failed. Never assume success.
+            shown = result or "unknown"
+            return JobState(PushStatus.FAILED, message or f"job finished with result {shown!r}")
+        if status in ("pend", "pending", "queued", "submitted"):
             return JobState(PushStatus.PENDING, message)
+        # ACT / unknown -> keep polling rather than claim an outcome.
         return JobState(PushStatus.RUNNING, message)
+
+    def candidate_editors(self, folder: str) -> List[str]:
+        """Who edited the pending candidate config.
+
+        The fail-closed guard's real signal: SCM tracks a candidate config
+        VERSION (with `edited_by` / `admin`), not a list of changed object names,
+        so we cannot diff object identifiers. Instead we assert the candidate was
+        touched ONLY by our automation identity — if a human staged something in
+        this folder, their identity appears here and we must refuse to push.
+        """
+        payload = self.session.request("GET", self.PENDING_PATH, params={"folder": folder})
+        items = payload if isinstance(payload, list) else _first_present(payload, "data", default=[])
+        editors: List[str] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("edited_by", "admin"):
+                val = item.get(key)
+                if isinstance(val, str) and val:
+                    editors.append(val)
+                elif isinstance(val, list):
+                    editors.extend(str(v) for v in val if v)
+        return sorted(set(editors))
 
 
 class ScmProvisionClient:
