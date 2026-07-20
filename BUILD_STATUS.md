@@ -9,7 +9,8 @@ what is built and verified, what is scaffolded but unvalidated, and what remains
 ## TL;DR
 
 - **Verified on any machine:** the entire Day-2 compile path, the Day-1 provisioning
-  orchestration, and the SCM push boundary — pure Python, **93 passing tests**.
+  orchestration, the SCM push boundary, and the SCM auth/session layer — pure Python,
+  **134 passing tests**.
 - **Scaffolded, marked `# VERIFY:`:** the Terraform module, the GitHub Actions
   pipeline, and the bootstrap template — structurally sound, but not runnable
   without the `scm` provider + SCM/cloud credentials.
@@ -40,13 +41,14 @@ what is built and verified, what is scaffolded but unvalidated, and what remains
 | CLI | `src/fwgitops/cli.py`, `io.py` | 8 | `fwgitops compile`, all-or-nothing |
 | Provisioning orchestration (T3) | `src/fwgitops/provision.py` | 8 | re-entrant, license retry, bounded poll |
 | SCM push / commit boundary (T13) | `src/fwgitops/push.py` | 10 | fail-closed guard, folder-scoped push, bounded job poll |
+| SCM auth/session | `src/fwgitops/scmapi.py` | 17 | VERIFIED flow: basic auth → client_credentials + `tsg_id:` scope → JWT, cached w/ early refresh |
 
 Run it:
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
-pytest -q                                              # 83 tests
+pytest -q                                              # 134 tests
 fwgitops compile intent --check                        # validate-only
 fwgitops compile intent --out terraform                # emit rules.auto.tfvars.json
 ```
@@ -63,6 +65,7 @@ Every assumption is marked `# VERIFY:`. Resolve before first `apply`.
 | Review gate | `.github/CODEOWNERS` | real team handles |
 | Bootstrap | `provisioning/bootstrap/init-cfg.sample.txt` | SCM onboarding keys |
 | Cloud instantiate | (pointers) | use Palo's `terraform-aws/google-vmseries-modules`, not blind HCL |
+| **SCM REST clients** | `src/fwgitops/clients.py` | ⚠️ endpoint paths/payloads are UNVERIFIED guesses (`# VERIFY:`); auth layer beneath them IS verified. Parsing tolerance + fail-safe defaults are tested. |
 
 The Python↔Terraform contract (`rules.auto.tfvars.json` shape) **is** verified end-to-end:
 compiler output type-checks through Terraform's variable types against the real provider
