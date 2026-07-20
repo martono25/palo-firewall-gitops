@@ -133,3 +133,12 @@ def test_unknown_device_shape_reads_as_earliest_stage():
 def test_is_connected(status, expected):
     c = ScmProvisionClient(session_for({"connection_status": status}))
     assert c.is_connected("vm-1") is expected
+
+
+def test_wrong_push_path_names_the_alternatives():
+    # The one unconfirmed endpoint: make being wrong cheap and obvious.
+    c = ScmPushClient(session_for({"message": "not found"}, statuses={0: 404}))
+    with pytest.raises(ScmApiError) as ei:
+        c.push("GitOps")
+    msg = str(ei.value)
+    assert "could not confirm" in msg and "push_path=" in msg

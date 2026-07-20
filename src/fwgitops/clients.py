@@ -97,10 +97,37 @@ class ScmPushClient:
                     out.append(str(name))
         return out
 
+    #: Ordered candidates for the push route, best guess first. GET-probing
+    #: cannot distinguish them (the route is permissive), so the first real POST
+    #: is the test. A wrong path fails loudly with these listed — a 30-second fix.
+    PUSH_PATH_CANDIDATES = (
+        "/config/operations/v1/config-versions/candidate:push",
+        "/config/operations/v1/config-versions/push",
+        "/config/operations/v1/config-versions:push",
+        "/config/operations/v1/push",
+    )
+
     def push(self, folder: str) -> str:
-        """Start a folder-scoped push. Returns the job id."""
-        # VERIFY: payload shape — SCM's push target is the FOLDER (spike finding #10).
-        payload = self.session.request("POST", self.PUSH_PATH, body={"folders": [folder]})
+        """Start a folder-scoped push. Returns the job id.
+
+        SCM's push target is the FOLDER (spike finding #10). If PUSH_PATH is
+        wrong the API answers 404/405 and we re-raise with the remaining
+        candidates so the fix is obvious and one line.
+        """
+        try:
+            payload = self.session.request("POST", self.PUSH_PATH, body={"folders": [folder]})
+        except ScmApiError as e:
+            if e.status in (404, 405):
+                others = [c for c in self.PUSH_PATH_CANDIDATES if c != self.PUSH_PATH]
+                raise ScmApiError(
+                    e.status,
+                    f"push path {self.PUSH_PATH!r} rejected ({e.status}). This path is the one "
+                    f"part of the SCM API we could not confirm by probing. Try one of: "
+                    f"{', '.join(others)} — pass it as ScmPushClient(session, push_path=...), "
+                    f"no code change needed. Confirm definitively from the SCM UI's network "
+                    f"call on 'Push Config'."
+                ) from e
+            raise
         job_id = _first_present(payload, "job_id", "jobId", "id")
         if not job_id:
             raise ScmApiError(200, f"push response contained no job id: {payload}")
