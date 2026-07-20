@@ -1,7 +1,7 @@
 """Tests for the SCM REST clients.
 
-Endpoint paths are now CONFIRMED by live probe for pending-changes and jobs
-(only the push verb remains unconfirmed). These tests cover parsing and the
+Endpoint paths + push body key are CONFIRMED against the live tenant. These
+tests cover parsing and the
 fail-safe defaults: an unknown job status must keep polling rather than claim
 success, and an unknown device state must read as an EARLIER stage so the
 re-entrant orchestrator redoes an idempotent step instead of skipping one.
@@ -135,10 +135,10 @@ def test_is_connected(status, expected):
     assert c.is_connected("vm-1") is expected
 
 
-def test_push_body_uses_singular_folder_key():
-    # Authoritative from the SDK struct PushCandidateConfigVersionsRequest: the
-    # key is `folder` (singular), array value. Sending `folders` returns 400
-    # ("push-to unexpected node") — the same singular/plural bug class as tag/tags.
+def test_push_body_uses_plural_folders_key():
+    # From the LIVE tenant (outranks the SDK): the schema validator accepts
+    # `folders` (plural) and rejects `folder` (API_I00035). The scm-go SDK's
+    # `folder` has drifted from the deployed API. Key is injectable.
     bodies = []
 
     def transport(method, url, headers, body):
@@ -148,5 +148,5 @@ def test_push_body_uses_singular_folder_key():
 
     ScmPushClient(ScmSession(GOOD, transport=transport)).push("GitOps")
     sent = json.loads(bodies[-1])
-    assert sent["folder"] == ["GitOps"]      # singular key
-    assert "folders" not in sent
+    assert sent["folders"] == ["GitOps"]     # plural key — live tenant schema
+    assert "folder" not in sent

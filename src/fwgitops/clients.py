@@ -56,6 +56,9 @@ class ScmPushClient:
     PENDING_PATH = "/config/operations/v1/config-versions/candidate"
     JOB_PATH = "/config/operations/v1/jobs/{job_id}"
     PUSH_PATH = "/config/operations/v1/config-versions/candidate:push"
+    #: Live tenant accepts `folders` (plural); the scm-go SDK says `folder`. Live
+    #: wins. Injectable so an API-version flip needs no code change.
+    PUSH_FOLDER_KEY = "folders"
 
     def __init__(
         self,
@@ -64,12 +67,14 @@ class ScmPushClient:
         pending_path: Optional[str] = None,
         push_path: Optional[str] = None,
         job_path: Optional[str] = None,
+        push_folder_key: Optional[str] = None,
     ):
         self.session = session
         # Injectable so the discovered paths need no code change.
         self.PENDING_PATH = pending_path or self.PENDING_PATH
         self.PUSH_PATH = push_path or self.PUSH_PATH
         self.JOB_PATH = job_path or self.JOB_PATH
+        self.PUSH_FOLDER_KEY = push_folder_key or self.PUSH_FOLDER_KEY
 
     def list_staged(self, folder: str) -> Iterable[str]:
         """Identifiers of changes currently staged (uncommitted) in `folder`.
@@ -93,16 +98,22 @@ class ScmPushClient:
     def push(self, folder: str, *, description: str = "fwgitops") -> str:
         """Start a folder-scoped push. Returns the job id.
 
-        Body shape is authoritative — from the SDK struct
-        PushCandidateConfigVersionsRequest: the field is `folder` (SINGULAR key,
-        array value), NOT `folders`. Sending `folders` fails with a 400
-        ("push-to unexpected node"), the same singular-vs-plural class of bug as
-        `tag` vs `tags` in the Terraform module. Optional siblings: `devices`
-        (numeric ids), `admin`, `description`.
+        Body key is `folders` (plural, array value) — determined from the LIVE
+        API, which outranks the SDK here. Evidence (2026-07-19, live tenant):
+          * `{"folder":  [...]}` -> API_I00035 schema error, "folder is not allowed"
+          * `{"folders": [...]}` -> API_I00013 (passes schema; deeper push-config
+            validation) — so the schema validator accepts `folders`.
+        The scm-go SDK struct uses `folder` (singular); it has drifted from the
+        deployed API. The key is `PUSH_FOLDER_KEY` (injectable) so a future API
+        version flip needs no code change.
+
+        NOTE on `push-to`: with `folders` the request reaches the push-config
+        builder, which needs a valid target. A folder with NO firewall bound has
+        nothing to push to, so full push success requires a device attached
+        (the pilot). Path + verb + body-key are confirmed here.
         """
-        payload = self.session.request(
-            "POST", self.PUSH_PATH, body={"folder": [folder], "description": description}
-        )
+        body = {self.PUSH_FOLDER_KEY: [folder], "description": description}
+        payload = self.session.request("POST", self.PUSH_PATH, body=body)
         job_id = _first_present(payload, "job_id", "jobId", "id")
         if not job_id:
             raise ScmApiError(200, f"push response contained no job id: {payload}")
