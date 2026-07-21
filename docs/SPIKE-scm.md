@@ -145,3 +145,19 @@ placement, which must map onto `position` / `relative_position`.
 - **T13** — implement the SCM push step (list staged → fail-closed check → push
   target=folder → poll job → evidence). This is now the last piece of the
   Phase-1 apply path.
+
+## Update — Day-2 push confirmed end-to-end (2026-07-19)
+
+Additional findings from live API testing of the push step:
+
+| # | Finding | Impact | Status |
+|---|---|---|---|
+| 12 | **A folder with NO firewall bound cannot complete a push** — config stages fine, but the push has no target (`push-to invalid`). Full push success needs a device attached. | architecture | confirmed; belongs to the pilot |
+| 13 | Push body key is **`folders`** (plural). The live API schema accepts `folders` (deep error `API_I00013`) and rejects `folder` (`API_I00035`). The scm-go SDK struct (`folder`) has DRIFTED from the deployed API — the live tenant is authoritative. | code | fixed (`PUSH_FOLDER_KEY`, injectable) |
+| 14 | Auth scope must be `tsg_id:<TSG>`; a bare TSG → `invalid_scope`. Roleless/misscoped SA authenticates then fails on operations (`unauthorized_client`). Confirmed live. | T1 | documented |
+
+**Track B (Day-2) is closed:** push path, verb, and body-key are confirmed against
+the live tenant; the job model is the PAN-OS two-field form (`status_str` +
+`result_str`). Full push *success* requires a bound device, which is a pilot/Day-1
+concern, not a Day-2 code gap. Remaining SCM-endpoint work is Day-1 device
+onboarding (`ScmProvisionClient`), which needs a VM-Series.

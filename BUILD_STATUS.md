@@ -69,6 +69,10 @@ Every assumption is marked `# VERIFY:`. Resolve before first `apply`.
 | **SCM push client (T13)** | `src/fwgitops/clients.py` | ✅ FULLY CONFIRMED — pending/job paths (live probe), push path (live POST + SDK), push body `{"folder":[...]}` singular (SDK struct), PAN-OS two-field job model. Track B closed for Day-2. |
 | SCM provision client (T3) | `src/fwgitops/clients.py` | ⚠️ base path + segments evidenced; per-device sub-paths + licensing need the device sub-spike (a VM-Series) |
 
+**Finding #12 (confirmed):** a folder with no firewall bound stages config but cannot complete a
+push (no `push-to` target). Full push success is a pilot/Day-1 concern; Day-2 push code (path,
+verb, `folders` body key, PAN-OS job model) is confirmed against the live tenant.
+
 The Python↔Terraform contract (`rules.auto.tfvars.json` shape) **is** verified end-to-end:
 compiler output type-checks through Terraform's variable types against the real provider
 schema (a `plan` reaches provider auth — `ClientId must be specified` — with no type errors).
