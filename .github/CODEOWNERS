@@ -1,16 +1,20 @@
 # Review gates. In the design's tier model, HIGH changes require the folder's
 # CODEOWNERS as the standard approver; Phase 1 requires review on every change.
-# VERIFY: replace the placeholder team with your real GitHub team(s).
+#
+# NOTE: CODEOWNERS is only ENFORCED when branch protection requires code-owner
+# review. That is unavailable on this free private repo (needs GitHub Pro or a
+# public repo). Until then this file is advisory. Solo test phase: owner is
+# @martono25; replace with real team handles (e.g. @org/firewall-team) for
+# production, and enable "Require review from Code Owners" in branch protection.
 
 # Firewall rule intent + generated desired-state + policy
-/intent/        @REPLACE-org/firewall-team
-/terraform/     @REPLACE-org/firewall-team
-/catalog/       @REPLACE-org/firewall-team
-/policy/        @REPLACE-org/firewall-team
+/intent/        @martono25
+/terraform/     @martono25
+/catalog/       @martono25
+/policy/        @martono25
 
-# The compile/classify engine — changes here affect every rule, so require
-# platform + security review.
-/src/fwgitops/  @REPLACE-org/firewall-platform @REPLACE-org/firewall-team
+# The compile/classify engine — changes here affect every rule.
+/src/fwgitops/  @martono25
 
 # CRITICAL-tier changes (Phase 2) additionally route to the firewall-security
 # environment for dual-control sign-off (see .github/workflows/apply.yml).
