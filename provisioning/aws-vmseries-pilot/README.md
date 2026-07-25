@@ -13,8 +13,9 @@ money** (EC2, BYOL) — the plan is stand up → onboard → confirm push → de
 - [ ] **Marketplace subscription** to the VM-Series **BYOL** AMI — accept terms in
       the AWS console, then copy the **AMI id for ap-southeast-1**.
 - [ ] **BYOL auth code** (VM-Series auth code / NGFW credits) from Palo.
-- [ ] **SCM auto-registration PIN** (id + value) — SCM → Device onboarding. **Time-limited**,
-      so generate it right before `apply`.
+- [ ] **Device-cert registration PIN** (id + value) — **Customer Support Portal**
+      (support.paloaltonetworks.com) → Products → Device Certificates → Generate
+      Registration PIN. NOT in SCM. **Time-limited** — generate right before `apply`.
 - [ ] An **EC2 key pair** in ap-southeast-1 (`aws ec2 create-key-pair ...` or reuse one).
 - [ ] Your public IP for `mgmt_allowed_cidr` (`curl ifconfig.me`).
 

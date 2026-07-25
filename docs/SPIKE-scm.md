@@ -174,8 +174,9 @@ confirm — authoritative from Palo documentation):
 | `vm-series-auto-registration-pin-value` | from SCM | " |
 | `dgname` | the SCM **folder** (e.g. `GitOps`) | SCM prioritises this as the target folder |
 
-**Prerequisites the operator provides before boot:** the auto-registration PIN
-(generated in SCM device onboarding; time-limited) and — for BYOL — a VM-Series
+**Prerequisites the operator provides before boot:** the device-certificate
+registration PIN (generated in the **Customer Support Portal** -> Products ->
+Device Certificates -> Generate Registration PIN, NOT in SCM; time-limited) and — for BYOL — a VM-Series
 auth code placed in the bootstrap package under `/license/authcodes`.
 
 Applied to `provisioning/bootstrap/init-cfg.sample.txt`. The provisioning cloud

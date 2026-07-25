@@ -47,13 +47,13 @@ variable "scm_folder" {
 }
 
 variable "scm_registration_pin_id" {
-  description = "SCM auto-registration PIN id (SCM -> device onboarding). Time-limited."
+  description = "Device-certificate registration PIN ID from the Customer Support Portal (CSP) -> Products -> Device Certificates -> Generate Registration PIN. Time-limited."
   type        = string
   sensitive   = true
 }
 
 variable "scm_registration_pin_value" {
-  description = "SCM auto-registration PIN value. Time-limited."
+  description = "Device-certificate registration PIN VALUE from CSP (same page as the PIN id). Time-limited."
   type        = string
   sensitive   = true
 }

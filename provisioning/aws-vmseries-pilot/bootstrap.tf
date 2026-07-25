@@ -28,7 +28,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "bootstrap" {
   }
 }
 
-# config/init-cfg.txt — SCM onboarding (keys confirmed 2026-07-23).
+# config/init-cfg.txt — SCM onboarding. Registration PIN comes from CSP
+# (Products -> Device Certificates -> Generate Registration PIN), not SCM.
 resource "aws_s3_object" "init_cfg" {
   bucket = aws_s3_bucket.bootstrap.id
   key    = "config/init-cfg.txt"
