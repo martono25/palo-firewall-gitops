@@ -5,9 +5,9 @@ variable "folder_name" {
 }
 
 variable "parent_folder" {
-  description = "Parent in the SCM folder hierarchy (NGFW root is 'All Firewalls')."
+  description = "Parent in the SCM folder hierarchy. The NGFW container shown as 'All Firewalls' in the UI is 'ngfw-shared' in the config API (verified via /config/setup/v1/folders — GitOps sits under it)."
   type        = string
-  default     = "All Firewalls"
+  default     = "ngfw-shared"
 }
 
 variable "description" {

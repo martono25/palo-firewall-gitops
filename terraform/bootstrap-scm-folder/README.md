@@ -1,7 +1,9 @@
 # bootstrap-scm-folder
 
 Run-once root that creates the SCM configuration folder the GitOps pipeline
-targets (`prod-edge` under `All Firewalls`).
+targets (`prod-edge` under `ngfw-shared` — the container the SCM UI labels
+"All Firewalls"; verified via `/config/setup/v1/folders`, where `GitOps` also
+sits under `ngfw-shared`).
 
 **Why separate:** the folder must exist *before* a VM-Series boots and
 auto-registers into it (`init-cfg` `dgname=<folder>`). The per-change
