@@ -23,9 +23,9 @@ jobs:
   compile-and-plan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - run: pip install -e .
@@ -46,7 +46,7 @@ jobs:
             exit 1
           fi
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
 
       # VERIFY (T1): mint a short-lived SCM token for this run and export the
       # provider's auth env vars. Single service account, per-run token — never
@@ -68,7 +68,7 @@ jobs:
           done
 
       - name: Upload plans
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: terraform-plans
           path: plan-*.txt

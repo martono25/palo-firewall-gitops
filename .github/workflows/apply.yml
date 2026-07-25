@@ -43,14 +43,14 @@ jobs:
     # PHASE 1: single protected environment = human approval on every change.
     environment: firewall-apply
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - run: pip install -e .
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
 
       # VERIFY (T1): short-lived SCM token, same as pr-validate.
       - name: Mint short-lived SCM token
