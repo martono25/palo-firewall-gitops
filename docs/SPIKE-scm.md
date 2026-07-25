@@ -182,3 +182,24 @@ auth code placed in the bootstrap package under `/license/authcodes`.
 Applied to `provisioning/bootstrap/init-cfg.sample.txt`. The provisioning cloud
 module uses Palo's current **`PaloAltoNetworks/swfw-modules/aws`** (renamed from
 `vmseries-modules`).
+
+## Finding #16 — device → TSG association is separate from bootstrap (2026-07-25)
+
+Live pilot proved end-to-end onboarding works (VM-Series booted, bootstrapped,
+BYOL-licensed, got a device cert, connected to SCM). BUT the device auto-associated
+to the CSP account's DEFAULT TSG (1959848920), not the target SCM tenant TSG
+(1198884949). The init-cfg `dgname` controls the FOLDER; it does NOT control the
+TENANT/TSG. TSG association is a Common Services step (hub → Common Services →
+Device Associations, or SCM → Settings → Device Associations).
+
+Consequences observed: device landed in the wrong tenant (so it did not appear as
+a managed device in the intended tenant), and telemetry/logging used the wrong
+TSG's Strata Logging Service region.
+
+**Design implication for production onboarding automation:** the provisioning
+pipeline must ensure devices associate to the CORRECT TSG — either by generating
+the registration PIN under the right tenant context, configuring device-onboarding
+rules in the target tenant, or a post-boot Device Association step (Common Services
+API). A multi-TSG CSP account will default devices to the wrong tenant otherwise.
+Manual fix for the pilot: remove associations from the default TSG, add to the
+target TSG by serial.
