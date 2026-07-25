@@ -25,4 +25,10 @@ resource "scm_folder" "this" {
   name        = var.folder_name
   parent      = var.parent_folder
   description = var.description
+
+  # The provider returns [] (not null) for these optional lists after apply;
+  # declaring them empty avoids the "inconsistent result after apply" bug
+  # (null -> cty.ListValEmpty) on scm_folder create.
+  labels   = []
+  snippets = []
 }
