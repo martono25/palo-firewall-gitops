@@ -203,3 +203,19 @@ rules in the target tenant, or a post-boot Device Association step (Common Servi
 API). A multi-TSG CSP account will default devices to the wrong tenant otherwise.
 Manual fix for the pilot: remove associations from the default TSG, add to the
 target TSG by serial.
+
+## END-TO-END VALIDATED (2026-07-25)
+
+Full Day-1 → Day-2 flow proven on live infrastructure:
+
+- VM-Series (BYOL) provisioned in AWS ap-southeast-1 via Terraform (swfw-modules 2.2.7).
+- Bootstrapped from the S3 package: init-cfg (panorama-server=cloud + registration PIN
+  + dgname=GitOps) → BYOL license → device certificate → **connected to SCM (SG region)**.
+- Auth code determines the TSG (finding #16): first code landed the device in the wrong
+  TSG (1959848920); a correct-TSG auth code (D4161614) put it in the intended tenant
+  (1198884949), GitOps folder.
+- With the device bound, the folder push (`candidate:push`, body `{"folders":["GitOps"]}`)
+  returns a JOB ID instead of `push-to invalid` → **finding #12 CLOSED**.
+
+Every subsystem — intent compiler, module, SCM auth, push, provisioning, onboarding — now
+confirmed against real infrastructure end to end. The pilot's job is done.
