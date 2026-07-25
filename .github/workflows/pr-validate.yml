@@ -53,6 +53,16 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v4
 
+      # DIAGNOSTIC (remove after OIDC trust confirmed): print the OIDC token's
+      # sub/aud claims so we can match the IAM role trust policy exactly.
+      - name: Show OIDC claims
+        run: |
+          TOK=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          PAYLOAD=$(echo "$TOK" | cut -d. -f2)
+          PAYLOAD="${PAYLOAD}$(printf '=%.0s' $(seq $(( (4 - ${#PAYLOAD} % 4) % 4 ))))"
+          echo "$PAYLOAD" | tr '_-' '/+' | base64 -d 2>/dev/null | python3 -c 'import sys,json;c=json.load(sys.stdin);print("sub=",c.get("sub"));print("aud=",c.get("aud"));print("iss=",c.get("iss"))'
+
       # AWS creds for the S3 state backend (Arch-2), via OIDC — no stored keys.
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
