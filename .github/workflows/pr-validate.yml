@@ -6,13 +6,18 @@
 # ─────────────────────────────────────────────────────────────────────────
 name: pr-validate
 
+# GATED: manual-only (workflow_dispatch) until the SCM-token (T1) + backend steps
+# are wired, so it doesn't auto-run and fail on every PR. Restore the
+# pull_request trigger below (and drop workflow_dispatch) once terraform plan
+# actually runs in CI.
 on:
-  pull_request:
-    paths:
-      - "intent/**"
-      - "catalog/**"
-      - "terraform/**"
-      - "src/**"
+  workflow_dispatch: {}
+  # pull_request:
+  #   paths:
+  #     - "intent/**"
+  #     - "catalog/**"
+  #     - "terraform/**"
+  #     - "src/**"
 
 permissions:
   contents: read

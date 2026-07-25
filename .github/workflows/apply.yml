@@ -9,13 +9,18 @@
 # ─────────────────────────────────────────────────────────────────────────
 name: apply
 
+# GATED: manual-only (workflow_dispatch) until the SCM-token (T1), backend, and
+# push (T13) steps are wired, so it doesn't auto-run and fail on every terraform
+# commit. Restore the push trigger below (and drop workflow_dispatch) once the
+# stubbed steps are implemented.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "terraform/**"
-      - "intent/**"
-      - "catalog/**"
+  workflow_dispatch: {}
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - "terraform/**"
+  #     - "intent/**"
+  #     - "catalog/**"
 
 permissions:
   contents: read
