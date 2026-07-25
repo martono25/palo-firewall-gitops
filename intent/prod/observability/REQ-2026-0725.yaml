@@ -1,0 +1,23 @@
+# First real Phase-1 intent through the GitOps pipeline (the CI canary).
+# Web tier → central log/metrics collector. Explicit forms (Phase 1); the
+# compiler derives folder, zones, objects, and rule position.
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0725
+  requester: martono@corp
+  ticket: JIRA-20725            # mandatory — audit linkage
+  justification: "Web tier ships logs/metrics to the central observability collector"
+  requested: 2026-07-25
+  expires: 2026-10-25
+spec:
+  environment: prod            # → prod-edge folder, trust→app zones
+  action: allow
+  source:
+    - cidr: 10.20.1.0/24
+  destination:
+    - cidr: 10.20.20.10/32
+  service:
+    - protocol: tcp
+      port: 443
+  log: true

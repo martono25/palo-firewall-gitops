@@ -1,23 +1,18 @@
 # ─────────────────────────────────────────────────────────────────────────
-# UNVALIDATED SCAFFOLDING. Wires fwgitops compile + terraform plan into the PR
-# gate. Auth (T1 short-lived SCM token) and the remote backend (Arch-2) are
-# stubbed with `# VERIFY:` markers — resolve during setup. Cannot be run in the
-# design environment (no SCM/cloud creds).
+# The PR gate: fwgitops compile (fail-closed) + terraform plan per folder.
+# SCM auth comes from the job env (secrets); the S3 state backend is reached via
+# AWS OIDC. Plan-only — no device, no side effects — so it is safe on every PR.
 # ─────────────────────────────────────────────────────────────────────────
 name: pr-validate
 
-# GATED: manual-only (workflow_dispatch) until the SCM-token (T1) + backend steps
-# are wired, so it doesn't auto-run and fail on every PR. Restore the
-# pull_request trigger below (and drop workflow_dispatch) once terraform plan
-# actually runs in CI.
 on:
   workflow_dispatch: {}
-  # pull_request:
-  #   paths:
-  #     - "intent/**"
-  #     - "catalog/**"
-  #     - "terraform/**"
-  #     - "src/**"
+  pull_request:
+    paths:
+      - "intent/**"
+      - "catalog/**"
+      - "terraform/**"
+      - "src/**"
 
 permissions:
   contents: read
@@ -27,6 +22,11 @@ permissions:
 jobs:
   compile-and-plan:
     runs-on: ubuntu-latest
+    # SCM auth for the scm Terraform provider during plan (its own OAuth).
+    env:
+      SCM_CLIENT_ID: ${{ secrets.SCM_CLIENT_ID }}
+      SCM_CLIENT_SECRET: ${{ secrets.SCM_CLIENT_SECRET }}
+      SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
     steps:
       - uses: actions/checkout@v7
 
@@ -53,22 +53,27 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v4
 
-      # VERIFY (T1): mint a short-lived SCM token for this run and export the
-      # provider's auth env vars. Single service account, per-run token — never
-      # a long-lived secret. Exact mechanism confirmed during the scm spike.
-      - name: Mint short-lived SCM token
-        run: |
-          echo "TODO(T1) exchange service-account creds for a short-lived token; export SCM_* env"
+      # AWS creds for the S3 state backend (Arch-2), via OIDC — no stored keys.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ap-southeast-1
 
-      # 3. terraform plan per changed folder → the PR preview + drift signal.
+      # 3. terraform plan per Day-2 folder → the PR preview + drift signal.
+      #    Plan needs no device and creates nothing, so it is the safe CI check.
       - name: terraform plan (per folder)
         run: |
           set -euo pipefail
           for dir in terraform/*/; do
+            folder=$(basename "$dir")
+            # Skip run-once bootstraps (local state) and the shared module dir.
+            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
             [ -f "$dir/main.tf" ] || continue
-            echo "::group::plan $dir"
-            terraform -chdir="$dir" init -input=false
-            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode | tee "plan-$(basename "$dir").txt" || true
+            echo "::group::plan $folder"
+            ./terraform/make-backend.sh "$folder"
+            terraform -chdir="$dir" init -input=false -backend-config=backend.hcl
+            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode | tee "plan-$folder.txt" || true
             echo "::endgroup::"
           done
 
