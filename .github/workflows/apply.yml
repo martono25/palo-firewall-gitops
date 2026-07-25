@@ -47,6 +47,12 @@ jobs:
     runs-on: ubuntu-latest
     # PHASE 1: single protected environment = human approval on every change.
     environment: firewall-apply
+    # SCM auth for BOTH the scm Terraform provider and `fwgitops push`. Each does
+    # its own client_credentials -> JWT exchange, so no separate token step.
+    env:
+      SCM_CLIENT_ID: ${{ secrets.SCM_CLIENT_ID }}
+      SCM_CLIENT_SECRET: ${{ secrets.SCM_CLIENT_SECRET }}
+      SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
     steps:
       - uses: actions/checkout@v7
 
@@ -57,52 +63,36 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v4
 
-      # VERIFY (T1): short-lived SCM token, same as pr-validate.
-      - name: Mint short-lived SCM token
-        run: |
-          echo "TODO(T1) exchange service-account creds for a short-lived token; export SCM_* env"
+      # AWS creds for the S3 state backend (Arch-2), via OIDC — no long-lived keys.
+      # ⬜ SETUP REMAINING: create the GitHub-OIDC IAM role (trust this repo) and
+      # put its ARN in the AWS_OIDC_ROLE_ARN repo variable. Until then this step
+      # fails and the terraform/backend below cannot run.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ap-southeast-1
 
-      # Applies the COMMITTED tfvars (exactly what was reviewed). The module's
-      # depends_on enforces objects-before-rules. One folder at a time keeps the
-      # 1:1 isolation / clean per-change rollback.
-      - name: terraform apply (stage) — per folder
+      # Per folder: stage via terraform (candidate), then push to make it live.
+      # The push FAILS CLOSED if the candidate was edited outside our automation.
+      # One folder at a time preserves 1:1 isolation / clean per-change rollback.
+      - name: terraform apply (stage) + SCM push — per folder
         run: |
           set -euo pipefail
           for dir in terraform/*/; do
+            folder=$(basename "$dir")
+            case "$folder" in bootstrap-backend | modules) continue ;; esac
             [ -f "$dir/main.tf" ] || continue
-            echo "::group::apply $dir"
-            terraform -chdir="$dir" init -input=false
-            # -parallelism=1 is REQUIRED: the scm provider cannot handle
-            # concurrent token acquisition and fails with a misleading
-            # "unauthorized_client" auth error under the default parallelism.
-            # Confirmed in the spike (2026-07-19) — plan works, parallel apply
-            # fails, serial apply succeeds.
+            [ -f "$dir/rules.auto.tfvars.json" ] || { echo "no rules in $folder — skip"; continue; }
+            echo "::group::apply+push $folder"
+            ./terraform/make-backend.sh "$folder"
+            terraform -chdir="$dir" init -input=false -backend-config=backend.hcl
+            # -parallelism=1 REQUIRED: the scm provider cannot handle concurrent
+            # token acquisition (spike 2026-07-19) — serial apply only.
             terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1
+            # Atomic commit boundary (Topic-1): terraform only STAGES config; this
+            # push makes it live (scm provider has no push). fwgitops push fails
+            # closed if the candidate was touched outside our service account.
+            fwgitops push "$folder"
             echo "::endgroup::"
           done
-
-      # ── Candidate/commit boundary (Topic-1 rollback) — CONFIRMED REQUIRED ──
-      # Spike finding (2026-07-19): the scm provider has NO push/commit resource
-      # (0 of 129 resources, 0 of 252 data sources). `terraform apply` only STAGES
-      # config in SCM; a separate push is required to make it live. SCM's push
-      # target is the FOLDER.
-      #
-      # Because push is folder-scoped it commits EVERYTHING staged in that folder,
-      # not just our change. Two safeguards:
-      #   1. The job-level `concurrency` group above serializes applies, so our own
-      #      pipeline never stages two changes into a folder at once (preserves the
-      #      1:1 isolation and clean per-change rollback).
-      #   2. FAIL CLOSED before pushing: if anything unexpected is staged in the
-      #      folder (e.g. an out-of-band GUI edit), abort rather than commit
-      #      someone else's unreviewed change under our audit trail. That staged
-      #      delta is Level-1 drift and must go through the drift flow instead.
-      # Orchestration is BUILT + TESTED in fwgitops.push (push_folder): it lists
-      # staged changes, FAILS CLOSED on anything we did not stage, pushes with
-      # target=folder, polls the job, and returns an evidence-shaped result.
-      # REMAINING: the thin PushClient implementation against the SCM REST API
-      # (list_staged / push / job_status) — needs tenant access to verify.
-      - name: SCM push (atomic boundary, folder-scoped)
-        run: |
-          echo "TODO(T13) wire: fwgitops.push.push_folder(client, folder, expected=...)"
-          echo "  orchestration + fail-closed guard: DONE (see tests/test_push.py)"
-          echo "  remaining: PushClient against the SCM REST API"
