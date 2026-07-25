@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars (GITIGNORED — holds secrets) and fill in.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+# --- access ---
+ssh_key_name      = "your-ec2-keypair-name"   # an EXISTING key pair in ap-southeast-1
+mgmt_allowed_cidr = "YOUR.PUBLIC.IP/32"        # lock mgmt to your IP (get it: curl ifconfig.me)
+
+# --- BYOL AMI (from your AWS Marketplace subscription, ap-southeast-1) ---
+vmseries_ami_id = "ami-xxxxxxxxxxxxxxxxx"
+
+# --- SCM onboarding (generate the PIN in SCM right before apply — time-limited) ---
+scm_folder                 = "GitOps"
+scm_registration_pin_id    = "REPLACE"
+scm_registration_pin_value = "REPLACE"
+
+# --- BYOL license ---
+vmseries_authcode = "REPLACE"                  # VM-Series auth code
