@@ -116,3 +116,62 @@ def test_missing_env_map_exits_1(tmp_path, capsys):
     rc = run_compile(tmp_path / "intent", tmp_path / "nope.yaml", tmp_path / "terraform")
     assert rc == 1
     assert "env map not found" in capsys.readouterr().err
+
+
+# ── fwgitops push (T13) ────────────────────────────────────────────────────
+from fwgitops.cli import run_push  # noqa: E402
+from fwgitops.scmapi import ScmCredentials, ScmSession  # noqa: E402
+
+SA = "GitOps@1198884949.iam.panserviceaccount.com"
+CREDS = ScmCredentials(client_id=SA, client_secret="s3cret", scope="tsg_id:1198884949")
+
+
+def _scm_transport(editors):
+    def t(method, url, headers, body):
+        if "oauth2" in url:
+            payload = {"access_token": "tok", "expires_in": 3600}
+        elif "candidate:push" in url:                      # POST push — check first
+            payload = {"job_id": "job-9"}
+        elif "config-versions/candidate" in url:            # GET candidate editors
+            payload = {"data": [{"edited_by": e} for e in editors]}
+        elif "/jobs/" in url:                               # GET job status
+            payload = {"data": [{"status_str": "FIN", "result_str": "OK"}]}
+        else:
+            return 404, b"{}"
+        return 200, json.dumps(payload).encode()
+    return t
+
+
+def _session(editors):
+    return ScmSession(CREDS, transport=_scm_transport(editors))
+
+
+def test_cli_push_success(capsys):
+    rc = run_push("GitOps", session=_session([SA]))
+    assert rc == 0
+    assert "OK — success" in capsys.readouterr().out
+
+
+def test_cli_push_refused_on_outside_editor(capsys):
+    rc = run_push("GitOps", session=_session([SA, "human@corp"]))
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "REFUSED" in err and "human@corp" in err
+
+
+def test_cli_push_break_glass_overrides(capsys):
+    rc = run_push("GitOps", session=_session([SA, "human@corp"]), allow_unexpected=True)
+    assert rc == 0
+
+
+def test_cli_push_noop_when_nothing_staged(capsys):
+    rc = run_push("GitOps", session=_session([]))
+    assert rc == 0
+    assert "noop" in capsys.readouterr().out
+
+
+def test_cli_push_missing_env_exits_1(monkeypatch, capsys):
+    for v in ("SCM_CLIENT_ID", "SCM_CLIENT_SECRET", "SCM_SCOPE"):
+        monkeypatch.delenv(v, raising=False)
+    rc = run_push("GitOps")   # no session -> from_env -> missing -> 1
+    assert rc == 1

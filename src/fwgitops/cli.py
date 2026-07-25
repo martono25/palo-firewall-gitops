@@ -17,6 +17,7 @@ Exit codes:  0 ok · 2 validation/compile error · 1 usage/IO error
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -120,6 +121,53 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
+def run_push(
+    folder: str,
+    *,
+    allowed_editors: Optional[List[str]] = None,
+    allow_unexpected: bool = False,
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Push a folder's staged config to SCM (T13). Returns a process exit code.
+
+    Exit codes:  0 ok/noop · 1 config/auth · 2 refused (fail-closed) · 3 push failed.
+    Credentials come from SCM_* env; the scm session does its own OAuth. The
+    fail-closed guard defaults to allowing only the service-account identity
+    (the session's client_id) to have edited the candidate. `session` is
+    injectable for testing.
+    """
+    # Imported lazily so `fwgitops compile` never needs the SCM stack.
+    from fwgitops.clients import ScmPushClient
+    from fwgitops.push import PushError, UnexpectedStagedChanges, push_folder
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    if session is None:
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except ScmConfigError as e:
+            print(f"error: {e}", file=err)
+            return 1
+
+    allowed = allowed_editors or [session.credentials.client_id]
+    client = ScmPushClient(session)
+    try:
+        result = push_folder(client, folder, allowed_editors=allowed, allow_unexpected=allow_unexpected)
+    except UnexpectedStagedChanges as e:
+        print(f"REFUSED: {e}", file=err)
+        return 2
+    except (PushError, ScmApiError) as e:
+        print(f"PUSH FAILED: {e}", file=err)
+        return 3
+
+    print(f"OK — {result.status} (folder={result.folder} job={result.job_id})", file=out)
+    print(json.dumps(result.to_evidence(), sort_keys=True), file=out)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fwgitops", description="GitOps firewall compiler")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -133,6 +181,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="output root; writes <out>/<folder>/rules.auto.tfvars.json")
     c.add_argument("--check", action="store_true",
                    help="validate and report without writing files")
+
+    p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
+    p.add_argument("folder", help="SCM folder to push")
+    p.add_argument("--allowed-editor", action="append", dest="allowed_editors",
+                   help="identity allowed to have edited the candidate (repeatable); "
+                        "default: SCM_CLIENT_ID")
+    p.add_argument("--allow-unexpected", action="store_true",
+                   help="BREAK-GLASS: push even if the candidate was edited by others")
     return parser
 
 
@@ -142,6 +198,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "compile":
         return run_compile(
             args.intent_root, args.env_map, args.out, write=not args.check
+        )
+    if args.command == "push":
+        return run_push(
+            args.folder,
+            allowed_editors=args.allowed_editors,
+            allow_unexpected=args.allow_unexpected,
         )
     parser.error(f"unknown command {args.command!r}")  # pragma: no cover
     return 1

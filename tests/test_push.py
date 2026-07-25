@@ -1,8 +1,9 @@
 """Tests for the SCM push step (T13) — the atomic commit boundary.
 
-The fail-closed guard is the security-critical behavior here: a folder-scoped
-push commits everything staged, so pushing with someone else's unreviewed change
-present is the failure mode we must never allow.
+The fail-closed guard is the security-critical behavior: a folder-scoped push
+commits everything staged in the candidate, so pushing when someone OUTSIDE our
+automation has edited the candidate would ship their unreviewed change under our
+audit trail. The guard keys on WHO edited the candidate (pilot finding).
 """
 
 from __future__ import annotations
@@ -22,20 +23,21 @@ from fwgitops.push import (
 NOSLEEP = lambda _s: None  # noqa: E731
 FAST = PollConfig(max_attempts=5, backoff_seconds=0)
 
-OURS = ["addr-abc", "svc-def", "REQ-2026-0417"]
+#: Our automation identity — the only editor allowed to have touched the candidate.
+US = "GitOps@1198884949.iam.panserviceaccount.com"
 
 
 class FakeClient:
-    def __init__(self, staged=None, statuses=None, job_id="job-1"):
-        self.staged = list(OURS if staged is None else staged)
-        # Sequence of JobState returned by successive job_status() calls.
+    def __init__(self, editors=None, statuses=None, job_id="job-1"):
+        # Who edited the pending candidate. Default: only us.
+        self.editors = list([US] if editors is None else editors)
         self.statuses = list(statuses or [JobState(PushStatus.SUCCESS)])
         self.job_id = job_id
         self.pushed_folders: list = []
         self.status_calls = 0
 
-    def list_staged(self, folder):
-        return list(self.staged)
+    def staged_editors(self, folder):
+        return list(self.editors)
 
     def push(self, folder):
         self.pushed_folders.append(folder)
@@ -43,12 +45,11 @@ class FakeClient:
 
     def job_status(self, job_id):
         self.status_calls += 1
-        idx = min(self.status_calls - 1, len(self.statuses) - 1)
-        return self.statuses[idx]
+        return self.statuses[min(self.status_calls - 1, len(self.statuses) - 1)]
 
 
 def run(client, **kw):
-    kw.setdefault("expected", OURS)
+    kw.setdefault("allowed_editors", [US])
     return push_folder(client, "GitOps", poll=FAST, sleep=NOSLEEP, **kw)
 
 
@@ -59,8 +60,7 @@ def test_push_success():
     assert r.status == "success"
     assert r.job_id == "job-1"
     assert c.pushed_folders == ["GitOps"]
-    assert r.pushed == tuple(sorted(OURS))
-    assert r.missing == ()
+    assert r.editors == (US,)
 
 
 def test_waits_for_job_to_finish():
@@ -75,30 +75,29 @@ def test_waits_for_job_to_finish():
 
 def test_result_is_evidence_shaped():
     ev = run(FakeClient()).to_evidence()
-    assert set(ev) == {"folder", "status", "job_id", "pushed", "missing"}
+    assert set(ev) == {"folder", "status", "job_id", "editors"}
     assert ev["folder"] == "GitOps" and ev["status"] == "success"
 
 
 # ── Fail closed (the security-critical guard) ─────────────────────────────
-def test_refuses_to_push_unexpected_staged_change():
-    # Someone made an out-of-band GUI edit in the same folder.
-    c = FakeClient(staged=OURS + ["rogue-any-any-rule"])
+def test_refuses_to_push_when_a_human_edited_the_candidate():
+    c = FakeClient(editors=[US, "human@corp"])   # out-of-band GUI edit
     with pytest.raises(UnexpectedStagedChanges) as ei:
         run(c)
-    assert "rogue-any-any-rule" in str(ei.value)
-    assert c.pushed_folders == []  # critically: never pushed
+    assert "human@corp" in str(ei.value)
+    assert c.pushed_folders == []                # critically: never pushed
 
 
-def test_unexpected_lists_only_the_delta():
-    c = FakeClient(staged=OURS + ["rogue-1", "rogue-2"])
+def test_unexpected_lists_only_outside_editors():
+    c = FakeClient(editors=[US, "alice@corp", "bob@corp"])
     with pytest.raises(UnexpectedStagedChanges) as ei:
         run(c)
-    assert ei.value.unexpected == ("rogue-1", "rogue-2")
+    assert ei.value.unexpected == ("alice@corp", "bob@corp")   # US excluded
 
 
 def test_break_glass_override_allows_push():
     # Explicit human-approved override — never the default path.
-    c = FakeClient(staged=OURS + ["rogue-1"])
+    c = FakeClient(editors=[US, "human@corp"])
     r = run(c, allow_unexpected=True)
     assert r.status == "success"
     assert c.pushed_folders == ["GitOps"]
@@ -106,20 +105,19 @@ def test_break_glass_override_allows_push():
 
 # ── Edge cases ────────────────────────────────────────────────────────────
 def test_nothing_staged_is_a_noop_not_an_error():
-    c = FakeClient(staged=[])
+    c = FakeClient(editors=[])
     r = run(c)
     assert r.status == "noop"
     assert r.job_id is None
-    assert c.pushed_folders == []          # nothing to push
-    assert r.missing == tuple(sorted(OURS))
+    assert c.pushed_folders == []
+    assert r.editors == ()
 
 
-def test_partial_stage_records_missing_but_still_pushes():
-    c = FakeClient(staged=["addr-abc"])
-    r = run(c)
+def test_multiple_allowed_editors_ok():
+    # More than one automation identity is fine if all are allowed.
+    c = FakeClient(editors=[US, "ci@corp"])
+    r = run(c, allowed_editors=[US, "ci@corp"])
     assert r.status == "success"
-    assert r.pushed == ("addr-abc",)
-    assert set(r.missing) == {"svc-def", "REQ-2026-0417"}
 
 
 # ── Failure paths ─────────────────────────────────────────────────────────

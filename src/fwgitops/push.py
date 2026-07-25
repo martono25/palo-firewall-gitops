@@ -16,8 +16,8 @@ folder would go live under our change's audit trail, unreviewed. So this module
 reports the delta as Level-1 drift for the drift flow to handle.
 
 Ordering of guarantees:
-  1. list what is actually staged
-  2. refuse to push if that exceeds what we staged   ← fail closed
+  1. read who edited the pending candidate config
+  2. refuse to push if anyone outside our automation touched it   ← fail closed
   3. push (target = folder)
   4. poll the push job to completion, bounded
   5. return a result suitable for the evidence bundle
@@ -73,9 +73,9 @@ class UnexpectedStagedChanges(PushError):
         self.folder = folder
         self.unexpected = tuple(unexpected)
         super().__init__(
-            f"refusing to push folder {folder!r}: {len(self.unexpected)} unexpected staged "
-            f"change(s) not made by this run: {', '.join(self.unexpected)}. "
-            "Resolve as drift before pushing."
+            f"refusing to push folder {folder!r}: candidate was edited by "
+            f"{len(self.unexpected)} identity(ies) outside our automation: "
+            f"{', '.join(self.unexpected)}. Resolve as drift before pushing."
         )
 
 
@@ -90,7 +90,7 @@ class PushFailed(PushError):
 class PushClient(Protocol):
     """SCM operations this step drives (real impl = SCM REST API)."""
 
-    def list_staged(self, folder: str) -> Iterable[str]: ...
+    def staged_editors(self, folder: str) -> Iterable[str]: ...
     def push(self, folder: str) -> str: ...
     def job_status(self, job_id: str) -> JobState: ...
 
@@ -102,16 +102,14 @@ class PushResult:
     folder: str
     status: str  # "success" | "noop"
     job_id: Optional[str]
-    pushed: Tuple[str, ...]
-    missing: Tuple[str, ...]  # expected but not staged (informational)
+    editors: Tuple[str, ...]  # who touched the pushed candidate (audit)
 
     def to_evidence(self) -> Dict[str, object]:
         return {
             "folder": self.folder,
             "status": self.status,
             "job_id": self.job_id,
-            "pushed": list(self.pushed),
-            "missing": list(self.missing),
+            "editors": list(self.editors),
         }
 
 
@@ -119,35 +117,33 @@ def push_folder(
     client: PushClient,
     folder: str,
     *,
-    expected: Iterable[str],
+    allowed_editors: Iterable[str],
     poll: PollConfig = PollConfig(),
     sleep: Callable[[float], None] = time.sleep,
     allow_unexpected: bool = False,
 ) -> PushResult:
-    """Push a folder's staged config, failing closed on anything unexpected.
+    """Push a folder's staged config, failing closed on out-of-band edits.
 
-    `expected` is the set of object/rule identifiers this run staged (derived
-    from the compiled desired-state). Anything staged beyond that aborts the push.
+    The SCM candidate is a config *version*, not a list of object names (pilot
+    finding), so the fail-closed signal is WHO touched it: `allowed_editors` is
+    the set of identities our automation is permitted to commit for (typically
+    just our service account). If the candidate was edited by anyone else — an
+    out-of-band GUI change — we refuse to push, because a folder-scoped push
+    would commit their unreviewed work under our audit trail. That delta is
+    Level-1 drift and belongs in the drift flow.
 
-    `allow_unexpected=True` is an explicit break-glass override — it should only
-    ever be set by a human-approved run, never by the default pipeline path.
+    `allow_unexpected=True` is an explicit break-glass override — only ever set
+    by a human-approved run, never the default pipeline path.
     """
-    staged = set(client.list_staged(folder))
-    expected_set = set(expected)
+    editors = set(client.staged_editors(folder))
 
-    unexpected = staged - expected_set
+    if not editors:
+        # Nothing staged (apply was a no-op, or SCM already committed).
+        return PushResult(folder=folder, status="noop", job_id=None, editors=())
+
+    unexpected = editors - set(allowed_editors)
     if unexpected and not allow_unexpected:
         raise UnexpectedStagedChanges(folder, sorted(unexpected))
-
-    if not staged:
-        # Apply was a no-op (or SCM already committed it) — nothing to push.
-        return PushResult(
-            folder=folder,
-            status="noop",
-            job_id=None,
-            pushed=(),
-            missing=tuple(sorted(expected_set)),
-        )
 
     job_id = client.push(folder)
     state = bounded_poll(
@@ -164,9 +160,5 @@ def push_folder(
         raise PushFailed(f"push job {job_id!r} for folder {folder!r} failed: {state.message}")
 
     return PushResult(
-        folder=folder,
-        status="success",
-        job_id=job_id,
-        pushed=tuple(sorted(staged)),
-        missing=tuple(sorted(expected_set - staged)),
+        folder=folder, status="success", job_id=job_id, editors=tuple(sorted(editors))
     )

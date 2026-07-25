@@ -76,24 +76,27 @@ class ScmPushClient:
         self.JOB_PATH = job_path or self.JOB_PATH
         self.PUSH_FOLDER_KEY = push_folder_key or self.PUSH_FOLDER_KEY
 
-    def list_staged(self, folder: str) -> Iterable[str]:
-        """Identifiers of changes currently staged (uncommitted) in `folder`.
+    def staged_editors(self, folder: str) -> List[str]:
+        """Identities that edited the pending candidate config for `folder`.
 
-        These identifiers must line up with what the compiler considers
-        "expected" (object/rule names) or the fail-closed guard will misfire.
-        VERIFY the response shape and align the identifier extraction.
+        This is the fail-closed guard's real signal (pilot finding): the SCM
+        candidate endpoint returns a config VERSION record with `edited_by` /
+        `admin`, NOT a list of object names. So the guard asks "was this candidate
+        touched by anyone outside our automation?" rather than diffing object ids.
         """
         payload = self.session.request("GET", self.PENDING_PATH, params={"folder": folder})
-        items: List[Any] = _first_present(payload, "data", "items", "changes", default=[]) or []
-        out: List[str] = []
-        for item in items:
-            if isinstance(item, str):
-                out.append(item)
-            elif isinstance(item, dict):
-                name = _first_present(item, "name", "object_name", "id")
-                if name:
-                    out.append(str(name))
-        return out
+        items = payload if isinstance(payload, list) else _first_present(payload, "data", default=[])
+        editors: List[str] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("edited_by", "admin"):
+                val = item.get(key)
+                if isinstance(val, str) and val:
+                    editors.append(val)
+                elif isinstance(val, list):
+                    editors.extend(str(v) for v in val if v)
+        return sorted(set(editors))
 
     def push(self, folder: str, *, description: str = "fwgitops") -> str:
         """Start a folder-scoped push. Returns the job id.
@@ -150,30 +153,6 @@ class ScmPushClient:
             return JobState(PushStatus.PENDING, message)
         # ACT / unknown -> keep polling rather than claim an outcome.
         return JobState(PushStatus.RUNNING, message)
-
-    def candidate_editors(self, folder: str) -> List[str]:
-        """Who edited the pending candidate config.
-
-        The fail-closed guard's real signal: SCM tracks a candidate config
-        VERSION (with `edited_by` / `admin`), not a list of changed object names,
-        so we cannot diff object identifiers. Instead we assert the candidate was
-        touched ONLY by our automation identity — if a human staged something in
-        this folder, their identity appears here and we must refuse to push.
-        """
-        payload = self.session.request("GET", self.PENDING_PATH, params={"folder": folder})
-        items = payload if isinstance(payload, list) else _first_present(payload, "data", default=[])
-        editors: List[str] = []
-        for item in items or []:
-            if not isinstance(item, dict):
-                continue
-            for key in ("edited_by", "admin"):
-                val = item.get(key)
-                if isinstance(val, str) and val:
-                    editors.append(val)
-                elif isinstance(val, list):
-                    editors.extend(str(v) for v in val if v)
-        return sorted(set(editors))
-
 
 class ScmProvisionClient:
     """ProvisionClient over the SCM REST API (Day-1, T3).

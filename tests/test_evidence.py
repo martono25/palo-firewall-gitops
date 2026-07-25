@@ -47,7 +47,7 @@ def bundle(**kw):
                      run_url="https://gh/runs/9", gate="firewall-apply",
                      approvers=("alice@corp",)),
         push=PushResult(folder="prod-edge", status="success", job_id="job-1",
-                        pushed=("addr-1",), missing=()),
+                        editors=("GitOps@1198884949.iam.panserviceaccount.com",)),
     )
     base.update(kw)
     return build_bundle(**base)

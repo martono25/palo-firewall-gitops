@@ -44,18 +44,17 @@ def session_for(*payloads, statuses=None):
 
 
 # ── ScmPushClient ─────────────────────────────────────────────────────────
-@pytest.mark.parametrize("payload", [
-    {"data": [{"name": "addr-abc"}, {"name": "svc-def"}]},
-    {"items": ["addr-abc", "svc-def"]},
-    {"changes": [{"object_name": "addr-abc"}, {"id": "svc-def"}]},
-])
-def test_list_staged_tolerates_shapes(payload):
-    c = ScmPushClient(session_for(payload))
-    assert sorted(c.list_staged("GitOps")) == ["addr-abc", "svc-def"]
+def test_staged_editors_from_candidate_version():
+    # The candidate endpoint returns a config VERSION record (edited_by / admin),
+    # not object names — the guard keys on WHO touched it (pilot finding).
+    payload = {"data": [{"edited_by": "human@corp", "admin": "svc-acct@iam"}]}
+    assert sorted(ScmPushClient(session_for(payload)).staged_editors("GitOps")) == \
+        ["human@corp", "svc-acct@iam"]
 
 
-def test_list_staged_empty():
-    assert list(ScmPushClient(session_for({})).list_staged("GitOps")) == []
+def test_staged_editors_bare_array_and_empty():
+    assert ScmPushClient(session_for([{"edited_by": "a@corp"}])).staged_editors("GitOps") == ["a@corp"]
+    assert ScmPushClient(session_for({})).staged_editors("GitOps") == []
 
 
 @pytest.mark.parametrize("payload", [{"job_id": "j1"}, {"jobId": "j1"}, {"id": "j1"}])
@@ -96,11 +95,9 @@ def test_job_record_unwrapped_from_data_envelope():
     assert ScmPushClient(session_for(payload)).job_status("j1").status is PushStatus.SUCCESS
 
 
-def test_candidate_editors_extracted_for_the_fail_closed_guard():
-    # The real guard signal: who touched the pending candidate config.
-    payload = [{"edited_by": "human@corp", "admin": "GitOps@1198884949.iam.panserviceaccount.com"}]
-    editors = ScmPushClient(session_for(payload)).candidate_editors("GitOps")
-    assert "human@corp" in editors
+def test_staged_editors_dedups_and_sorts():
+    payload = {"data": [{"edited_by": "b@corp"}, {"edited_by": "a@corp", "admin": "b@corp"}]}
+    assert ScmPushClient(session_for(payload)).staged_editors("GitOps") == ["a@corp", "b@corp"]
 
 
 # ── ScmProvisionClient ────────────────────────────────────────────────────
