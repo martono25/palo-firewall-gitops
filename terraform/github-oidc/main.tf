@@ -44,12 +44,18 @@ data "aws_iam_policy_document" "trust" {
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
-    # Scope to THIS repo (any ref/environment). Tighten for production, e.g.
-    # repo:${var.repo}:environment:firewall-apply for the apply path.
+    # Scope to THIS repo (any ref/environment). Two subject forms are accepted so
+    # trust holds whether or not the org/repo enables GitHub's immutable numeric
+    # ID subject claim (which sends repo:<owner>@<id>/<repo>@<id>:...). Confirmed
+    # via the OIDC-claim diagnostic on 2026-07-25. Tighten for production, e.g.
+    # ...:environment:firewall-apply for the apply path.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.repo}:*"]
+      values   = concat(
+        ["repo:${var.repo}:*"],
+        var.repo_id_subject != "" ? ["${var.repo_id_subject}:*"] : [],
+      )
     }
   }
 }

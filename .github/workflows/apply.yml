@@ -82,7 +82,7 @@ jobs:
           for dir in terraform/*/; do
             folder=$(basename "$dir")
             # Skip run-once bootstraps (local state) and the shared module dir.
-            case "$folder" in bootstrap-backend | github-oidc | modules) continue ;; esac
+            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
             [ -f "$dir/main.tf" ] || continue
             [ -f "$dir/rules.auto.tfvars.json" ] || { echo "no rules in $folder — skip"; continue; }
             echo "::group::apply+push $folder"
