@@ -1,0 +1,8 @@
+# Copy to backend.hcl and fill the bucket from the bootstrap output
+# (`terraform -chdir=terraform/bootstrap-backend output state_bucket`).
+# backend.hcl is gitignored (it names your account); this .example is tracked.
+bucket       = "fw-gitops-tfstate-<ACCOUNT_ID>"
+region       = "ap-southeast-1"
+key          = "prod-edge/terraform.tfstate"
+encrypt      = true
+use_lockfile = true

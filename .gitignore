@@ -67,3 +67,6 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+
+# Per-folder filled backend config (names the AWS account)
+backend.hcl

@@ -1,23 +1,12 @@
-# Remote state — ONE state per folder (design Arch-2: cloud object store + native
-# locking, encrypted at rest, never committed to Git). Uncomment and fill in
-# during setup; pick the backend matching the cloud you provision the pilot in.
+# Remote state — ONE state per folder (design Arch-2: S3 + native locking,
+# encrypted, never in Git). PARTIAL config: the concrete bucket/region/key live
+# in backend.hcl (filled from the bootstrap output), passed at init:
 #
-# AWS (S3):
-# terraform {
-#   backend "s3" {
-#     bucket       = "REPLACE-fw-gitops-tfstate"
-#     key          = "prod-edge/terraform.tfstate"
-#     region       = "REPLACE"
-#     encrypt      = true
-#     use_lockfile = true   # native S3 state locking (Terraform >= 1.10)
-#     #                       # older TF: set dynamodb_table = "REPLACE-tf-locks"
-#   }
-# }
+#   terraform init -backend-config=backend.hcl
 #
-# GCP (GCS):
-# terraform {
-#   backend "gcs" {
-#     bucket = "REPLACE-fw-gitops-tfstate"   # enable object versioning on the bucket
-#     prefix = "prod-edge"
-#   }
-# }
+# Partial config keeps the bucket name (which contains the account id) out of
+# the tracked .tf and lets CI pass the same values.
+
+terraform {
+  backend "s3" {}
+}
