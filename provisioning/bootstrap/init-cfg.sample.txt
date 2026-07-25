@@ -1,13 +1,12 @@
-# EXAMPLE bootstrap init-cfg.txt (the ZTP phone-home config).
+# Bootstrap init-cfg.txt for VM-Series → Strata Cloud Manager onboarding.
 # Rendered per device (substitute ${...}) and delivered via the bootstrap package
-# (AWS: user-data or S3 bootstrap bucket; GCP: instance metadata or GCS). The
-# rendered file carries auth material — NEVER commit rendered output (.gitignore
-# excludes *.rendered.*). This template is safe; the values are not.
+# (AWS: user-data or an S3 bootstrap bucket). The rendered file carries the
+# registration PIN — NEVER commit rendered output (.gitignore excludes
+# *.rendered.*). This template is safe; the values are not.
 #
-# ⚠️ We are SCM-managed. The exact SCM onboarding keys differ from the classic
-#    Panorama keys and MUST be confirmed during the scm/onboarding spike. Both
-#    forms are shown; keep the SCM block and delete the Panorama block once
-#    verified.
+# SCM onboarding keys CONFIRMED from Palo docs (device sub-spike, 2026-07-23):
+#   docs.paloaltonetworks.com/vm-series → Create the init-cfg.txt File
+#   docs.paloaltonetworks.com/strata-cloud-manager → Onboard to Strata Cloud Manager
 
 type=dhcp-client
 hostname=${HOSTNAME}
@@ -15,20 +14,28 @@ dns-primary=${DNS_PRIMARY}
 dns-secondary=${DNS_SECONDARY}
 dhcp-accept-server-hostname=yes
 
-# Cloud dataplane/mgmt options (VERIFY per cloud + instance type):
-#   op-command-modes=jumbo-frame        # common on VM-Series
-#   plugin-op-commands=set-dp-cores:... # sizing, if applicable
-op-command-modes=
+# ── Strata Cloud Manager onboarding ──────────────────────────────────────
+# panorama-server=cloud is the literal that points the firewall at SCM (initiates
+# TLS to the cloud management service edge — NOT a Panorama IP).
+panorama-server=cloud
 
-# ── SCM-managed onboarding (KEEP — verify keys) ──────────────────────────
-# VERIFY: the exact init-cfg keys SCM uses to claim a device (device auth-key /
-# tenant / cloud-manager endpoint). Confirm against the SCM onboarding docs.
-# vm-auth-key=${SCM_DEVICE_AUTH_KEY}
-# cloud-manager=${SCM_ENDPOINT}
+# The auto-registration PIN (generated in SCM → device onboarding / setup) requests
+# a Thermite device certificate that authenticates this firewall to your tenant.
+# PREREQUISITE: generate the PIN in SCM before boot; it is time-limited.
+vm-series-auto-registration-pin-id=${SCM_REGISTRATION_PIN_ID}
+vm-series-auto-registration-pin-value=${SCM_REGISTRATION_PIN_VALUE}
 
-# ── Panorama onboarding (DELETE once on SCM) ─────────────────────────────
-# panorama-server=${PANORAMA_PRIMARY}
-# panorama-server-2=${PANORAMA_SECONDARY}
-# vm-auth-key=${VM_AUTH_KEY}
-# dgname=${DEVICE_GROUP}
-# tplname=${TEMPLATE_STACK}
+# dgname = the target SCM FOLDER. SCM prioritises this over any onboarding rule,
+# so the device lands in our folder deterministically.
+dgname=${SCM_FOLDER}   # e.g. GitOps
+
+# Optional cloud/VM-Series toggles:
+#   op-command-modes=jumbo-frame
+#   plugin-op-commands=advance-routing:enable
+
+# ── BYOL licensing ───────────────────────────────────────────────────────
+# For BYOL bootstrap, place the auth code in the bootstrap package under
+# /license/authcodes (a separate file, NOT this init-cfg). The firewall
+# activates the license from it on first boot.
+#   PREREQUISITE: a VM-Series auth code (or software NGFW credits + deployment
+#   profile) from your Palo licensing / CSP.

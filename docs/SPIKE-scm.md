@@ -161,3 +161,23 @@ the live tenant; the job model is the PAN-OS two-field form (`status_str` +
 `result_str`). Full push *success* requires a bound device, which is a pilot/Day-1
 concern, not a Day-2 code gap. Remaining SCM-endpoint work is Day-1 device
 onboarding (`ScmProvisionClient`), which needs a VM-Series.
+
+## Device onboarding sub-spike — RESOLVED (2026-07-23, from Palo docs)
+
+VM-Series → SCM onboarding via bootstrap `init-cfg.txt` (no live device needed to
+confirm — authoritative from Palo documentation):
+
+| Key | Value | Purpose |
+|---|---|---|
+| `panorama-server` | `cloud` (literal) | points the firewall at SCM (TLS to the cloud service edge), not a Panorama IP |
+| `vm-series-auto-registration-pin-id` | from SCM | requests a Thermite device cert to authenticate to the tenant |
+| `vm-series-auto-registration-pin-value` | from SCM | " |
+| `dgname` | the SCM **folder** (e.g. `GitOps`) | SCM prioritises this as the target folder |
+
+**Prerequisites the operator provides before boot:** the auto-registration PIN
+(generated in SCM device onboarding; time-limited) and — for BYOL — a VM-Series
+auth code placed in the bootstrap package under `/license/authcodes`.
+
+Applied to `provisioning/bootstrap/init-cfg.sample.txt`. The provisioning cloud
+module uses Palo's current **`PaloAltoNetworks/swfw-modules/aws`** (renamed from
+`vmseries-modules`).
