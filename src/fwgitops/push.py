@@ -9,18 +9,26 @@ boundary from the design is structurally forced, and this module is it.
                             │
         push_folder() ──────┴──▶ live on devices   ← the atomic point
 
-Because push is folder-scoped it commits EVERYTHING staged in that folder, not
-just our change. That is dangerous: an out-of-band GUI edit sitting in the same
-folder would go live under our change's audit trail, unreviewed. So this module
-**fails closed** — if anything unexpected is staged, it refuses to push and
-reports the delta as Level-1 drift for the drift flow to handle.
+SCM has a SHARED candidate: a folder-scoped push would otherwise commit EVERY
+editor's staged changes — an out-of-band GUI edit would go live under our audit
+trail, unreviewed. We fail safe by **admin-scoped partial push**: the push
+request's `admin` field scopes the commit to just our service account's staged
+changes, so foreign pending edits are never swept in (safe by construction).
+
+This replaced an earlier "detect-drift" guard that read the candidate's editor
+list to refuse on out-of-band edits. That signal was WRONG: SCM's
+`config-versions/candidate` returns committed version HISTORY (every past
+committer, back months), not current pending drift — so it refused forever once
+any human had ever committed in the folder. Scoping the commit is both correct
+and simpler: we don't detect drift, we just never commit anyone else's work.
 
 Ordering of guarantees:
-  1. read who edited the pending candidate config
-  2. refuse to push if anyone outside our automation touched it   ← fail closed
-  3. push (target = folder)
-  4. poll the push job to completion, bounded
-  5. return a result suitable for the evidence bundle
+  1. push, scoped to our service account (target = folder)   ← safe by construction
+  2. poll the push job to completion, bounded
+  3. return a result suitable for the evidence bundle
+
+`all_admins=True` is the break-glass: push the WHOLE candidate (baseline
+absorption / an approved manual run), never the default pipeline path.
 
 SCM calls sit behind the `PushClient` protocol so the logic is unit-testable;
 the real client (SCM REST API) is thin glue on top.
@@ -61,24 +69,6 @@ class PushError(Exception):
     """Base class for push failures."""
 
 
-class UnexpectedStagedChanges(PushError):
-    """Refused to push: the folder holds staged changes we did not make.
-
-    This is the fail-closed guard. The extra delta is out-of-band (Level-1)
-    drift — it must go through the drift flow, not be silently committed under
-    this change's audit trail.
-    """
-
-    def __init__(self, folder: str, unexpected: Sequence[str]):
-        self.folder = folder
-        self.unexpected = tuple(unexpected)
-        super().__init__(
-            f"refusing to push folder {folder!r}: candidate was edited by "
-            f"{len(self.unexpected)} identity(ies) outside our automation: "
-            f"{', '.join(self.unexpected)}. Resolve as drift before pushing."
-        )
-
-
 class PushTimeout(PushError):
     """The push job did not reach a terminal state within the poll budget."""
 
@@ -90,8 +80,7 @@ class PushFailed(PushError):
 class PushClient(Protocol):
     """SCM operations this step drives (real impl = SCM REST API)."""
 
-    def staged_editors(self, folder: str) -> Iterable[str]: ...
-    def push(self, folder: str) -> str: ...
+    def push(self, folder: str, *, admins: Optional[Sequence[str]]) -> Optional[str]: ...
     def job_status(self, job_id: str) -> JobState: ...
 
 
@@ -102,14 +91,14 @@ class PushResult:
     folder: str
     status: str  # "success" | "noop"
     job_id: Optional[str]
-    editors: Tuple[str, ...]  # who touched the pushed candidate (audit)
+    admins: Tuple[str, ...]  # identities the commit was scoped to (audit); () = unscoped
 
     def to_evidence(self) -> Dict[str, object]:
         return {
             "folder": self.folder,
             "status": self.status,
             "job_id": self.job_id,
-            "editors": list(self.editors),
+            "admins": list(self.admins),
         }
 
 
@@ -117,35 +106,29 @@ def push_folder(
     client: PushClient,
     folder: str,
     *,
-    allowed_editors: Iterable[str],
+    admins: Sequence[str],
     poll: PollConfig = PollConfig(),
     sleep: Callable[[float], None] = time.sleep,
-    allow_unexpected: bool = False,
+    all_admins: bool = False,
 ) -> PushResult:
-    """Push a folder's staged config, failing closed on out-of-band edits.
+    """Push a folder's staged config, scoped to our service account.
 
-    The SCM candidate is a config *version*, not a list of object names (pilot
-    finding), so the fail-closed signal is WHO touched it: `allowed_editors` is
-    the set of identities our automation is permitted to commit for (typically
-    just our service account). If the candidate was edited by anyone else — an
-    out-of-band GUI change — we refuse to push, because a folder-scoped push
-    would commit their unreviewed work under our audit trail. That delta is
-    Level-1 drift and belongs in the drift flow.
+    `admins` is the set of identities whose staged changes to commit — normally
+    just our service account. Scoping the commit means a shared-candidate folder
+    with out-of-band edits is safe: we only ever commit our own staged work, so
+    there is no drift to detect and no false refusal (see module docstring).
 
-    `allow_unexpected=True` is an explicit break-glass override — only ever set
-    by a human-approved run, never the default pipeline path.
+    `all_admins=True` is the break-glass: commit the WHOLE candidate regardless
+    of who staged it (baseline absorption / an approved manual run). It maps to
+    an unscoped push (no `admin` field).
     """
-    editors = set(client.staged_editors(folder))
+    scope: Optional[Sequence[str]] = None if all_admins else list(admins)
 
-    if not editors:
-        # Nothing staged (apply was a no-op, or SCM already committed).
-        return PushResult(folder=folder, status="noop", job_id=None, editors=())
+    job_id = client.push(folder, admins=scope)
+    if job_id is None:
+        # Nothing staged for this scope — a steady-state no-op, not a failure.
+        return PushResult(folder=folder, status="noop", job_id=None, admins=tuple(scope or ()))
 
-    unexpected = editors - set(allowed_editors)
-    if unexpected and not allow_unexpected:
-        raise UnexpectedStagedChanges(folder, sorted(unexpected))
-
-    job_id = client.push(folder)
     state = bounded_poll(
         lambda: (lambda s: s if s.status in TERMINAL else None)(client.job_status(job_id)),
         poll,
@@ -160,5 +143,5 @@ def push_folder(
         raise PushFailed(f"push job {job_id!r} for folder {folder!r} failed: {state.message}")
 
     return PushResult(
-        folder=folder, status="success", job_id=job_id, editors=tuple(sorted(editors))
+        folder=folder, status="success", job_id=job_id, admins=tuple(scope or ())
     )

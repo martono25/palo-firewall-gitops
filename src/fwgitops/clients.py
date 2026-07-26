@@ -43,6 +43,18 @@ def _first_present(payload: Dict[str, Any], *keys: str, default: Any = None) -> 
     return default
 
 
+#: Phrases SCM uses when a scoped push has no pending changes to commit. Treated
+#: as a no-op (not a failure) so a steady-state pipeline run on an unchanged
+#: folder is green. VERIFY (live, VM up): confirm SCM's exact no-changes signal
+#: (status + message) and tighten this to match rather than a broad phrase match.
+_NOTHING_TO_PUSH = ("no changes", "nothing to push", "no candidate", "no pending", "up to date")
+
+
+def _is_nothing_to_push(err: "ScmApiError") -> bool:
+    text = str(err).lower()
+    return any(p in text for p in _NOTHING_TO_PUSH)
+
+
 class ScmPushClient:
     """PushClient over the SCM REST API (T13).
 
@@ -76,47 +88,34 @@ class ScmPushClient:
         self.JOB_PATH = job_path or self.JOB_PATH
         self.PUSH_FOLDER_KEY = push_folder_key or self.PUSH_FOLDER_KEY
 
-    def staged_editors(self, folder: str) -> List[str]:
-        """Identities that edited the pending candidate config for `folder`.
+    def push(
+        self, folder: str, *, admins: Optional[List[str]] = None, description: str = "fwgitops"
+    ) -> Optional[str]:
+        """Start a folder-scoped push. Returns the job id, or None if nothing to push.
 
-        This is the fail-closed guard's real signal (pilot finding): the SCM
-        candidate endpoint returns a config VERSION record with `edited_by` /
-        `admin`, NOT a list of object names. So the guard asks "was this candidate
-        touched by anyone outside our automation?" rather than diffing object ids.
+        ADMIN-SCOPED PARTIAL PUSH is how we fail safe. SCM has a SHARED candidate:
+        a push commits EVERY editor's pending changes in the folder, not just ours
+        (confirmed live — a single version bundled our service account + a human).
+        The push request's `admin` field (OpenAPI `PushCandidateConfigVersions_request`:
+        "List the administrators and/or service accounts in this field") scopes the
+        commit to just those identities' staged changes. So we pass our service
+        account and NEVER sweep in out-of-band edits — safe by construction, not by
+        detecting drift after the fact (the old `staged_editors` guard read committed
+        version HISTORY, which can never signal current pending drift).
+
+        `admins=None` means unscoped — commit the WHOLE candidate (break-glass /
+        baseline absorption). Body key for folders is `folders` (plural) — the LIVE
+        API outranks the SDK (which says `folder`); `PUSH_FOLDER_KEY` is injectable.
         """
-        payload = self.session.request("GET", self.PENDING_PATH, params={"folder": folder})
-        items = payload if isinstance(payload, list) else _first_present(payload, "data", default=[])
-        editors: List[str] = []
-        for item in items or []:
-            if not isinstance(item, dict):
-                continue
-            for key in ("edited_by", "admin"):
-                val = item.get(key)
-                if isinstance(val, str) and val:
-                    editors.append(val)
-                elif isinstance(val, list):
-                    editors.extend(str(v) for v in val if v)
-        return sorted(set(editors))
-
-    def push(self, folder: str, *, description: str = "fwgitops") -> str:
-        """Start a folder-scoped push. Returns the job id.
-
-        Body key is `folders` (plural, array value) — determined from the LIVE
-        API, which outranks the SDK here. Evidence (2026-07-19, live tenant):
-          * `{"folder":  [...]}` -> API_I00035 schema error, "folder is not allowed"
-          * `{"folders": [...]}` -> API_I00013 (passes schema; deeper push-config
-            validation) — so the schema validator accepts `folders`.
-        The scm-go SDK struct uses `folder` (singular); it has drifted from the
-        deployed API. The key is `PUSH_FOLDER_KEY` (injectable) so a future API
-        version flip needs no code change.
-
-        NOTE on `push-to`: with `folders` the request reaches the push-config
-        builder, which needs a valid target. A folder with NO firewall bound has
-        nothing to push to, so full push success requires a device attached
-        (the pilot). Path + verb + body-key are confirmed here.
-        """
-        body = {self.PUSH_FOLDER_KEY: [folder], "description": description}
-        payload = self.session.request("POST", self.PUSH_PATH, body=body)
+        body: Dict[str, Any] = {self.PUSH_FOLDER_KEY: [folder], "description": description}
+        if admins:
+            body["admin"] = list(admins)
+        try:
+            payload = self.session.request("POST", self.PUSH_PATH, body=body)
+        except ScmApiError as e:
+            if _is_nothing_to_push(e):
+                return None
+            raise
         job_id = _first_present(payload, "job_id", "jobId", "id")
         if not job_id:
             raise ScmApiError(200, f"push response contained no job id: {payload}")
