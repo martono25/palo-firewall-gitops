@@ -1,0 +1,22 @@
+# Second Phase-1 intent — steady-state proof: flows through the guarded push
+# with NO override (clean baseline now that onboarding is absorbed).
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0726
+  requester: martono@corp
+  ticket: JIRA-20726
+  justification: "CI runners pull build artifacts from the internal package registry"
+  requested: 2026-07-26
+  expires: 2026-10-26
+spec:
+  environment: prod            # → prod-edge, zones local→internet
+  action: allow
+  source:
+    - cidr: 10.20.2.0/24
+  destination:
+    - cidr: 10.20.30.5/32
+  service:
+    - protocol: tcp
+      port: 443
+  log: true
