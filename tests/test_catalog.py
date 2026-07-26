@@ -55,3 +55,41 @@ def test_all_problems_reported_together():
 def test_non_mapping_catalog_rejected():
     with pytest.raises(CatalogError, match="must be a mapping"):
         ServiceCatalog.from_dict(["not", "a", "map"])
+
+
+# ── App catalog ────────────────────────────────────────────────────────────
+from fwgitops.catalog import AppCatalog, AppDef  # noqa: E402
+
+
+def app(spec):
+    return AppCatalog.from_dict({"apps": {"web": spec}})
+
+
+def test_app_resolves_addresses_and_zone():
+    c = app({"environment": "prod", "folder": "prod-edge", "zone": "local",
+             "addresses": ["10.20.1.0/24"], "fqdns": ["a.internal"]})
+    a = c.resolve("web")
+    assert a == AppDef("prod", "prod-edge", "local", ("10.20.1.0/24",), ("a.internal",))
+
+
+def test_app_addresses_optional_if_fqdns_present():
+    c = app({"environment": "prod", "folder": "f", "zone": "local", "fqdns": ["a.internal"]})
+    assert c.resolve("web").addresses == ()
+
+
+def test_unknown_app_raises():
+    c = app({"environment": "prod", "folder": "f", "zone": "local", "addresses": ["10.0.0.0/8"]})
+    with pytest.raises(CatalogError, match="unknown app"):
+        c.resolve("nope")
+
+
+@pytest.mark.parametrize("bad", [
+    {"folder": "f", "zone": "z", "addresses": ["10.0.0.0/8"]},              # missing environment
+    {"environment": "p", "folder": "f", "zone": "z"},                        # no address or fqdn
+    {"environment": "p", "folder": "f", "zone": "z", "addresses": ["nope"]}, # bad CIDR
+    {"environment": "p", "folder": "f", "zone": "z", "addresses": ["10.20.1.5/24"]},  # host bits
+    {"environment": "p", "folder": "f", "zone": "z", "addresses": "not-a-list"},      # wrong shape
+])
+def test_malformed_app_fails_closed(bad):
+    with pytest.raises(CatalogError):
+        app(bad)

@@ -86,6 +86,18 @@ def _service_for(svc: Service, folder: str) -> ServiceObject:
     )
 
 
+def _zones_for(endpoints, default_zone: str) -> List[str]:
+    """Zones for a rule side: each endpoint's zone (from its app) or the env
+    default (explicit endpoints). Order-preserving dedup — PAN-OS allows a rule
+    to list several from/to zones."""
+    zones: List[str] = []
+    for ep in endpoints:
+        z = ep.zone or default_zone
+        if z not in zones:
+            zones.append(z)
+    return zones
+
+
 def compile_request(
     ar: AccessRequest,
     env_map: EnvMap,
@@ -110,8 +122,11 @@ def compile_request(
     rule = SecurityRule(
         name=ar.metadata.id,
         folder=res.folder,
-        from_zones=[res.from_zone],
-        to_zones=[res.to_zone],
+        # Zones follow the traffic's endpoints: an app-resolved endpoint carries
+        # its own zone; an explicit cidr/fqdn uses the environment default. This
+        # is what makes multi-zone rules possible (Phase 2).
+        from_zones=_zones_for(ar.spec.source, res.from_zone),
+        to_zones=_zones_for(ar.spec.destination, res.to_zone),
         sources=_names_in_order(src_objs),
         destinations=_names_in_order(dst_objs),
         services=_names_in_order(svc_objs),

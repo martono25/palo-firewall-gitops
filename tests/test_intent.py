@@ -132,13 +132,47 @@ def test_endpoint_needs_exactly_one_key():
     assert "spec.source[0]" in problems(doc)
 
 
-def test_app_endpoint_deferred_to_phase2_with_guidance():
+def _app_catalog():
+    from fwgitops.catalog import AppCatalog
+    return AppCatalog.from_dict({"apps": {
+        "web-tier": {"environment": "prod", "folder": "prod-edge", "zone": "local",
+                     "addresses": ["10.20.1.0/24"]},
+        "payments": {"environment": "prod", "folder": "prod-edge", "zone": "app",
+                     "addresses": ["10.20.9.10/32"], "fqdns": ["pay.internal"]},
+        "staging-x": {"environment": "staging", "folder": "stg", "zone": "local",
+                      "addresses": ["10.99.0.0/24"]},
+    }})
+
+
+def test_app_endpoint_expands_with_zone():
+    doc = valid_doc()
+    doc["spec"]["source"] = [{"app": "payments"}]  # 1 cidr + 1 fqdn, zone "app"
+    ar = load_intent(doc, app_catalog=_app_catalog())
+    kinds = {(e.kind, e.value, e.zone) for e in ar.spec.source}
+    assert kinds == {("cidr", "10.20.9.10/32", "app"), ("fqdn", "pay.internal", "app")}
+
+
+def test_app_endpoint_without_catalog_is_rejected():
     doc = valid_doc()
     doc["spec"]["source"] = [{"app": "web-tier"}]
     with pytest.raises(IntentError) as ei:
-        load_intent(doc)
+        load_intent(doc)  # no catalog
     prob = next(p for p in ei.value.problems if p.path == "spec.source[0].app")
-    assert "Phase 2" in prob.message and "cidr" in prob.message
+    assert "no app catalog" in prob.message and "cidr" in prob.message
+
+
+def test_unknown_app_is_rejected():
+    doc = valid_doc()
+    doc["spec"]["source"] = [{"app": "ghost"}]
+    with pytest.raises(IntentError, match="unknown app"):
+        load_intent(doc, app_catalog=_app_catalog())
+
+
+def test_app_environment_mismatch_is_rejected():
+    doc = valid_doc()  # environment: prod
+    doc["spec"]["source"] = [{"app": "staging-x"}]  # app is in 'staging'
+    with pytest.raises(IntentError, match="environment"):
+        load_intent(doc, app_catalog=_app_catalog())
 
 
 def test_cidr_host_bits_hint():

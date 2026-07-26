@@ -1,0 +1,41 @@
+# App catalog (Phase 2) — friendly app names → addresses/fqdns + zone.
+#
+# Platform-maintained (changes are reviewed PRs). Intents may then say
+# `source: - app: web-tier` instead of an explicit `cidr:`/`fqdn:`.
+#
+# Each app is ENVIRONMENT-SPECIFIC and carries a ZONE. The zone is what makes
+# multi-zone rules possible: a rule's from-zones come from its source apps and
+# its to-zones from its destination apps (an explicit cidr/fqdn falls back to the
+# environment's default zone from catalog/environments.yaml). The zone must exist
+# in the app's folder on the firewall — this lab's prod-edge folder has `local`
+# and `internet`. Addresses are network CIDRs (strict); add fqdns for named hosts.
+apps:
+  web-tier:
+    environment: prod
+    folder: prod-edge
+    zone: local
+    addresses:
+      - 10.20.1.0/24
+
+  app-tier:
+    environment: prod
+    folder: prod-edge
+    zone: local
+    addresses:
+      - 10.20.2.0/24
+
+  observability:
+    environment: prod
+    folder: prod-edge
+    zone: local
+    addresses:
+      - 10.20.20.0/24
+
+  payments-gateway:
+    environment: prod
+    folder: prod-edge
+    zone: internet          # egress to a partner over the untrusted side
+    addresses:
+      - 203.0.113.0/24
+    fqdns:
+      - pay.partner.example
