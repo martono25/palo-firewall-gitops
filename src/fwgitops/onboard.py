@@ -16,9 +16,15 @@ and the mirror teardown step:
 devices in the folder — so a stale registration breaks later pushes. Teardown
 must call deregister explicitly.
 
-Privilege note: onboarding RULES and device general-settings are denied to the
-policy SA, but `/folders` (read) and `/devices/{serial}` (PUT/DELETE) are not
-(verified live). So this whole flow runs as the policy SA — no elevated identity.
+Privilege note (verified live 2026-07-26): the policy SA reads `/folders` and does
+`PUT /devices/{serial}` (display_name) — so verify + name run as the policy SA.
+
+CAVEAT — deregister is NOT an SCM operation. SCM does not delete devices; it only
+UNASSIGNS them (moves a device to "Available Devices", clearing the folder).
+`DELETE /devices/{serial}` returns 403 because it is UNSUPPORTED, not merely
+permission-gated. Full device deletion is a CSP (Customer Support Portal)
+operation, a different API. So `deregister_device` below is WRONG and needs
+rework — see its docstring.
 
 Serial capture (`ssh admin@<mgmt_ip> 'show system info'` -> the `serial:` field)
 is a provisioning-host concern; the serial is an INPUT here. SCM calls sit behind
@@ -103,9 +109,15 @@ def onboard_device(
 
 
 def deregister_device(client: DeviceClient, serial: str) -> None:
-    """Remove a device's SCM registration (teardown; mirror of onboarding).
+    """REWORK NEEDED — SCM does not delete devices (see module CAVEAT).
 
-    Call this when decommissioning — `terraform destroy` does NOT deregister, and
-    a leftover registration in a folder breaks that folder's future pushes.
+    This calls `DELETE /devices/{serial}`, which SCM rejects (403, unsupported).
+    Correct teardown is two separate operations:
+      (a) UNASSIGN in SCM — move the device to "Available Devices" (clear its
+          folder) so a stale registration stops breaking the folder's pushes
+          (find the SCM API for this — likely a device PUT that clears `folder`);
+      (b) DELETE via the CSP (Customer Support Portal) API for full deregistration.
+    Kept as a placeholder (and to document the dead end) until those are wired;
+    `terraform destroy` does NOT do either.
     """
     client.deregister(serial)
