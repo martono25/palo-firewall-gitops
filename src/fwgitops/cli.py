@@ -124,23 +124,24 @@ def _display_path(path: Path) -> str:
 def run_push(
     folder: str,
     *,
-    allowed_editors: Optional[List[str]] = None,
-    allow_unexpected: bool = False,
+    admins: Optional[List[str]] = None,
+    all_admins: bool = False,
     session=None,
     out=None,
     err=None,
 ) -> int:
     """Push a folder's staged config to SCM (T13). Returns a process exit code.
 
-    Exit codes:  0 ok/noop · 1 config/auth · 2 refused (fail-closed) · 3 push failed.
-    Credentials come from SCM_* env; the scm session does its own OAuth. The
-    fail-closed guard defaults to allowing only the service-account identity
-    (the session's client_id) to have edited the candidate. `session` is
-    injectable for testing.
+    Exit codes:  0 ok/noop · 1 config/auth · 3 push failed.
+    Credentials come from SCM_* env; the scm session does its own OAuth. The push
+    is ADMIN-SCOPED — it commits only `admins`' staged changes (default: the
+    service-account identity), so a shared-candidate folder with out-of-band edits
+    is safe by construction. `--all-admins` is the break-glass (whole candidate).
+    `session` is injectable for testing.
     """
     # Imported lazily so `fwgitops compile` never needs the SCM stack.
     from fwgitops.clients import ScmPushClient
-    from fwgitops.push import PushError, UnexpectedStagedChanges, push_folder
+    from fwgitops.push import PushError, push_folder
     from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
 
     out = out if out is not None else sys.stdout
@@ -152,13 +153,10 @@ def run_push(
             print(f"error: {e}", file=err)
             return 1
 
-    allowed = allowed_editors or [session.credentials.client_id]
+    scope = admins or [session.credentials.client_id]
     client = ScmPushClient(session)
     try:
-        result = push_folder(client, folder, allowed_editors=allowed, allow_unexpected=allow_unexpected)
-    except UnexpectedStagedChanges as e:
-        print(f"REFUSED: {e}", file=err)
-        return 2
+        result = push_folder(client, folder, admins=scope, all_admins=all_admins)
     except (PushError, ScmApiError) as e:
         print(f"PUSH FAILED: {e}", file=err)
         return 3
@@ -184,11 +182,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
     p.add_argument("folder", help="SCM folder to push")
-    p.add_argument("--allowed-editor", action="append", dest="allowed_editors",
-                   help="identity allowed to have edited the candidate (repeatable); "
-                        "default: SCM_CLIENT_ID")
-    p.add_argument("--allow-unexpected", action="store_true",
-                   help="BREAK-GLASS: push even if the candidate was edited by others")
+    p.add_argument("--admin", action="append", dest="admins",
+                   help="identity whose staged changes to commit (repeatable); "
+                        "default: SCM_CLIENT_ID. Scopes the commit so out-of-band "
+                        "edits are never swept in.")
+    p.add_argument("--all-admins", action="store_true",
+                   help="BREAK-GLASS: push the WHOLE candidate (every editor's staged "
+                        "changes), e.g. to absorb the device-onboarding baseline")
     return parser
 
 
@@ -202,8 +202,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "push":
         return run_push(
             args.folder,
-            allowed_editors=args.allowed_editors,
-            allow_unexpected=args.allow_unexpected,
+            admins=args.admins,
+            all_admins=args.all_admins,
         )
     parser.error(f"unknown command {args.command!r}")  # pragma: no cover
     return 1

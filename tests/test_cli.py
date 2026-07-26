@@ -126,46 +126,44 @@ SA = "GitOps@1198884949.iam.panserviceaccount.com"
 CREDS = ScmCredentials(client_id=SA, client_secret="s3cret", scope="tsg_id:1198884949")
 
 
-def _scm_transport(editors):
+def _scm_transport(nothing_to_push=False, sink=None):
     def t(method, url, headers, body):
         if "oauth2" in url:
-            payload = {"access_token": "tok", "expires_in": 3600}
-        elif "candidate:push" in url:                      # POST push — check first
-            payload = {"job_id": "job-9"}
-        elif "config-versions/candidate" in url:            # GET candidate editors
-            payload = {"data": [{"edited_by": e} for e in editors]}
-        elif "/jobs/" in url:                               # GET job status
-            payload = {"data": [{"status_str": "FIN", "result_str": "OK"}]}
-        else:
-            return 404, b"{}"
-        return 200, json.dumps(payload).encode()
+            return 200, json.dumps({"access_token": "tok", "expires_in": 3600}).encode()
+        if "candidate:push" in url:                         # POST push
+            if sink is not None:
+                sink.append(json.loads(body))
+            if nothing_to_push:
+                return 400, json.dumps({"message": "no changes to push"}).encode()
+            return 200, json.dumps({"job_id": "job-9"}).encode()
+        if "/jobs/" in url:                                 # GET job status
+            return 200, json.dumps({"data": [{"status_str": "FIN", "result_str": "OK"}]}).encode()
+        return 404, b"{}"
     return t
 
 
-def _session(editors):
-    return ScmSession(CREDS, transport=_scm_transport(editors))
+def _session(**kw):
+    return ScmSession(CREDS, transport=_scm_transport(**kw))
 
 
-def test_cli_push_success(capsys):
-    rc = run_push("GitOps", session=_session([SA]))
+def test_cli_push_success_scoped_to_service_account(capsys):
+    sink = []
+    rc = run_push("GitOps", session=ScmSession(CREDS, transport=_scm_transport(sink=sink)))
     assert rc == 0
     assert "OK — success" in capsys.readouterr().out
+    assert sink[-1]["admin"] == [SA]          # default: commit only our SA's changes
 
 
-def test_cli_push_refused_on_outside_editor(capsys):
-    rc = run_push("GitOps", session=_session([SA, "human@corp"]))
-    assert rc == 2
-    err = capsys.readouterr().err
-    assert "REFUSED" in err and "human@corp" in err
-
-
-def test_cli_push_break_glass_overrides(capsys):
-    rc = run_push("GitOps", session=_session([SA, "human@corp"]), allow_unexpected=True)
+def test_cli_push_all_admins_is_unscoped(capsys):
+    sink = []
+    rc = run_push("GitOps", all_admins=True,
+                  session=ScmSession(CREDS, transport=_scm_transport(sink=sink)))
     assert rc == 0
+    assert "admin" not in sink[-1]            # break-glass: whole candidate
 
 
 def test_cli_push_noop_when_nothing_staged(capsys):
-    rc = run_push("GitOps", session=_session([]))
+    rc = run_push("GitOps", session=_session(nothing_to_push=True))
     assert rc == 0
     assert "noop" in capsys.readouterr().out
 

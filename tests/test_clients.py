@@ -44,19 +44,6 @@ def session_for(*payloads, statuses=None):
 
 
 # ── ScmPushClient ─────────────────────────────────────────────────────────
-def test_staged_editors_from_candidate_version():
-    # The candidate endpoint returns a config VERSION record (edited_by / admin),
-    # not object names — the guard keys on WHO touched it (pilot finding).
-    payload = {"data": [{"edited_by": "human@corp", "admin": "svc-acct@iam"}]}
-    assert sorted(ScmPushClient(session_for(payload)).staged_editors("GitOps")) == \
-        ["human@corp", "svc-acct@iam"]
-
-
-def test_staged_editors_bare_array_and_empty():
-    assert ScmPushClient(session_for([{"edited_by": "a@corp"}])).staged_editors("GitOps") == ["a@corp"]
-    assert ScmPushClient(session_for({})).staged_editors("GitOps") == []
-
-
 @pytest.mark.parametrize("payload", [{"job_id": "j1"}, {"jobId": "j1"}, {"id": "j1"}])
 def test_push_returns_job_id(payload):
     assert ScmPushClient(session_for(payload)).push("GitOps") == "j1"
@@ -65,6 +52,42 @@ def test_push_returns_job_id(payload):
 def test_push_without_job_id_raises():
     with pytest.raises(ScmApiError):
         ScmPushClient(session_for({"nothing": True})).push("GitOps")
+
+
+def test_push_admin_scope_in_body():
+    # Admin-scoped partial push: `admin` lists the identities whose staged
+    # changes to commit, so out-of-band edits are never swept in.
+    bodies = []
+
+    def transport(method, url, headers, body):
+        bodies.append(body)
+        payload = {"access_token": "t"} if "oauth2" in url else {"job_id": "j1"}
+        return 200, json.dumps(payload).encode()
+
+    ScmPushClient(ScmSession(GOOD, transport=transport)).push(
+        "prod-edge", admins=["GitOps@1198884949.iam.panserviceaccount.com"]
+    )
+    sent = json.loads(bodies[-1])
+    assert sent["admin"] == ["GitOps@1198884949.iam.panserviceaccount.com"]
+
+
+def test_push_without_admins_omits_scope():
+    # Unscoped push (break-glass) sends no `admin` field -> whole candidate.
+    bodies = []
+
+    def transport(method, url, headers, body):
+        bodies.append(body)
+        payload = {"access_token": "t"} if "oauth2" in url else {"job_id": "j1"}
+        return 200, json.dumps(payload).encode()
+
+    ScmPushClient(ScmSession(GOOD, transport=transport)).push("prod-edge", admins=None)
+    assert "admin" not in json.loads(bodies[-1])
+
+
+def test_push_nothing_to_push_returns_none():
+    # SCM reports no pending changes for the scope -> a no-op, not a failure.
+    s = session_for({"message": "no changes to push"}, statuses={0: 400})
+    assert ScmPushClient(s).push("GitOps", admins=["svc@iam"]) is None
 
 
 # SCM uses the PAN-OS two-field model (confirmed live): status_str says whether
@@ -93,11 +116,6 @@ def test_job_record_unwrapped_from_data_envelope():
     # SCM list responses use {data, limit, offset, total}.
     payload = {"data": [{"status_str": "FIN", "result_str": "OK"}], "total": 1}
     assert ScmPushClient(session_for(payload)).job_status("j1").status is PushStatus.SUCCESS
-
-
-def test_staged_editors_dedups_and_sorts():
-    payload = {"data": [{"edited_by": "b@corp"}, {"edited_by": "a@corp", "admin": "b@corp"}]}
-    assert ScmPushClient(session_for(payload)).staged_editors("GitOps") == ["a@corp", "b@corp"]
 
 
 # ── ScmProvisionClient ────────────────────────────────────────────────────
