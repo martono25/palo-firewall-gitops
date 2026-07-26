@@ -40,6 +40,12 @@ jobs:
       - name: Validate intent (fail-closed)
         run: fwgitops compile intent --check
 
+      # 1b. Risk classification (Phase 2) — PR preview of each change's tier.
+      #     Informational for now; the tier gate (LOW auto / HIGH review /
+      #     CRITICAL dual-control) is wired on the apply side as it matures.
+      - name: Risk-classify (preview)
+        run: fwgitops classify intent
+
       # 2. The committed rules.auto.tfvars.json must match a fresh compile, so
       #    the artifact reviewed in the PR is exactly what apply will use.
       - name: Check generated tfvars is up to date

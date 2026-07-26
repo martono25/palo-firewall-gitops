@@ -118,6 +118,25 @@ def test_missing_env_map_exits_1(tmp_path, capsys):
     assert "env map not found" in capsys.readouterr().err
 
 
+# ── fwgitops classify (Phase 2) ────────────────────────────────────────────
+from fwgitops.cli import run_classify  # noqa: E402
+
+
+def test_classify_reports_tier(tmp_path, capsys):
+    intent_root, env_map, _ = _setup(tmp_path)
+    rc = run_classify(intent_root, env_map)
+    assert rc == 0
+    o = capsys.readouterr().out
+    assert "REQ-2026-0417" in o and "LOW" in o and "classified 1" in o
+
+
+def test_classify_rejects_invalid_intent_exits_2(tmp_path, capsys):
+    bad = VALID_INTENT.replace("action: allow", "action: permit")
+    intent_root, env_map, _ = _setup(tmp_path, intent_body=bad)
+    rc = run_classify(intent_root, env_map)
+    assert rc == 2
+
+
 # ── fwgitops push (T13) ────────────────────────────────────────────────────
 from fwgitops.cli import run_push  # noqa: E402
 from fwgitops.scmapi import ScmCredentials, ScmSession  # noqa: E402

@@ -122,6 +122,70 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
+def run_classify(intent_root: Path, env_map_path: Path, *, out=None, err=None) -> int:
+    """Risk-classify every intent (Phase 2). Returns a process exit code.
+
+    Compiles each intent (same fail-closed path as `compile`) then runs the
+    policy-as-code classifier, reporting the risk tier + fired checks per change.
+    Exit codes:  0 ok · 1 usage/IO error · 2 invalid intent.
+    """
+    from fwgitops.classify import classify
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    if not env_map_path.is_file():
+        print(f"error: env map not found: {env_map_path}", file=err)
+        return 1
+    try:
+        env_map = EnvMap.from_dict(read_yaml(env_map_path))
+    except ResolveError as e:
+        print(f"error: invalid env map {env_map_path}: {e}", file=err)
+        return 1
+    if not intent_root.exists():
+        print(f"error: intent root not found: {intent_root}", file=err)
+        return 1
+
+    intents = discover_intents(intent_root)
+    if not intents:
+        print(f"no intent files found under {intent_root}", file=out)
+        return 0
+
+    changes: List[CompiledChange] = []
+    problems: List[str] = []
+    for path in intents:
+        rel = _display_path(path)
+        try:
+            doc = read_yaml(path)
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"{rel}: could not parse YAML: {e}")
+            continue
+        try:
+            changes.append(compile_request(load_intent(doc), env_map))
+        except IntentError as e:
+            problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
+        except ResolveError as e:
+            problems.append(f"{rel}: {e}")
+
+    if problems:
+        print(f"REJECTED — {len(problems)} of {len(intents)} intent file(s) invalid:", file=err)
+        for p in problems:
+            print(f"  - {p}", file=err)
+        return 2
+
+    tiers = {"LOW": 0, "HIGH": 0, "CRITICAL": 0}
+    for ch in sorted(changes, key=lambda c: c.rule.name):
+        v = classify(ch)
+        tiers[v.tier] = tiers.get(v.tier, 0) + 1
+        checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
+        print(f"  {ch.rule.name:16} {v.tier:9} {checks}", file=out)
+    print(
+        f"classified {len(changes)}: "
+        f"{tiers['LOW']} LOW · {tiers['HIGH']} HIGH · {tiers['CRITICAL']} CRITICAL",
+        file=out,
+    )
+    return 0
+
+
 def run_push(
     folder: str,
     *,
@@ -278,6 +342,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--check", action="store_true",
                    help="validate and report without writing files")
 
+    cl = sub.add_parser("classify", help="risk-classify intents (Phase 2, policy-as-code)")
+    cl.add_argument("intent_root", nargs="?", default="intent", type=Path,
+                    help="directory of intent YAML (default: intent)")
+    cl.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path,
+                    help="environment resolution map (default: catalog/environments.yaml)")
+
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
     p.add_argument("folder", help="SCM folder to push")
     p.add_argument("--admin", action="append", dest="admins",
@@ -312,6 +382,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_compile(
             args.intent_root, args.env_map, args.out, write=not args.check
         )
+    if args.command == "classify":
+        return run_classify(args.intent_root, args.env_map)
     if args.command == "push":
         return run_push(
             args.folder,
