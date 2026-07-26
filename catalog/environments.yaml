@@ -5,5 +5,5 @@
 # This file is platform-maintained config; changes to it are PRs.
 prod:
   folder: prod-edge
-  from_zone: trust
-  to_zone: app
+  from_zone: local      # SCM/NGFW default zone (exists on the device)
+  to_zone: internet     # SCM/NGFW default zone (exists on the device)
