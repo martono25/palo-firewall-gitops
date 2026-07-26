@@ -14,7 +14,13 @@ name: apply
 # commit. Restore the push trigger below (and drop workflow_dispatch) once the
 # stubbed steps are implemented.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      max_auto_tier:
+        description: "Highest risk tier allowed to apply without escalation (fail-closed gate)"
+        type: choice
+        options: [LOW, HIGH, CRITICAL]
+        default: LOW
   # push:
   #   branches: [main]
   #   paths:
@@ -60,6 +66,13 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e .
+
+      # Fail-closed RISK GATE (Phase 2): block the apply if any change exceeds the
+      # dispatched max-auto tier. LOW auto-applies; HIGH/CRITICAL require an
+      # explicit, logged re-dispatch with a higher tier (the human override). This
+      # is the tier gate that does NOT need required-reviewers (plan-limited).
+      - name: Risk gate (fail-closed)
+        run: fwgitops classify intent --gate "${{ inputs.max_auto_tier }}"
 
       - uses: hashicorp/setup-terraform@v4
 

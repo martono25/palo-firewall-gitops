@@ -32,8 +32,11 @@ from fwgitops.evidence import RiskVerdict
 
 CLASSIFIER_VERSION = "1.0"
 
+#: Tiers in ascending severity — the public ordering for gates/comparisons.
+TIERS = ("LOW", "HIGH", "CRITICAL")
+
 #: Tier ordering for "take the most severe fired check".
-_ORDER = {"LOW": 0, "HIGH": 1, "CRITICAL": 2}
+_ORDER = {t: i for i, t in enumerate(TIERS)}
 
 #: Zone names treated as the untrusted / internet side. Lowercased match.
 INTERNET_ZONES: FrozenSet[str] = frozenset(
