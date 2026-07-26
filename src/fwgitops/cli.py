@@ -166,6 +166,71 @@ def run_push(
     return 0
 
 
+def run_onboard(
+    serial: str,
+    *,
+    folder: str,
+    name: Optional[str] = None,
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Finalize device onboarding: verify placement, then set the display name.
+
+    Exit codes:  0 ok · 1 config/auth · 3 onboard failed. The serial is captured
+    upstream (ssh 'show system info'); this runs as the policy SA (folders read +
+    device PUT are permitted). `session` is injectable for testing.
+    """
+    from fwgitops.clients import ScmDeviceClient
+    from fwgitops.onboard import OnboardError, onboard_device
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    if session is None:
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except ScmConfigError as e:
+            print(f"error: {e}", file=err)
+            return 1
+    try:
+        result = onboard_device(ScmDeviceClient(session), serial, expected_folder=folder, display_name=name)
+    except (OnboardError, ScmApiError) as e:
+        print(f"ONBOARD FAILED: {e}", file=err)
+        return 3
+
+    named = f" as {result.display_name!r}" if result.display_name else ""
+    print(f"OK — {serial} in folder {result.folder!r}{named}", file=out)
+    print(json.dumps(result.to_evidence(), sort_keys=True), file=out)
+    return 0
+
+
+def run_deregister(serial: str, *, session=None, out=None, err=None) -> int:
+    """Remove a device's SCM registration (teardown; destroy does NOT do this).
+
+    Exit codes:  0 ok · 1 config/auth · 3 deregister failed.
+    """
+    from fwgitops.clients import ScmDeviceClient
+    from fwgitops.onboard import deregister_device
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    if session is None:
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except ScmConfigError as e:
+            print(f"error: {e}", file=err)
+            return 1
+    try:
+        deregister_device(ScmDeviceClient(session), serial)
+    except ScmApiError as e:
+        print(f"DEREGISTER FAILED: {e}", file=err)
+        return 3
+    print(f"OK — deregistered {serial}", file=out)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fwgitops", description="GitOps firewall compiler")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -189,6 +254,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--all-admins", action="store_true",
                    help="BREAK-GLASS: push the WHOLE candidate (every editor's staged "
                         "changes), e.g. to absorb the device-onboarding baseline")
+
+    o = sub.add_parser("onboard", help="finalize onboarding: verify placement + set display name")
+    o.add_argument("serial", help="device serial number (from ssh 'show system info')")
+    o.add_argument("--folder", required=True,
+                   help="SCM folder the device should have auto-placed into")
+    o.add_argument("--name", help="display name to set in SCM (e.g. fw-prod-edge-682)")
+
+    d = sub.add_parser("deregister", help="remove a device's SCM registration (teardown)")
+    d.add_argument("serial", help="device serial number")
     return parser
 
 
@@ -205,6 +279,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             admins=args.admins,
             all_admins=args.all_admins,
         )
+    if args.command == "onboard":
+        return run_onboard(args.serial, folder=args.folder, name=args.name)
+    if args.command == "deregister":
+        return run_deregister(args.serial)
     parser.error(f"unknown command {args.command!r}")  # pragma: no cover
     return 1
 
