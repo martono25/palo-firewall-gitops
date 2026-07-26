@@ -122,14 +122,20 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
-def run_classify(intent_root: Path, env_map_path: Path, *, out=None, err=None) -> int:
+def run_classify(
+    intent_root: Path, env_map_path: Path, *, gate: Optional[str] = None, out=None, err=None
+) -> int:
     """Risk-classify every intent (Phase 2). Returns a process exit code.
 
     Compiles each intent (same fail-closed path as `compile`) then runs the
     policy-as-code classifier, reporting the risk tier + fired checks per change.
-    Exit codes:  0 ok · 1 usage/IO error · 2 invalid intent.
+
+    `gate` is the max tier that may auto-apply. If any change exceeds it, the
+    command FAILS (exit 3) — the fail-closed tier gate the apply pipeline uses so
+    HIGH/CRITICAL changes need an explicit human override, not silent auto-apply.
+    Exit codes:  0 ok · 1 usage/IO error · 2 invalid intent · 3 gate exceeded.
     """
-    from fwgitops.classify import classify
+    from fwgitops.classify import TIERS, classify
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
@@ -173,16 +179,27 @@ def run_classify(intent_root: Path, env_map_path: Path, *, out=None, err=None) -
         return 2
 
     tiers = {"LOW": 0, "HIGH": 0, "CRITICAL": 0}
+    exceeded: List[str] = []
+    gate_rank = TIERS.index(gate) if gate else None
     for ch in sorted(changes, key=lambda c: c.rule.name):
         v = classify(ch)
         tiers[v.tier] = tiers.get(v.tier, 0) + 1
         checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
         print(f"  {ch.rule.name:16} {v.tier:9} {checks}", file=out)
+        if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
+            exceeded.append(f"{ch.rule.name}={v.tier}")
     print(
         f"classified {len(changes)}: "
         f"{tiers['LOW']} LOW · {tiers['HIGH']} HIGH · {tiers['CRITICAL']} CRITICAL",
         file=out,
     )
+    if exceeded:
+        print(
+            f"::error::GATE — {len(exceeded)} change(s) exceed max-auto-tier {gate}: "
+            f"{', '.join(exceeded)}. Re-dispatch with a higher override to apply these.",
+            file=err,
+        )
+        return 3
     return 0
 
 
@@ -347,6 +364,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="directory of intent YAML (default: intent)")
     cl.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path,
                     help="environment resolution map (default: catalog/environments.yaml)")
+    cl.add_argument("--gate", choices=("LOW", "HIGH", "CRITICAL"),
+                    help="fail (exit 3) if any change's tier exceeds this max-auto tier")
 
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
     p.add_argument("folder", help="SCM folder to push")
@@ -383,7 +402,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.intent_root, args.env_map, args.out, write=not args.check
         )
     if args.command == "classify":
-        return run_classify(args.intent_root, args.env_map)
+        return run_classify(args.intent_root, args.env_map, gate=args.gate)
     if args.command == "push":
         return run_push(
             args.folder,

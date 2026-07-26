@@ -137,6 +137,26 @@ def test_classify_rejects_invalid_intent_exits_2(tmp_path, capsys):
     assert rc == 2
 
 
+_BROAD = VALID_INTENT.replace("cidr: 10.20.1.0/24", "cidr: 10.0.0.0/8")  # broad_source -> HIGH
+
+
+def test_classify_gate_blocks_change_above_tier(tmp_path, capsys):
+    intent_root, env_map, _ = _setup(tmp_path, intent_body=_BROAD)
+    rc = run_classify(intent_root, env_map, gate="LOW")
+    assert rc == 3
+    assert "GATE" in capsys.readouterr().err
+
+
+def test_classify_gate_allows_low_change(tmp_path, capsys):
+    intent_root, env_map, _ = _setup(tmp_path)  # VALID_INTENT is LOW
+    assert run_classify(intent_root, env_map, gate="LOW") == 0
+
+
+def test_classify_gate_higher_override_allows_high(tmp_path, capsys):
+    intent_root, env_map, _ = _setup(tmp_path, intent_body=_BROAD)
+    assert run_classify(intent_root, env_map, gate="CRITICAL") == 0  # explicit override
+
+
 # ── fwgitops push (T13) ────────────────────────────────────────────────────
 from fwgitops.cli import run_push  # noqa: E402
 from fwgitops.scmapi import ScmCredentials, ScmSession  # noqa: E402
