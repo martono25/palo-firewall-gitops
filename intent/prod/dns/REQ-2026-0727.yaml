@@ -1,0 +1,22 @@
+# Third intent — live validation of the admin-scoped push guard fix (PR #4).
+# Must flow through apply.yml with the guard passing on its own (no override).
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0727
+  requester: martono@corp
+  ticket: JIRA-20727
+  justification: "App tier resolves names via the internal DNS resolver"
+  requested: 2026-07-26
+  expires: 2026-10-26
+spec:
+  environment: prod            # → prod-edge, zones local→internet
+  action: allow
+  source:
+    - cidr: 10.20.3.0/24
+  destination:
+    - cidr: 10.20.40.53/32
+  service:
+    - protocol: udp
+      port: 53
+  log: true
