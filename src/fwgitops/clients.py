@@ -153,6 +153,44 @@ class ScmPushClient:
         # ACT / unknown -> keep polling rather than claim an outcome.
         return JobState(PushStatus.RUNNING, message)
 
+
+class ScmDeviceClient:
+    """DeviceClient over the SCM REST API (onboarding finalization + teardown).
+
+    All three operations are CONFIRMED against the live tenant and readable/
+    writable by the POLICY service account (2026-07-26):
+      * placement:   GET /config/setup/v1/folders -> a managed device appears as
+        an entry {name: <serial>, parent: <folder>}.
+      * display name: PUT /config/setup/v1/devices/{serial} {"display_name": ...}
+        (verified: 007955000891682 PA-VM -> fw-prod-edge-682).
+      * deregister:   DELETE /config/setup/v1/devices/{serial}.
+    """
+
+    FOLDERS_PATH = "/config/setup/v1/folders"
+    DEVICE_PATH = "/config/setup/v1/devices/{serial}"
+
+    def __init__(self, session: ScmSession):
+        self.session = session
+
+    def device_folder(self, serial: str) -> Optional[str]:
+        """The folder a managed device sits in, or None if not yet placed."""
+        payload = self.session.request("GET", self.FOLDERS_PATH)
+        items = payload if isinstance(payload, list) else _first_present(payload, "data", default=[])
+        for f in items or []:
+            if isinstance(f, dict) and str(f.get("name")) == serial:
+                folder = f.get("parent")
+                return str(folder) if folder else None
+        return None
+
+    def set_display_name(self, serial: str, name: str) -> None:
+        self.session.request(
+            "PUT", self.DEVICE_PATH.format(serial=serial), body={"display_name": name}
+        )
+
+    def deregister(self, serial: str) -> None:
+        self.session.request("DELETE", self.DEVICE_PATH.format(serial=serial))
+
+
 class ScmProvisionClient:
     """ProvisionClient over the SCM REST API (Day-1, T3).
 

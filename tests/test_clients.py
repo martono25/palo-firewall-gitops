@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from fwgitops.clients import ScmProvisionClient, ScmPushClient
+from fwgitops.clients import ScmDeviceClient, ScmProvisionClient, ScmPushClient
 from fwgitops.provision import Stage
 from fwgitops.push import PushStatus
 from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
@@ -116,6 +116,49 @@ def test_job_record_unwrapped_from_data_envelope():
     # SCM list responses use {data, limit, offset, total}.
     payload = {"data": [{"status_str": "FIN", "result_str": "OK"}], "total": 1}
     assert ScmPushClient(session_for(payload)).job_status("j1").status is PushStatus.SUCCESS
+
+
+# ── ScmDeviceClient (onboarding finalization + teardown) ──────────────────
+def test_device_folder_finds_serial_entry():
+    # A managed device appears in /folders as {name: <serial>, parent: <folder>}.
+    payload = {"data": [
+        {"name": "GitOps", "parent": "ngfw-shared"},
+        {"name": "007955000891682", "parent": "prod-edge"},
+    ]}
+    assert ScmDeviceClient(session_for(payload)).device_folder("007955000891682") == "prod-edge"
+
+
+def test_device_folder_none_when_not_placed():
+    payload = {"data": [{"name": "prod-edge", "parent": "ngfw-shared"}]}
+    assert ScmDeviceClient(session_for(payload)).device_folder("007955000891682") is None
+
+
+def test_set_display_name_puts_device_body():
+    bodies = []
+
+    def transport(method, url, headers, body):
+        bodies.append((method, url, body))
+        payload = {"access_token": "t"} if "oauth2" in url else {"display_name": "n"}
+        return 200, json.dumps(payload).encode()
+
+    ScmDeviceClient(ScmSession(GOOD, transport=transport)).set_display_name(
+        "007955000891682", "fw-prod-edge-682"
+    )
+    method, url, body = bodies[-1]
+    assert method == "PUT" and url.endswith("/config/setup/v1/devices/007955000891682")
+    assert json.loads(body) == {"display_name": "fw-prod-edge-682"}
+
+
+def test_deregister_deletes_device():
+    calls = []
+
+    def transport(method, url, headers, body):
+        calls.append((method, url))
+        return 200, json.dumps({"access_token": "t"} if "oauth2" in url else {}).encode()
+
+    ScmDeviceClient(ScmSession(GOOD, transport=transport)).deregister("007955000891682")
+    assert calls[-1][0] == "DELETE"
+    assert calls[-1][1].endswith("/config/setup/v1/devices/007955000891682")
 
 
 # ── ScmProvisionClient ────────────────────────────────────────────────────
