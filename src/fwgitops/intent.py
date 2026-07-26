@@ -64,8 +64,11 @@ class IntentError(Exception):
 # ── Typed model ───────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class Endpoint:
-    kind: str  # "cidr" | "fqdn"  (Phase 1; "app" deferred)
+    kind: str  # "cidr" | "fqdn"  (an `app:` resolves into these)
     value: str
+    #: The zone this endpoint sits in, from its app (Phase 2). None = use the
+    #: environment default zone (explicit cidr/fqdn endpoints).
+    zone: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -102,24 +105,29 @@ class AccessRequest:
 
 # ── Loader ────────────────────────────────────────────────────────────────
 class _Collector:
-    def __init__(self, service_catalog: Any = None) -> None:
+    def __init__(self, service_catalog: Any = None, app_catalog: Any = None) -> None:
         self.problems: List[Problem] = []
         #: Optional ServiceCatalog (Phase 2). Enables the `service: name:` form.
         self.service_catalog = service_catalog
+        #: Optional AppCatalog (Phase 2). Enables the `source/destination: app:` form.
+        self.app_catalog = app_catalog
 
     def add(self, path: str, message: str) -> None:
         self.problems.append(Problem(path, message))
 
 
-def load_intent(data: Any, *, service_catalog: Any = None) -> AccessRequest:
+def load_intent(data: Any, *, service_catalog: Any = None, app_catalog: Any = None) -> AccessRequest:
     """Parse + validate an intent dict into an AccessRequest.
 
     Collects every problem and raises a single IntentError. Never returns a
     partially-built result. If `service_catalog` (a `catalog.ServiceCatalog`) is
-    supplied, the friendly `service: - name: https` form resolves through it;
-    without it, only the explicit `protocol`+`port` form is accepted (Phase 1).
+    supplied, the friendly `service: - name: https` form resolves through it.
+    If `app_catalog` (a `catalog.AppCatalog`) is supplied, `source/destination:
+    - app: web-tier` resolves into that app's addresses/fqdns, each tagged with
+    the app's zone (so the compiler can derive zones from the endpoints). Without
+    a catalog, only the explicit forms are accepted (Phase 1 behavior).
     """
-    c = _Collector(service_catalog=service_catalog)
+    c = _Collector(service_catalog=service_catalog, app_catalog=app_catalog)
     if not isinstance(data, dict):
         raise IntentError([Problem("$", "document must be a mapping")])
 
@@ -199,8 +207,8 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     if action not in _ACTIONS:
         c.add(f"{path}.action", f"must be one of {sorted(_ACTIONS)}, got {action!r}")
 
-    source = _load_endpoints(sp.get("source"), f"{path}.source", c)
-    destination = _load_endpoints(sp.get("destination"), f"{path}.destination", c)
+    source = _load_endpoints(sp.get("source"), f"{path}.source", c, environment)
+    destination = _load_endpoints(sp.get("destination"), f"{path}.destination", c, environment)
     service = _load_services(sp.get("service"), f"{path}.service", c)
 
     log = sp.get("log", True)
@@ -216,24 +224,28 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     )
 
 
-def _load_endpoints(raw: Any, path: str, c: _Collector) -> Optional[List[Endpoint]]:
+def _load_endpoints(
+    raw: Any, path: str, c: _Collector, environment: Optional[str]
+) -> Optional[List[Endpoint]]:
     if not isinstance(raw, list) or not raw:
         c.add(path, "required non-empty list")
         return None
     out: List[Endpoint] = []
     ok = True
     for i, item in enumerate(raw):
-        ep = _load_endpoint(item, f"{path}[{i}]", c)
-        if ep is None:
+        eps = _load_endpoint(item, f"{path}[{i}]", c, environment)
+        if eps is None:
             ok = False
         else:
-            out.append(ep)
+            out.extend(eps)  # an app expands to several endpoints
     return out if ok else None
 
 
-def _load_endpoint(item: Any, path: str, c: _Collector) -> Optional[Endpoint]:
+def _load_endpoint(
+    item: Any, path: str, c: _Collector, environment: Optional[str]
+) -> Optional[List[Endpoint]]:
     if not isinstance(item, dict):
-        c.add(path, "must be a mapping with exactly one of cidr/fqdn")
+        c.add(path, "must be a mapping with exactly one of cidr/fqdn/app")
         return None
     keys = _ENDPOINT_KEYS & set(item)
     if len(keys) != 1:
@@ -246,12 +258,26 @@ def _load_endpoint(item: Any, path: str, c: _Collector) -> Optional[Endpoint]:
         return None
 
     if kind == "app":
-        c.add(
-            f"{path}.app",
-            "catalog resolution is Phase 2 — use an explicit 'cidr:' or 'fqdn:' for now "
-            "(e.g. cidr: 10.20.1.0/24)",
-        )
-        return None
+        # Phase-2 friendly form: resolve to the app's endpoints, tagged with its zone.
+        from fwgitops.catalog import CatalogError  # local import: no hard dep in Phase 1
+
+        if c.app_catalog is None:
+            c.add(f"{path}.app",
+                  "no app catalog loaded — use explicit 'cidr:'/'fqdn:', or provide catalog/apps.yaml")
+            return None
+        try:
+            app = c.app_catalog.resolve(value)
+        except CatalogError as e:
+            c.add(f"{path}.app", str(e))
+            return None
+        if environment is not None and app.environment != environment:
+            c.add(f"{path}.app",
+                  f"app {value!r} is in environment {app.environment!r}, "
+                  f"but this request is for {environment!r}")
+            return None
+        eps = [Endpoint(kind="cidr", value=a, zone=app.zone) for a in app.addresses]
+        eps += [Endpoint(kind="fqdn", value=f, zone=app.zone) for f in app.fqdns]
+        return eps
     if kind == "cidr":
         try:
             ipaddress.ip_network(value, strict=True)
@@ -263,7 +289,7 @@ def _load_endpoint(item: Any, path: str, c: _Collector) -> Optional[Endpoint]:
         if not _FQDN.match(value):
             c.add(f"{path}.fqdn", f"invalid FQDN {value!r}")
             return None
-    return Endpoint(kind=kind, value=value)
+    return [Endpoint(kind=kind, value=value)]  # explicit endpoint: env-default zone
 
 
 def _load_services(raw: Any, path: str, c: _Collector) -> Optional[List[Service]]:

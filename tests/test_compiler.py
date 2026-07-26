@@ -60,6 +60,34 @@ def test_rule_identity_and_zones():
     assert ch.rule.log_end is True
 
 
+def _app_catalog():
+    from fwgitops.catalog import AppCatalog
+    return AppCatalog.from_dict({"apps": {
+        "web": {"environment": "prod", "folder": "prod-edge", "zone": "dmz",
+                "addresses": ["10.20.1.0/24"]},
+        "pay": {"environment": "prod", "folder": "prod-edge", "zone": "app",
+                "addresses": ["10.20.9.10/32"]},
+    }})
+
+
+def test_zones_derived_from_apps_not_env_default():
+    doc = valid_doc()
+    doc["spec"]["source"] = [{"app": "web"}]        # zone dmz
+    doc["spec"]["destination"] = [{"app": "pay"}]   # zone app
+    ch = compile_request(load_intent(doc, app_catalog=_app_catalog()), env_map())
+    assert ch.rule.from_zones == ["dmz"]   # from the source app, NOT env default "trust"
+    assert ch.rule.to_zones == ["app"]
+
+
+def test_explicit_endpoint_uses_env_default_zone():
+    doc = valid_doc()
+    doc["spec"]["source"] = [{"cidr": "10.20.1.0/24"}]   # explicit -> env default
+    doc["spec"]["destination"] = [{"app": "pay"}]        # app zone
+    ch = compile_request(load_intent(doc, app_catalog=_app_catalog()), env_map())
+    assert ch.rule.from_zones == ["trust"]   # env default (explicit source)
+    assert ch.rule.to_zones == ["app"]
+
+
 def test_rule_carries_full_provenance_tags():
     ch = compiled()
     assert is_managed(ch.rule.tags)

@@ -38,6 +38,7 @@ def run_compile(
     *,
     write: bool = True,
     service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
     err=None,
 ) -> int:
@@ -54,6 +55,9 @@ def run_compile(
         print(f"error: invalid env map {env_map_path}: {e}", file=err)
         return 1
     catalog, ok = _load_service_catalog(service_catalog_path, err)
+    if not ok:
+        return 1
+    app_catalog, ok = _load_app_catalog(app_catalog_path, err)
     if not ok:
         return 1
 
@@ -76,7 +80,7 @@ def run_compile(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            ar = load_intent(doc, service_catalog=catalog)
+            ar = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
             changes.append(compile_request(ar, env_map))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -145,12 +149,32 @@ def _load_service_catalog(path: Path, err) -> Tuple[Optional[object], bool]:
         return None, False
 
 
+def _load_app_catalog(path: Path, err) -> Tuple[Optional[object], bool]:
+    """Load the optional app catalog. Returns (catalog_or_None, ok).
+
+    Absent is fine — explicit cidr/fqdn endpoints still work. Present-but-malformed
+    is a hard error (fail-closed).
+    """
+    if not path.is_file():
+        return None, True
+    from fwgitops.catalog import AppCatalog, CatalogError
+    try:
+        return AppCatalog.from_dict(read_yaml(path)), True
+    except CatalogError as e:
+        print(f"error: invalid app catalog {path}: {e}", file=err)
+        return None, False
+    except Exception as e:  # noqa: BLE001 - YAML parse / IO
+        print(f"error: could not read app catalog {path}: {e}", file=err)
+        return None, False
+
+
 def run_classify(
     intent_root: Path,
     env_map_path: Path,
     *,
     gate: Optional[str] = None,
     service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
     err=None,
 ) -> int:
@@ -179,6 +203,9 @@ def run_classify(
     catalog, ok = _load_service_catalog(service_catalog_path, err)
     if not ok:
         return 1
+    app_catalog, ok = _load_app_catalog(app_catalog_path, err)
+    if not ok:
+        return 1
     if not intent_root.exists():
         print(f"error: intent root not found: {intent_root}", file=err)
         return 1
@@ -198,7 +225,8 @@ def run_classify(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            changes.append(compile_request(load_intent(doc, service_catalog=catalog), env_map))
+            changes.append(compile_request(
+                load_intent(doc, service_catalog=catalog, app_catalog=app_catalog), env_map))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
         except ResolveError as e:
@@ -392,6 +420,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="validate and report without writing files")
     c.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
                    help="service name catalog (Phase 2); absent = explicit protocol+port only")
+    c.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path,
+                   help="app name catalog (Phase 2); absent = explicit cidr/fqdn only")
 
     cl = sub.add_parser("classify", help="risk-classify intents (Phase 2, policy-as-code)")
     cl.add_argument("intent_root", nargs="?", default="intent", type=Path,
@@ -402,6 +432,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="fail (exit 3) if any change's tier exceeds this max-auto tier")
     cl.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
                     help="service name catalog (Phase 2)")
+    cl.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path,
+                    help="app name catalog (Phase 2)")
 
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
     p.add_argument("folder", help="SCM folder to push")
@@ -436,12 +468,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "compile":
         return run_compile(
             args.intent_root, args.env_map, args.out, write=not args.check,
-            service_catalog_path=args.service_catalog,
+            service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "classify":
         return run_classify(
             args.intent_root, args.env_map, gate=args.gate,
-            service_catalog_path=args.service_catalog,
+            service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "push":
         return run_push(

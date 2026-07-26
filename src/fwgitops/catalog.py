@@ -13,9 +13,10 @@ owns the parse/validate flow.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 _PROTOCOLS = {"tcp", "udp"}
 _PORT_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
@@ -85,3 +86,84 @@ class ServiceCatalog:
         if problems:
             raise CatalogError("invalid service catalog:\n  - " + "\n  - ".join(problems))
         return cls(services=out)
+
+
+@dataclass(frozen=True)
+class AppDef:
+    """A named application: its environment/folder/zone and where it lives."""
+
+    environment: str
+    folder: str
+    zone: str
+    addresses: Tuple[str, ...]  # CIDRs (network addresses; strict)
+    fqdns: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AppCatalog:
+    """Resolve `source: - app: web-tier` to its addresses/fqdns AND its zone.
+
+    Unlike services, an app carries a ZONE — resolving apps is what lets a rule's
+    from/to zones be derived from the traffic's actual endpoints (web-tier=trust,
+    payments-api=app) instead of one fixed env-map pair. That is what unlocks
+    multi-zone rules (and, later, the stateful novel-zone-pair classifier check).
+    """
+
+    apps: Dict[str, AppDef]
+
+    def resolve(self, name: str) -> AppDef:
+        app = self.apps.get(name)
+        if app is None:
+            raise CatalogError(
+                f"unknown app name {name!r}; known: {sorted(self.apps) or '(catalog is empty)'}"
+            )
+        return app
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AppCatalog":
+        if not isinstance(raw, dict):
+            raise CatalogError("app catalog must be a mapping")
+        entries = raw.get("apps", raw) if "apps" in raw else raw
+        if not isinstance(entries, dict):
+            raise CatalogError("'apps' must be a mapping of name -> {environment, folder, zone, ...}")
+
+        out: Dict[str, AppDef] = {}
+        problems: List[str] = []
+        for name, spec in entries.items():
+            if not isinstance(spec, dict):
+                problems.append(f"{name}: must be a mapping")
+                continue
+            env, folder, zone = spec.get("environment"), spec.get("folder"), spec.get("zone")
+            strs_ok = True
+            for field, val in (("environment", env), ("folder", folder), ("zone", zone)):
+                if not isinstance(val, str) or not val.strip():
+                    problems.append(f"{name}.{field}: required non-empty string")
+                    strs_ok = False
+
+            addresses = spec.get("addresses") or []
+            fqdns = spec.get("fqdns") or []
+            if not isinstance(addresses, list):
+                problems.append(f"{name}.addresses: must be a list of CIDRs")
+                addresses = []
+            if not isinstance(fqdns, list):
+                problems.append(f"{name}.fqdns: must be a list of FQDNs")
+                fqdns = []
+
+            valid_addr: List[str] = []
+            for a in addresses:
+                try:
+                    ipaddress.ip_network(a, strict=True)
+                    valid_addr.append(str(a))
+                except (ValueError, TypeError) as e:
+                    problems.append(f"{name}.addresses: invalid CIDR {a!r} ({e})")
+            if not addresses and not fqdns:
+                problems.append(f"{name}: must define at least one address or fqdn")
+
+            if strs_ok:
+                out[str(name)] = AppDef(
+                    environment=env, folder=folder, zone=zone,
+                    addresses=tuple(valid_addr), fqdns=tuple(str(f) for f in fqdns),
+                )
+        if problems:
+            raise CatalogError("invalid app catalog:\n  - " + "\n  - ".join(problems))
+        return cls(apps=out)
