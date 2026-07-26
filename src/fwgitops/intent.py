@@ -102,20 +102,24 @@ class AccessRequest:
 
 # ── Loader ────────────────────────────────────────────────────────────────
 class _Collector:
-    def __init__(self) -> None:
+    def __init__(self, service_catalog: Any = None) -> None:
         self.problems: List[Problem] = []
+        #: Optional ServiceCatalog (Phase 2). Enables the `service: name:` form.
+        self.service_catalog = service_catalog
 
     def add(self, path: str, message: str) -> None:
         self.problems.append(Problem(path, message))
 
 
-def load_intent(data: Any) -> AccessRequest:
+def load_intent(data: Any, *, service_catalog: Any = None) -> AccessRequest:
     """Parse + validate an intent dict into an AccessRequest.
 
     Collects every problem and raises a single IntentError. Never returns a
-    partially-built result.
+    partially-built result. If `service_catalog` (a `catalog.ServiceCatalog`) is
+    supplied, the friendly `service: - name: https` form resolves through it;
+    without it, only the explicit `protocol`+`port` form is accepted (Phase 1).
     """
-    c = _Collector()
+    c = _Collector(service_catalog=service_catalog)
     if not isinstance(data, dict):
         raise IntentError([Problem("$", "document must be a mapping")])
 
@@ -279,15 +283,23 @@ def _load_services(raw: Any, path: str, c: _Collector) -> Optional[List[Service]
 
 def _load_service(item: Any, path: str, c: _Collector) -> Optional[Service]:
     if not isinstance(item, dict):
-        c.add(path, "must be a mapping with protocol+port")
+        c.add(path, "must be a mapping with protocol+port (or a catalog name)")
         return None
     if "name" in item:
-        c.add(
-            f"{path}.name",
-            "service catalog is Phase 2 — use explicit 'protocol' + 'port' for now "
-            "(e.g. protocol: tcp, port: 443)",
-        )
-        return None
+        # Phase-2 friendly form: resolve the name through the service catalog.
+        from fwgitops.catalog import CatalogError  # local import: no hard dep in Phase 1
+
+        if c.service_catalog is None:
+            c.add(f"{path}.name",
+                  "no service catalog loaded — use explicit 'protocol' + 'port', "
+                  "or provide catalog/services.yaml")
+            return None
+        try:
+            sd = c.service_catalog.resolve(item["name"])
+        except CatalogError as e:
+            c.add(f"{path}.name", str(e))
+            return None
+        return Service(protocol=sd.protocol, port=sd.port)
     protocol = item.get("protocol")
     if protocol not in _PROTOCOLS:
         c.add(f"{path}.protocol", f"must be one of {sorted(_PROTOCOLS)}, got {protocol!r}")

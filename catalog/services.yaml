@@ -1,0 +1,16 @@
+# Service catalog (Phase 2) — friendly service names → protocol + port.
+# Platform-maintained; adding a name is a reviewed PR. Intents may then use
+# `service: - name: https` instead of `protocol: tcp, port: 443`.
+services:
+  https:      { protocol: tcp, port: "443" }
+  http:       { protocol: tcp, port: "80" }
+  ssh:        { protocol: tcp, port: "22" }
+  dns:        { protocol: udp, port: "53" }
+  dns-tcp:    { protocol: tcp, port: "53" }
+  ntp:        { protocol: udp, port: "123" }
+  postgres:   { protocol: tcp, port: "5432" }
+  mysql:      { protocol: tcp, port: "3306" }
+  redis:      { protocol: tcp, port: "6379" }
+  smtp-tls:   { protocol: tcp, port: "587" }
+  syslog:     { protocol: udp, port: "514" }
+  ephemeral:  { protocol: tcp, port: "1024-65535" }

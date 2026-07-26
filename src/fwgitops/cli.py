@@ -37,6 +37,7 @@ def run_compile(
     out_root: Path,
     *,
     write: bool = True,
+    service_catalog_path: Path = Path("catalog/services.yaml"),
     out=None,
     err=None,
 ) -> int:
@@ -51,6 +52,9 @@ def run_compile(
         env_map = EnvMap.from_dict(read_yaml(env_map_path))
     except ResolveError as e:
         print(f"error: invalid env map {env_map_path}: {e}", file=err)
+        return 1
+    catalog, ok = _load_service_catalog(service_catalog_path, err)
+    if not ok:
         return 1
 
     if not intent_root.exists():
@@ -72,7 +76,7 @@ def run_compile(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            ar = load_intent(doc)
+            ar = load_intent(doc, service_catalog=catalog)
             changes.append(compile_request(ar, env_map))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -122,8 +126,33 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
+def _load_service_catalog(path: Path, err) -> Tuple[Optional[object], bool]:
+    """Load the optional service catalog. Returns (catalog_or_None, ok).
+
+    Absent is fine — the explicit protocol+port form still works (Phase 1). A
+    present-but-malformed catalog is a hard error (fail-closed).
+    """
+    if not path.is_file():
+        return None, True
+    from fwgitops.catalog import CatalogError, ServiceCatalog
+    try:
+        return ServiceCatalog.from_dict(read_yaml(path)), True
+    except CatalogError as e:
+        print(f"error: invalid service catalog {path}: {e}", file=err)
+        return None, False
+    except Exception as e:  # noqa: BLE001 - YAML parse / IO
+        print(f"error: could not read service catalog {path}: {e}", file=err)
+        return None, False
+
+
 def run_classify(
-    intent_root: Path, env_map_path: Path, *, gate: Optional[str] = None, out=None, err=None
+    intent_root: Path,
+    env_map_path: Path,
+    *,
+    gate: Optional[str] = None,
+    service_catalog_path: Path = Path("catalog/services.yaml"),
+    out=None,
+    err=None,
 ) -> int:
     """Risk-classify every intent (Phase 2). Returns a process exit code.
 
@@ -147,6 +176,9 @@ def run_classify(
     except ResolveError as e:
         print(f"error: invalid env map {env_map_path}: {e}", file=err)
         return 1
+    catalog, ok = _load_service_catalog(service_catalog_path, err)
+    if not ok:
+        return 1
     if not intent_root.exists():
         print(f"error: intent root not found: {intent_root}", file=err)
         return 1
@@ -166,7 +198,7 @@ def run_classify(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            changes.append(compile_request(load_intent(doc), env_map))
+            changes.append(compile_request(load_intent(doc, service_catalog=catalog), env_map))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
         except ResolveError as e:
@@ -358,6 +390,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="output root; writes <out>/<folder>/rules.auto.tfvars.json")
     c.add_argument("--check", action="store_true",
                    help="validate and report without writing files")
+    c.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
+                   help="service name catalog (Phase 2); absent = explicit protocol+port only")
 
     cl = sub.add_parser("classify", help="risk-classify intents (Phase 2, policy-as-code)")
     cl.add_argument("intent_root", nargs="?", default="intent", type=Path,
@@ -366,6 +400,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="environment resolution map (default: catalog/environments.yaml)")
     cl.add_argument("--gate", choices=("LOW", "HIGH", "CRITICAL"),
                     help="fail (exit 3) if any change's tier exceeds this max-auto tier")
+    cl.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
+                    help="service name catalog (Phase 2)")
 
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
     p.add_argument("folder", help="SCM folder to push")
@@ -399,10 +435,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "compile":
         return run_compile(
-            args.intent_root, args.env_map, args.out, write=not args.check
+            args.intent_root, args.env_map, args.out, write=not args.check,
+            service_catalog_path=args.service_catalog,
         )
     if args.command == "classify":
-        return run_classify(args.intent_root, args.env_map, gate=args.gate)
+        return run_classify(
+            args.intent_root, args.env_map, gate=args.gate,
+            service_catalog_path=args.service_catalog,
+        )
     if args.command == "push":
         return run_push(
             args.folder,
