@@ -173,3 +173,13 @@ def test_cli_push_missing_env_exits_1(monkeypatch, capsys):
         monkeypatch.delenv(v, raising=False)
     rc = run_push("GitOps")   # no session -> from_env -> missing -> 1
     assert rc == 1
+
+
+from fwgitops.cli import run_set_admin_password  # noqa: E402
+
+
+def test_cli_set_admin_password_missing_phash_exits_1(monkeypatch, capsys):
+    monkeypatch.delenv("FWGITOPS_ADMIN_PHASH", raising=False)
+    rc = run_set_admin_password("10.0.0.1", ssh_key="k.pem")  # no phash -> 1, no SSH
+    assert rc == 1
+    assert "FWGITOPS_ADMIN_PHASH" in capsys.readouterr().err

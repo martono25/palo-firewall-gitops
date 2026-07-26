@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -231,6 +232,38 @@ def run_deregister(serial: str, *, session=None, out=None, err=None) -> int:
     return 0
 
 
+def run_set_admin_password(
+    mgmt_ip: str,
+    *,
+    ssh_key: str,
+    phash: Optional[str] = None,
+    user: str = "admin",
+    out=None,
+    err=None,
+) -> int:
+    """Set the firewall admin password post-boot over SSH (route B).
+
+    The phash ($5$… crypt hash) comes from FWGITOPS_ADMIN_PHASH (never a CLI arg,
+    so it stays out of argv/process listings). Exit codes: 0 ok · 1 config · 3 failed.
+    """
+    from fwgitops.admin_password import AdminPasswordError, set_admin_phash
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    phash = phash or os.environ.get("FWGITOPS_ADMIN_PHASH")
+    if not phash:
+        print("error: set FWGITOPS_ADMIN_PHASH to the $5$… hash "
+              "(openssl passwd -5 '<pw>' on Linux, or PAN-OS 'request password-hash')", file=err)
+        return 1
+    try:
+        set_admin_phash(mgmt_ip, phash, ssh_key=ssh_key, user=user)
+    except AdminPasswordError as e:
+        print(f"SET-PASSWORD FAILED: {e}", file=err)
+        return 3
+    print(f"OK — admin password set on {mgmt_ip}", file=out)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fwgitops", description="GitOps firewall compiler")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -263,6 +296,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("deregister", help="remove a device's SCM registration (teardown)")
     d.add_argument("serial", help="device serial number")
+
+    a = sub.add_parser("set-admin-password",
+                       help="set the firewall admin password post-boot over SSH (route B)")
+    a.add_argument("mgmt_ip", help="firewall management IP")
+    a.add_argument("--ssh-key", required=True, help="path to the SSH private key (EC2 key pair)")
+    a.add_argument("--user", default="admin", help="admin username (default: admin)")
     return parser
 
 
@@ -283,6 +322,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_onboard(args.serial, folder=args.folder, name=args.name)
     if args.command == "deregister":
         return run_deregister(args.serial)
+    if args.command == "set-admin-password":
+        return run_set_admin_password(args.mgmt_ip, ssh_key=args.ssh_key, user=args.user)
     parser.error(f"unknown command {args.command!r}")  # pragma: no cover
     return 1
 
