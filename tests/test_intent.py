@@ -157,13 +157,31 @@ def test_invalid_fqdn():
 
 
 # ── Service ───────────────────────────────────────────────────────────────
-def test_service_name_deferred_to_phase2():
+def test_service_name_resolves_with_catalog():
+    from fwgitops.catalog import ServiceCatalog
+    doc = valid_doc()
+    doc["spec"]["service"] = [{"name": "https"}]
+    cat = ServiceCatalog.from_dict({"services": {"https": {"protocol": "tcp", "port": "443"}}})
+    ar = load_intent(doc, service_catalog=cat)
+    assert ar.spec.service[0].protocol == "tcp" and ar.spec.service[0].port == "443"
+
+
+def test_service_name_without_catalog_is_rejected():
     doc = valid_doc()
     doc["spec"]["service"] = [{"name": "https"}]
     with pytest.raises(IntentError) as ei:
-        load_intent(doc)
+        load_intent(doc)  # no catalog
     prob = next(p for p in ei.value.problems if p.path == "spec.service[0].name")
-    assert "Phase 2" in prob.message and "protocol" in prob.message
+    assert "no service catalog" in prob.message and "protocol" in prob.message
+
+
+def test_unknown_service_name_is_rejected():
+    from fwgitops.catalog import ServiceCatalog
+    doc = valid_doc()
+    doc["spec"]["service"] = [{"name": "ftp"}]
+    cat = ServiceCatalog.from_dict({"services": {"https": {"protocol": "tcp", "port": "443"}}})
+    with pytest.raises(IntentError, match="unknown service"):
+        load_intent(doc, service_catalog=cat)
 
 
 def test_invalid_protocol():
