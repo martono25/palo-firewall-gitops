@@ -1,16 +1,127 @@
 # Service catalog (Phase 2) — friendly service names → protocol + port.
-# Platform-maintained; adding a name is a reviewed PR. Intents may then use
-# `service: - name: https` instead of `protocol: tcp, port: 443`.
+#
+# Platform-maintained; adding/changing a name is a reviewed PR. Intents may then
+# use `service: - name: https` instead of `protocol: tcp, port: "443"`.
+# Ports follow the IANA / de-facto standard assignments. Where a service uses
+# both TCP and UDP, or has a distinct TLS variant, they are named separately so
+# a rule commits exactly the transport it means (fail-closed: no guessing).
+#
+# NOTE: entries above ~1024 are *common defaults* — many apps let you rebind the
+# port. Confirm against your actual deployment before relying on one.
 services:
-  https:      { protocol: tcp, port: "443" }
-  http:       { protocol: tcp, port: "80" }
-  ssh:        { protocol: tcp, port: "22" }
-  dns:        { protocol: udp, port: "53" }
-  dns-tcp:    { protocol: tcp, port: "53" }
-  ntp:        { protocol: udp, port: "123" }
-  postgres:   { protocol: tcp, port: "5432" }
-  mysql:      { protocol: tcp, port: "3306" }
-  redis:      { protocol: tcp, port: "6379" }
-  smtp-tls:   { protocol: tcp, port: "587" }
-  syslog:     { protocol: udp, port: "514" }
-  ephemeral:  { protocol: tcp, port: "1024-65535" }
+  # ── Web / proxy ──────────────────────────────────────────────────────────
+  http:                 { protocol: tcp, port: "80" }
+  https:                { protocol: tcp, port: "443" }
+  http-alt:             { protocol: tcp, port: "8080" }
+  https-alt:            { protocol: tcp, port: "8443" }
+  http-proxy:           { protocol: tcp, port: "3128" }   # squid default
+
+  # ── Remote access & management ───────────────────────────────────────────
+  ssh:                  { protocol: tcp, port: "22" }     # also SFTP/SCP
+  telnet:               { protocol: tcp, port: "23" }     # legacy, plaintext
+  rdp:                  { protocol: tcp, port: "3389" }
+  vnc:                  { protocol: tcp, port: "5900" }
+  winrm-http:           { protocol: tcp, port: "5985" }
+  winrm-https:          { protocol: tcp, port: "5986" }
+
+  # ── DNS, directory, authentication ───────────────────────────────────────
+  dns:                  { protocol: udp, port: "53" }
+  dns-tcp:              { protocol: tcp, port: "53" }     # zone transfer / large responses
+  kerberos:             { protocol: tcp, port: "88" }
+  kerberos-udp:         { protocol: udp, port: "88" }
+  ldap:                 { protocol: tcp, port: "389" }
+  ldaps:                { protocol: tcp, port: "636" }
+  ldap-gc:              { protocol: tcp, port: "3268" }   # AD global catalog
+  ldap-gc-ssl:          { protocol: tcp, port: "3269" }
+  radius-auth:          { protocol: udp, port: "1812" }
+  radius-acct:          { protocol: udp, port: "1813" }
+  tacacs:               { protocol: tcp, port: "49" }
+
+  # ── Mail ─────────────────────────────────────────────────────────────────
+  smtp:                 { protocol: tcp, port: "25" }
+  smtp-submission:      { protocol: tcp, port: "587" }    # STARTTLS submission (preferred)
+  smtps:                { protocol: tcp, port: "465" }    # implicit TLS
+  pop3:                 { protocol: tcp, port: "110" }
+  pop3s:                { protocol: tcp, port: "995" }
+  imap:                 { protocol: tcp, port: "143" }
+  imaps:                { protocol: tcp, port: "993" }
+
+  # ── File transfer & sharing ──────────────────────────────────────────────
+  ftp:                  { protocol: tcp, port: "21" }     # control channel (data is dynamic)
+  ftp-data:             { protocol: tcp, port: "20" }
+  ftps:                 { protocol: tcp, port: "990" }
+  tftp:                 { protocol: udp, port: "69" }
+  smb:                  { protocol: tcp, port: "445" }
+  netbios-ns:           { protocol: udp, port: "137" }
+  netbios-dgm:          { protocol: udp, port: "138" }
+  netbios-ssn:          { protocol: tcp, port: "139" }
+  nfs:                  { protocol: tcp, port: "2049" }
+  rsync:                { protocol: tcp, port: "873" }
+
+  # ── Databases ────────────────────────────────────────────────────────────
+  mssql:                { protocol: tcp, port: "1433" }
+  oracle:               { protocol: tcp, port: "1521" }
+  mysql:                { protocol: tcp, port: "3306" }
+  postgres:             { protocol: tcp, port: "5432" }
+  couchdb:              { protocol: tcp, port: "5984" }
+  redis:                { protocol: tcp, port: "6379" }
+  influxdb:             { protocol: tcp, port: "8086" }
+  cassandra:            { protocol: tcp, port: "9042" }   # CQL native
+  memcached:            { protocol: tcp, port: "11211" }
+  mongodb:              { protocol: tcp, port: "27017" }
+  db2:                  { protocol: tcp, port: "50000" }
+
+  # ── Messaging, streaming, coordination ───────────────────────────────────
+  amqp:                 { protocol: tcp, port: "5672" }   # RabbitMQ / AMQP 0-9-1
+  amqps:                { protocol: tcp, port: "5671" }
+  rabbitmq-mgmt:        { protocol: tcp, port: "15672" }
+  mqtt:                 { protocol: tcp, port: "1883" }
+  mqtt-tls:             { protocol: tcp, port: "8883" }
+  kafka:                { protocol: tcp, port: "9092" }
+  nats:                 { protocol: tcp, port: "4222" }
+  zookeeper:            { protocol: tcp, port: "2181" }
+
+  # ── Search / observability ───────────────────────────────────────────────
+  elasticsearch:        { protocol: tcp, port: "9200" }   # REST
+  elasticsearch-nodes:  { protocol: tcp, port: "9300" }   # transport / inter-node
+  kibana:               { protocol: tcp, port: "5601" }
+  grafana:              { protocol: tcp, port: "3000" }
+  prometheus:           { protocol: tcp, port: "9090" }
+  node-exporter:        { protocol: tcp, port: "9100" }
+  graphite:             { protocol: tcp, port: "2003" }
+  statsd:               { protocol: udp, port: "8125" }
+  splunk-mgmt:          { protocol: tcp, port: "8089" }
+  splunk-forwarder:     { protocol: tcp, port: "9997" }
+
+  # ── Monitoring / logging (network) ───────────────────────────────────────
+  snmp:                 { protocol: udp, port: "161" }
+  snmp-trap:            { protocol: udp, port: "162" }
+  syslog:               { protocol: udp, port: "514" }
+  syslog-tls:           { protocol: tcp, port: "6514" }
+
+  # ── Time & addressing ────────────────────────────────────────────────────
+  ntp:                  { protocol: udp, port: "123" }
+  dhcp-server:          { protocol: udp, port: "67" }
+  dhcp-client:          { protocol: udp, port: "68" }
+
+  # ── VPN & tunneling ──────────────────────────────────────────────────────
+  ipsec-ike:            { protocol: udp, port: "500" }
+  ipsec-natt:           { protocol: udp, port: "4500" }
+  l2tp:                 { protocol: udp, port: "1701" }
+  pptp:                 { protocol: tcp, port: "1723" }
+  openvpn:              { protocol: udp, port: "1194" }
+  wireguard:            { protocol: udp, port: "51820" }
+
+  # ── Cloud-native infra & service discovery ───────────────────────────────
+  kubernetes-api:       { protocol: tcp, port: "6443" }
+  kubelet:              { protocol: tcp, port: "10250" }
+  etcd-client:          { protocol: tcp, port: "2379" }
+  etcd-peer:            { protocol: tcp, port: "2380" }
+  consul-http:          { protocol: tcp, port: "8500" }
+  consul-dns:           { protocol: tcp, port: "8600" }
+  vault:                { protocol: tcp, port: "8200" }
+  docker-registry:      { protocol: tcp, port: "5000" }
+  git-daemon:           { protocol: tcp, port: "9418" }
+
+  # ── Ranges ───────────────────────────────────────────────────────────────
+  ephemeral:            { protocol: tcp, port: "1024-65535" }   # return-traffic / high ports
