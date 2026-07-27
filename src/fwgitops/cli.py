@@ -23,7 +23,13 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from fwgitops.compiler import CompiledChange, compile_request, dumps_tfvars
+from fwgitops.compiler import (
+    CompiledChange,
+    CompiledZone,
+    compile_any,
+    dumps_tfvars,
+    dumps_zone_tfvars,
+)
 from fwgitops.intent import IntentError, load_intent
 from fwgitops.io import discover_intents, read_yaml
 from fwgitops.resolve import EnvMap, ResolveError
@@ -70,7 +76,7 @@ def run_compile(
         print(f"no intent files found under {intent_root} (nothing to compile)", file=out)
         return 0
 
-    changes: List[CompiledChange] = []
+    compiled: List[object] = []  # mixed CompiledChange | CompiledZone (per kind)
     problems: List[str] = []
     for path in intents:
         rel = _display_path(path)
@@ -80,8 +86,8 @@ def run_compile(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            ar = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
-            changes.append(compile_request(ar, env_map))
+            req = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
+            compiled.append(compile_any(req, env_map))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
         except ResolveError as e:
@@ -97,18 +103,30 @@ def run_compile(
             print(f"  - {p}", file=err)
         return 2
 
-    by_folder = _group_by_folder(changes)
+    changes = [c for c in compiled if isinstance(c, CompiledChange)]
+    zones = [c for c in compiled if isinstance(c, CompiledZone)]
     written: List[Path] = []
-    for folder, folder_changes in sorted(by_folder.items()):
+    # AccessRequest -> rules.auto.tfvars.json per folder.
+    for folder, folder_changes in sorted(_group_by_folder(changes).items()):
         target = out_root / folder / OUTPUT_FILENAME
         if write:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(dumps_tfvars(folder_changes), encoding="utf-8")
         written.append(target)
+    # ZoneRequest -> zones.auto.tfvars.json per folder (terraform auto-loads both).
+    zones_by_folder: Dict[str, List[CompiledZone]] = {}
+    for z in zones:
+        zones_by_folder.setdefault(z.folder, []).append(z)
+    for folder, folder_zones in sorted(zones_by_folder.items()):
+        target = out_root / folder / "zones.auto.tfvars.json"
+        if write:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(dumps_zone_tfvars(folder_zones), encoding="utf-8")
+        written.append(target)
 
     verb = "wrote" if write else "would write"
     print(
-        f"OK — compiled {len(changes)} request(s) into {len(written)} folder(s); {verb}:",
+        f"OK — compiled {len(compiled)} request(s) into {len(written)} file(s); {verb}:",
         file=out,
     )
     for t in written:
@@ -225,8 +243,10 @@ def run_classify(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            changes.append(compile_request(
-                load_intent(doc, service_catalog=catalog, app_catalog=app_catalog), env_map))
+            c = compile_any(
+                load_intent(doc, service_catalog=catalog, app_catalog=app_catalog), env_map)
+            if isinstance(c, CompiledChange):  # policy stages: rules only (zones are infra)
+                changes.append(c)
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
         except ResolveError as e:
@@ -294,7 +314,9 @@ def _compile_intents(intent_root, env_map_path, catalog, app_catalog, err):
             continue
         try:
             ar = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
-            items.append((path, ar, compile_request(ar, env_map)))
+            ch = compile_any(ar, env_map)
+            if isinstance(ch, CompiledChange):  # rules only (zones are infra)
+                items.append((path, ar, ch))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
         except ResolveError as e:
@@ -425,7 +447,9 @@ def run_evidence(
             continue
         try:
             ar = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
-            items.append((path, ar, compile_request(ar, env_map)))
+            ch = compile_any(ar, env_map)
+            if isinstance(ch, CompiledChange):  # evidence covers policy; zones are infra (follow-up)
+                items.append((path, ar, ch))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
         except ResolveError as e:

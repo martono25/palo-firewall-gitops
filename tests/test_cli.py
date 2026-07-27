@@ -102,6 +102,27 @@ def test_example_files_are_skipped(tmp_path):
     assert rc == 0  # example ignored, valid intent still compiles
 
 
+def test_compile_zone_request_writes_zones_tfvars(tmp_path, capsys):
+    root = tmp_path / "intent" / "prod"
+    root.mkdir(parents=True)
+    (root / "ZONE.yaml").write_text(
+        "apiVersion: fw-intent/v1\n"
+        "kind: ZoneRequest\n"
+        "metadata: {id: ZONE-1, requester: m@corp, ticket: J-1, justification: dmz, requested: 2026-07-27}\n"
+        "spec: {environment: prod, zone: dmz, type: layer3, interfaces: [ethernet1/2]}\n"
+    )
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP)
+    out = tmp_path / "terraform"
+    rc = run_compile(tmp_path / "intent", env_map, out)
+    assert rc == 0
+    zf = json.loads((out / "prod-edge" / "zones.auto.tfvars.json").read_text())
+    assert zf["zones"]["dmz"]["network"] == {"layer3": ["ethernet1/2"]}
+    assert zf["zones"]["dmz"]["folder"] == "prod-edge"
+    # a ZoneRequest-only compile writes no rules file
+    assert not (out / "prod-edge" / "rules.auto.tfvars.json").exists()
+
+
 def test_no_intents_is_ok(tmp_path, capsys):
     (tmp_path / "intent").mkdir()
     env_map = tmp_path / "environments.yaml"

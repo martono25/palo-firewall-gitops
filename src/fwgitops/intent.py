@@ -103,6 +103,22 @@ class AccessRequest:
     spec: Spec
 
 
+@dataclass(frozen=True)
+class ZoneSpec:
+    environment: str
+    zone: str
+    zone_type: str          # layer3 | layer2 | virtual-wire | tap | external | tunnel
+    interfaces: List[str]    # member interfaces (may be empty — an empty zone is valid)
+
+
+@dataclass(frozen=True)
+class ZoneRequest:
+    """kind: ZoneRequest — declares a zone in a folder (ADR-0001 kind #2)."""
+
+    metadata: Metadata
+    spec: ZoneSpec
+
+
 # ── Loader ────────────────────────────────────────────────────────────────
 class _Collector:
     def __init__(self, service_catalog: Any = None, app_catalog: Any = None) -> None:
@@ -164,10 +180,51 @@ def _load_access_request(
     return AccessRequest(metadata=metadata, spec=spec)  # type: ignore[arg-type]
 
 
-#: Intent kind -> loader (ADR-0001). Register new kinds here (ZoneRequest, …);
-#: each loader validates that kind's schema and returns its typed request. The
-#: pipeline compiles/classifies per kind. Keeps the envelope check in one place.
-_KIND_LOADERS = {KIND: _load_access_request}
+#: PAN-OS zone network types.
+_ZONE_TYPES = {"layer3", "layer2", "virtual-wire", "tap", "external", "tunnel"}
+ZONE_KIND = "ZoneRequest"
+
+
+def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
+    path = "spec"
+    if not isinstance(sp, dict):
+        c.add(path, "required mapping")
+        return None
+    environment = _req_str(sp, "environment", path, c)
+    zone = _req_str(sp, "zone", path, c)
+    ztype = sp.get("type")
+    if ztype not in _ZONE_TYPES:
+        c.add(f"{path}.type", f"must be one of {sorted(_ZONE_TYPES)}, got {ztype!r}")
+        ztype = None
+    interfaces = sp.get("interfaces", [])
+    if not isinstance(interfaces, list) or not all(
+        isinstance(i, str) and i.strip() for i in interfaces
+    ):
+        c.add(f"{path}.interfaces", "must be a list of interface names (strings)")
+        interfaces = None
+    if environment is None or zone is None or ztype is None or interfaces is None:
+        return None
+    return ZoneSpec(environment=environment, zone=zone, zone_type=ztype, interfaces=list(interfaces))
+
+
+def _load_zone_request(
+    data: dict, *, service_catalog: Any = None, app_catalog: Any = None
+) -> ZoneRequest:
+    """Loader for `kind: ZoneRequest` (kind #2). Catalogs are unused (no names)."""
+    c = _Collector()
+    if data.get("apiVersion") != API_VERSION:
+        c.add("apiVersion", f"must be {API_VERSION!r}, got {data.get('apiVersion')!r}")
+    metadata = _load_metadata(data.get("metadata"), c)
+    spec = _load_zone_spec(data.get("spec"), c)
+    if c.problems:
+        raise IntentError(c.problems)
+    return ZoneRequest(metadata=metadata, spec=spec)  # type: ignore[arg-type]
+
+
+#: Intent kind -> loader (ADR-0001). Register new kinds here; each loader
+#: validates that kind's schema and returns its typed request. The pipeline
+#: compiles/classifies per kind. Keeps the envelope check in one place.
+_KIND_LOADERS = {KIND: _load_access_request, ZONE_KIND: _load_zone_request}
 
 
 def _req_str(obj: dict, key: str, path: str, c: _Collector) -> Optional[str]:

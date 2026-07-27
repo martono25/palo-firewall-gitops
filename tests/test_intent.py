@@ -79,14 +79,60 @@ def test_unknown_kind_lists_supported_and_stops(capsys=None):
     # ADR-0001: an unknown kind can't have its spec validated (no schema), so it
     # reports the envelope and stops — with an actionable "supported" list.
     doc = valid_doc()
-    doc["kind"] = "ZoneRequest"       # not registered yet
+    doc["kind"] = "NatRequest"         # not registered
     del doc["metadata"]["ticket"]      # a spec problem that must NOT be reported
     with pytest.raises(IntentError) as ei:
         load_intent(doc)
     paths = {p.path for p in ei.value.problems}
     assert paths == {"kind"}           # only the kind problem — spec not validated
     msg = next(p for p in ei.value.problems if p.path == "kind").message
-    assert "unsupported kind 'ZoneRequest'" in msg and "AccessRequest" in msg
+    assert "unsupported kind 'NatRequest'" in msg and "AccessRequest" in msg and "ZoneRequest" in msg
+
+
+# ── ZoneRequest (kind #2) ──────────────────────────────────────────────────
+def _zone_doc():
+    return {
+        "apiVersion": "fw-intent/v1", "kind": "ZoneRequest",
+        "metadata": {"id": "ZONE-1", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "dmz for partner", "requested": "2026-07-27"},
+        "spec": {"environment": "prod", "zone": "dmz", "type": "layer3",
+                 "interfaces": ["ethernet1/2"]},
+    }
+
+
+def test_zone_request_loads():
+    from fwgitops.intent import ZoneRequest
+    zr = load_intent(_zone_doc())
+    assert isinstance(zr, ZoneRequest)
+    assert zr.spec.environment == "prod" and zr.spec.zone == "dmz"
+    assert zr.spec.zone_type == "layer3" and zr.spec.interfaces == ["ethernet1/2"]
+
+
+def test_zone_request_empty_interfaces_ok():
+    doc = _zone_doc()
+    doc["spec"]["interfaces"] = []
+    assert load_intent(doc).spec.interfaces == []  # empty typed zone is valid
+
+
+def test_zone_request_bad_type_rejected():
+    doc = _zone_doc()
+    doc["spec"]["type"] = "layer9"
+    with pytest.raises(IntentError, match="spec.type"):
+        load_intent(doc)
+
+
+def test_zone_request_missing_zone_rejected():
+    doc = _zone_doc()
+    del doc["spec"]["zone"]
+    with pytest.raises(IntentError, match="spec.zone"):
+        load_intent(doc)
+
+
+def test_zone_request_bad_interface_rejected():
+    doc = _zone_doc()
+    doc["spec"]["interfaces"] = [123]  # not a string
+    with pytest.raises(IntentError, match="spec.interfaces"):
+        load_intent(doc)
 
 
 def test_non_mapping_document():

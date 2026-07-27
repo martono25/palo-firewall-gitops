@@ -88,6 +88,39 @@ def test_explicit_endpoint_uses_env_default_zone():
     assert ch.rule.to_zones == ["app"]
 
 
+# ── ZoneRequest (kind #2) compile ──────────────────────────────────────────
+def _zone_doc():
+    return {
+        "apiVersion": "fw-intent/v1", "kind": "ZoneRequest",
+        "metadata": {"id": "ZONE-1", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "dmz", "requested": "2026-07-27"},
+        "spec": {"environment": "prod", "zone": "dmz", "type": "layer3",
+                 "interfaces": ["ethernet1/2"]},
+    }
+
+
+def test_compile_any_dispatches_zone_request():
+    from fwgitops.compiler import CompiledZone, compile_any
+    cz = compile_any(load_intent(_zone_doc()), env_map())
+    assert isinstance(cz, CompiledZone)
+    assert cz.folder == "prod-edge" and cz.name == "dmz"
+    assert cz.zone_type == "layer3" and cz.interfaces == ["ethernet1/2"]
+
+
+def test_zone_tfvars_shape():
+    from fwgitops.compiler import CompiledZone, zone_tfvars
+    z = CompiledZone(folder="prod-edge", name="dmz", zone_type="layer3", interfaces=["e1/2"])
+    assert zone_tfvars([z]) == {
+        "zones": {"dmz": {"name": "dmz", "folder": "prod-edge", "network": {"layer3": ["e1/2"]}}}
+    }
+
+
+def test_compile_any_unknown_request_type_raises():
+    from fwgitops.compiler import CompileError, compile_any
+    with pytest.raises(CompileError, match="no compiler"):
+        compile_any(object(), env_map())
+
+
 def test_rule_carries_full_provenance_tags():
     ch = compiled()
     assert is_managed(ch.rule.tags)
