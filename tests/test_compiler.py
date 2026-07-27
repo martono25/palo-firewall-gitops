@@ -121,6 +121,32 @@ def test_compile_any_unknown_request_type_raises():
         compile_any(object(), env_map())
 
 
+# ── Cross-kind zone consistency ────────────────────────────────────────────
+def _rule_using_dmz():
+    # web (zone dmz) -> pay (zone app), via the app catalog
+    doc = valid_doc()
+    doc["spec"]["source"] = [{"app": "web"}]        # zone dmz
+    doc["spec"]["destination"] = [{"app": "pay"}]   # zone app
+    return compile_request(load_intent(doc, app_catalog=_app_catalog()), env_map())
+
+
+def test_zone_consistency_ok_for_baseline_zones():
+    from fwgitops.compiler import check_zone_consistency
+    assert check_zone_consistency([compiled()], [], env_map()) == []  # trust->app are baseline
+
+
+def test_zone_consistency_flags_undeclared_zone():
+    from fwgitops.compiler import check_zone_consistency
+    v = check_zone_consistency([_rule_using_dmz()], [], env_map())  # dmz undeclared
+    assert len(v) == 1 and "dmz" in v[0] and "ZoneRequest" in v[0]
+
+
+def test_zone_request_makes_zone_declared():
+    from fwgitops.compiler import CompiledZone, check_zone_consistency
+    zones = [CompiledZone(folder="prod-edge", name="dmz", zone_type="layer3", interfaces=[])]
+    assert check_zone_consistency([_rule_using_dmz()], zones, env_map()) == []  # now declared
+
+
 def test_rule_carries_full_provenance_tags():
     ch = compiled()
     assert is_managed(ch.rule.tags)
