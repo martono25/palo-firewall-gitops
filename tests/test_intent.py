@@ -75,6 +75,20 @@ def test_wrong_api_version_and_kind():
     assert set(problems(doc)) >= {"apiVersion", "kind"}
 
 
+def test_unknown_kind_lists_supported_and_stops(capsys=None):
+    # ADR-0001: an unknown kind can't have its spec validated (no schema), so it
+    # reports the envelope and stops — with an actionable "supported" list.
+    doc = valid_doc()
+    doc["kind"] = "ZoneRequest"       # not registered yet
+    del doc["metadata"]["ticket"]      # a spec problem that must NOT be reported
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc)
+    paths = {p.path for p in ei.value.problems}
+    assert paths == {"kind"}           # only the kind problem — spec not validated
+    msg = next(p for p in ei.value.problems if p.path == "kind").message
+    assert "unsupported kind 'ZoneRequest'" in msg and "AccessRequest" in msg
+
+
 def test_non_mapping_document():
     with pytest.raises(IntentError):
         load_intent(["not", "a", "mapping"])

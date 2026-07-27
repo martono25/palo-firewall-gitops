@@ -117,32 +117,57 @@ class _Collector:
 
 
 def load_intent(data: Any, *, service_catalog: Any = None, app_catalog: Any = None) -> AccessRequest:
-    """Parse + validate an intent dict into an AccessRequest.
+    """Parse + validate an intent dict, dispatching on `kind` (ADR-0001).
 
-    Collects every problem and raises a single IntentError. Never returns a
-    partially-built result. If `service_catalog` (a `catalog.ServiceCatalog`) is
-    supplied, the friendly `service: - name: https` form resolves through it.
-    If `app_catalog` (a `catalog.AppCatalog`) is supplied, `source/destination:
-    - app: web-tier` resolves into that app's addresses/fqdns, each tagged with
-    the app's zone (so the compiler can derive zones from the endpoints). Without
-    a catalog, only the explicit forms are accepted (Phase 1 behavior).
+    The envelope (`apiVersion` + `kind`) is common to every kind; the kind-
+    specific schema is validated by the registered loader. An unknown kind stops
+    here — we cannot validate a spec against a schema we do not have. Raises a
+    single IntentError with every problem; never returns a partial result.
+
+    Catalogs (Phase 2) are passed through to the loader: `service_catalog`
+    enables `service: - name: https`; `app_catalog` enables `source: - app: X`
+    (resolving to the app's addresses/fqdns + zone). Without them only the
+    explicit forms are accepted.
     """
-    c = _Collector(service_catalog=service_catalog, app_catalog=app_catalog)
     if not isinstance(data, dict):
         raise IntentError([Problem("$", "document must be a mapping")])
 
+    kind = data.get("kind")
+    loader = _KIND_LOADERS.get(kind)
+    if loader is None:
+        # Unknown kind: we can't validate a spec against a schema we don't have,
+        # so report the envelope problems (apiVersion too) and stop.
+        problems: List[Problem] = []
+        if data.get("apiVersion") != API_VERSION:
+            problems.append(Problem("apiVersion",
+                                    f"must be {API_VERSION!r}, got {data.get('apiVersion')!r}"))
+        problems.append(Problem("kind", f"unsupported kind {kind!r}; supported: {sorted(_KIND_LOADERS)}"))
+        raise IntentError(problems)
+
+    # Known kind: the loader validates apiVersion + the kind schema together, so a
+    # requester sees every problem in one pass.
+    return loader(data, service_catalog=service_catalog, app_catalog=app_catalog)
+
+
+def _load_access_request(
+    data: dict, *, service_catalog: Any = None, app_catalog: Any = None
+) -> AccessRequest:
+    """Loader for `kind: AccessRequest` — the security-rule kind (kind #1)."""
+    c = _Collector(service_catalog=service_catalog, app_catalog=app_catalog)
     if data.get("apiVersion") != API_VERSION:
         c.add("apiVersion", f"must be {API_VERSION!r}, got {data.get('apiVersion')!r}")
-    if data.get("kind") != KIND:
-        c.add("kind", f"must be {KIND!r}, got {data.get('kind')!r}")
-
     metadata = _load_metadata(data.get("metadata"), c)
     spec = _load_spec(data.get("spec"), c)
-
     if c.problems:
         raise IntentError(c.problems)
     # metadata and spec are non-None here because any failure added a problem.
     return AccessRequest(metadata=metadata, spec=spec)  # type: ignore[arg-type]
+
+
+#: Intent kind -> loader (ADR-0001). Register new kinds here (ZoneRequest, …);
+#: each loader validates that kind's schema and returns its typed request. The
+#: pipeline compiles/classifies per kind. Keeps the envelope check in one place.
+_KIND_LOADERS = {KIND: _load_access_request}
 
 
 def _req_str(obj: dict, key: str, path: str, c: _Collector) -> Optional[str]:
