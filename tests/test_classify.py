@@ -200,3 +200,46 @@ def test_redundant_rule_flagged_low():
 def test_no_policy_means_no_stateful_checks():
     b = _spec("B", "dmz", "app")
     assert classify(b).tier == "LOW"      # without policy, novel_zone_pair can't fire
+
+
+# ── Shadowing (subset of a broader rule) ──────────────────────────────────
+def test_shadowed_by_broader_rule():
+    narrow = _change(srcs=[("sn", "ip-netmask", "10.20.1.0/24")], dsts=[HOST], services=[HTTPS], name="NARROW")
+    broad = _change(srcs=[("sb", "ip-netmask", "10.0.0.0/8")], dsts=[HOST], services=[HTTPS], name="BROAD")
+    policy = PolicyContext.from_changes([narrow, broad])
+    assert "shadowed_by" in _fired(classify(narrow, policy=policy))  # narrow ⊂ broad
+
+
+def test_broad_rule_is_not_shadowed_by_narrow():
+    narrow = _change(srcs=[("sn", "ip-netmask", "10.20.1.0/24")], dsts=[HOST], services=[HTTPS], name="NARROW")
+    broad = _change(srcs=[("sb", "ip-netmask", "10.0.0.0/8")], dsts=[HOST], services=[HTTPS], name="BROAD")
+    policy = PolicyContext.from_changes([narrow, broad])
+    assert "shadowed_by" not in _fired(classify(broad, policy=policy))  # broad ⊄ narrow
+
+
+def test_wider_service_shadows_narrower():
+    narrow = _change(srcs=[("sn", "ip-netmask", "10.20.1.0/24")], dsts=[HOST],
+                     services=[("svc443", "tcp", "443")], name="N")
+    broad = _change(srcs=[("sb", "ip-netmask", "10.0.0.0/8")], dsts=[HOST],
+                    services=[("svcall", "tcp", "0-65535")], name="B")
+    policy = PolicyContext.from_changes([narrow, broad])
+    assert "shadowed_by" in _fired(classify(narrow, policy=policy))  # 443 ⊂ 0-65535
+
+
+def test_not_shadowed_when_service_not_covered():
+    # the "narrow" rule uses port 22, which the broader rule (443 only) doesn't cover
+    a = _change(srcs=[("sa", "ip-netmask", "10.0.0.0/8")], dsts=[HOST],
+                services=[("svc443", "tcp", "443")], name="A")
+    b = _change(srcs=[("sb", "ip-netmask", "10.20.1.0/24")], dsts=[HOST],
+                services=[("svc22", "tcp", "22")], name="B")
+    policy = PolicyContext.from_changes([a, b])
+    assert "shadowed_by" not in _fired(classify(b, policy=policy))
+
+
+def test_not_shadowed_across_zone_pairs():
+    inside = _change(srcs=[("si", "ip-netmask", "10.20.1.0/24")], dsts=[HOST], services=[HTTPS],
+                     from_zones=("local",), to_zones=("app",), name="I")
+    broad = _change(srcs=[("sb", "ip-netmask", "10.0.0.0/8")], dsts=[HOST], services=[HTTPS],
+                    from_zones=("local",), to_zones=("internet",), name="B")  # different to-zone
+    policy = PolicyContext.from_changes([inside, broad])
+    assert "shadowed_by" not in _fired(classify(inside, policy=policy))  # zones not a superset

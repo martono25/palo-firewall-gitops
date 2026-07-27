@@ -81,6 +81,88 @@ def _rule_sig(rule: SecurityRule) -> _Sig:
 
 
 @dataclass(frozen=True)
+class RuleFacts:
+    """A rule's resolved match — object VALUES (CIDR/fqdn) + (proto, port) — for
+    subset/containment analysis (shadowing)."""
+
+    rid: str
+    folder: str
+    from_zones: FrozenSet[str]
+    to_zones: FrozenSet[str]
+    action: str
+    sources: FrozenSet[str]                     # address object values (CIDR or fqdn)
+    dests: FrozenSet[str]
+    services: FrozenSet[Tuple[str, str]]        # (protocol, port)
+
+
+def _rule_facts(change: CompiledChange) -> RuleFacts:
+    r = change.rule
+    addr = {a.name: a.value for a in change.address_objects}
+    svc = {s.name: (s.protocol, s.port) for s in change.service_objects}
+    return RuleFacts(
+        rid=r.name, folder=r.folder,
+        from_zones=frozenset(r.from_zones), to_zones=frozenset(r.to_zones), action=r.action,
+        sources=frozenset(addr.get(n, n) for n in r.sources),
+        dests=frozenset(addr.get(n, n) for n in r.destinations),
+        services=frozenset(svc.get(n, (n, "")) for n in r.services),
+    )
+
+
+def _covers(a_values: FrozenSet[str], b_value: str) -> bool:
+    """Does some value in `a_values` cover `b_value`? Exact, any (0.0.0.0/0), or
+    CIDR supernet. An fqdn is covered only exactly or by any (conservative)."""
+    if b_value in a_values or "0.0.0.0/0" in a_values:
+        return True
+    try:
+        bnet = ipaddress.ip_network(b_value, strict=False)
+    except ValueError:
+        return False  # fqdn / unparsable — only exact or any (handled above)
+    for a in a_values:
+        try:
+            if bnet.subnet_of(ipaddress.ip_network(a, strict=False)):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _all_covered(a_values: FrozenSet[str], b_values: FrozenSet[str]) -> bool:
+    return all(_covers(a_values, b) for b in b_values)
+
+
+def _port_bounds(port: str) -> Optional[Tuple[int, int]]:
+    p = port.strip().lower()
+    if p in ("any", "0-65535", "0"):
+        return (0, 65535)
+    try:
+        if "-" in p:
+            lo, hi = (int(x) for x in p.split("-", 1))
+            return (lo, hi)
+        return (int(p), int(p))
+    except ValueError:
+        return None
+
+
+def _svc_covered(a_svcs: FrozenSet[Tuple[str, str]], b_svc: Tuple[str, str]) -> bool:
+    """A covers b if some a-service has the same protocol and a port range ⊇ b's."""
+    bp, bport = b_svc
+    bb = _port_bounds(bport)
+    if bb is None:
+        return b_svc in a_svcs  # unparsable -> exact only
+    for ap, aport in a_svcs:
+        if ap != bp:
+            continue
+        ab = _port_bounds(aport)
+        if ab and ab[0] <= bb[0] and bb[1] <= ab[1]:
+            return True
+    return False
+
+
+def _all_svc_covered(a_svcs: FrozenSet[Tuple[str, str]], b_svcs: FrozenSet[Tuple[str, str]]) -> bool:
+    return all(_svc_covered(a_svcs, b) for b in b_svcs)
+
+
+@dataclass(frozen=True)
 class PolicyContext:
     """The rest of the declared policy a change is judged against.
 
@@ -95,20 +177,25 @@ class PolicyContext:
     zone_pair_rules: Dict[Tuple[str, Tuple[str, str]], FrozenSet[str]]
     #: (folder, signature) -> ids of rules with that exact match
     sig_rules: Dict[Tuple[str, _Sig], FrozenSet[str]]
+    #: resolved facts per rule, for containment (shadowing) analysis
+    rule_facts: Tuple[RuleFacts, ...] = ()
 
     @classmethod
     def from_changes(cls, changes: Iterable[CompiledChange]) -> "PolicyContext":
         zp: Dict[Tuple[str, Tuple[str, str]], Set[str]] = defaultdict(set)
         sg: Dict[Tuple[str, _Sig], Set[str]] = defaultdict(set)
+        facts: List[RuleFacts] = []
         for ch in changes:
             r = ch.rule
             for fz in r.from_zones:
                 for tz in r.to_zones:
                     zp[(r.folder, (fz, tz))].add(r.name)
             sg[(r.folder, _rule_sig(r))].add(r.name)
+            facts.append(_rule_facts(ch))
         return cls(
             zone_pair_rules={k: frozenset(v) for k, v in zp.items()},
             sig_rules={k: frozenset(v) for k, v in sg.items()},
+            rule_facts=tuple(facts),
         )
 
 
@@ -243,6 +330,21 @@ def classify(
         if dupes:
             fire("LOW", "redundant_rule",
                  f"identical match to existing rule(s) {dupes} — possible duplicate/sprawl")
+        elif rule.action.lower() == "allow":
+            # Shadowed: this allow's traffic is a proper SUBSET of a broader allow
+            # in the same folder (same zones-superset + covered sources/dests/
+            # services) -> the broader rule already permits it (dead/redundant).
+            me = _rule_facts(change)
+            for other in policy.rule_facts:
+                if other.rid == rid or other.folder != me.folder or other.action.lower() != "allow":
+                    continue
+                if (me.from_zones <= other.from_zones and me.to_zones <= other.to_zones
+                        and _all_covered(other.sources, me.sources)
+                        and _all_covered(other.dests, me.dests)
+                        and _all_svc_covered(other.services, me.services)):
+                    fire("LOW", "shadowed_by",
+                         f"traffic is a subset of rule {other.rid!r} — likely redundant")
+                    break
 
     tier = "LOW"
     for f in fired:
