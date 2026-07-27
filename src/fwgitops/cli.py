@@ -188,7 +188,7 @@ def run_classify(
     HIGH/CRITICAL changes need an explicit human override, not silent auto-apply.
     Exit codes:  0 ok · 1 usage/IO error · 2 invalid intent · 3 gate exceeded.
     """
-    from fwgitops.classify import TIERS, classify
+    from fwgitops.classify import TIERS, PolicyContext, classify
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
@@ -238,11 +238,14 @@ def run_classify(
             print(f"  - {p}", file=err)
         return 2
 
+    # The rest of the declared policy — each change is classified against it
+    # (GitOps = source of truth), enabling stateful checks (novel zone-pair, etc.).
+    policy = PolicyContext.from_changes(changes)
     tiers = {"LOW": 0, "HIGH": 0, "CRITICAL": 0}
     exceeded: List[str] = []
     gate_rank = TIERS.index(gate) if gate else None
     for ch in sorted(changes, key=lambda c: c.rule.name):
-        v = classify(ch)
+        v = classify(ch, policy=policy)
         tiers[v.tier] = tiers.get(v.tier, 0) + 1
         checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
         print(f"  {ch.rule.name:16} {v.tier:9} {checks}", file=out)
