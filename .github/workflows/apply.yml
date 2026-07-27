@@ -111,3 +111,15 @@ jobs:
             fwgitops push "$folder"
             echo "::endgroup::"
           done
+
+      # Evidence (Phase 2): one NIST-mapped bundle per applied change, carrying
+      # the risk verdict, intent/tfvars hashes, and CI provenance (GITHUB_* env).
+      # Uploaded as a run artifact — the audit record for this apply.
+      - name: Generate evidence bundles
+        run: fwgitops evidence intent --out evidence --status applied
+
+      - name: Upload evidence bundles
+        uses: actions/upload-artifact@v7
+        with:
+          name: evidence-bundles
+          path: evidence/

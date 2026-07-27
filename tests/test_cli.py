@@ -166,6 +166,31 @@ def test_classify_gate_higher_override_allows_high(tmp_path, capsys):
     assert run_classify(intent_root, env_map, gate="CRITICAL") == 0  # explicit override
 
 
+# ── fwgitops evidence (Phase 2) ────────────────────────────────────────────
+from fwgitops.cli import run_evidence  # noqa: E402
+
+
+def test_evidence_writes_bundle_with_risk_and_provenance(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    intent_root, env_map, _ = _setup(tmp_path)
+    out = tmp_path / "ev"
+    rc = run_evidence(intent_root, env_map, out, tfvars_root=tmp_path / "none")
+    assert rc == 0
+    b = json.loads((out / "prod-edge" / "REQ-2026-0417.json").read_text())
+    assert b["schema"] == "fw-evidence/v1" and b["status"] == "applied"
+    assert b["risk"]["classifier_version"]                    # risk verdict recorded
+    assert b["apply"]["run_url"].endswith("/actions/runs/42")  # CI provenance
+    assert set(b["controls"]) >= {"AC-4", "CM-3", "AU-12"}
+
+
+def test_evidence_rejects_invalid_intent_exits_2(tmp_path, capsys):
+    bad = VALID_INTENT.replace("action: allow", "action: nope")
+    intent_root, env_map, _ = _setup(tmp_path, intent_body=bad)
+    assert run_evidence(intent_root, env_map, tmp_path / "ev") == 2
+
+
 # ── fwgitops push (T13) ────────────────────────────────────────────────────
 from fwgitops.cli import run_push  # noqa: E402
 from fwgitops.scmapi import ScmCredentials, ScmSession  # noqa: E402

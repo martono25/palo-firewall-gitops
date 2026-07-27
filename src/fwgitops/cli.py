@@ -266,6 +266,103 @@ def run_classify(
     return 0
 
 
+def run_evidence(
+    intent_root: Path,
+    env_map_path: Path,
+    out_root: Path,
+    *,
+    status: str = "applied",
+    tfvars_root: Path = Path("terraform"),
+    service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
+    out=None,
+    err=None,
+) -> int:
+    """Write a NIST-mapped evidence bundle per change (Phase 2).
+
+    Compiles + classifies every intent, then assembles one bundle per change with
+    the risk verdict, intent/tfvars hashes, and CI provenance (from GITHUB_* env),
+    written to `out_root/<folder>/<req_id>.json`. This is the apply-path audit
+    record — run it after apply/push and upload the folder as a run artifact.
+    Exit codes:  0 ok · 1 usage/IO/build error · 2 invalid intent.
+    """
+    import os
+    from datetime import datetime, timezone
+
+    from fwgitops.classify import PolicyContext, classify
+    from fwgitops.evidence import CIContext, EvidenceError, build_bundle, sha256_file, write_bundle
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    if not env_map_path.is_file():
+        print(f"error: env map not found: {env_map_path}", file=err)
+        return 1
+    try:
+        env_map = EnvMap.from_dict(read_yaml(env_map_path))
+    except ResolveError as e:
+        print(f"error: invalid env map {env_map_path}: {e}", file=err)
+        return 1
+    catalog, ok = _load_service_catalog(service_catalog_path, err)
+    if not ok:
+        return 1
+    app_catalog, ok = _load_app_catalog(app_catalog_path, err)
+    if not ok:
+        return 1
+    if not intent_root.exists():
+        print(f"error: intent root not found: {intent_root}", file=err)
+        return 1
+
+    intents = discover_intents(intent_root)
+    if not intents:
+        print(f"no intent files found under {intent_root}", file=out)
+        return 0
+
+    items = []  # (path, request, change)
+    problems: List[str] = []
+    for path in intents:
+        rel = _display_path(path)
+        try:
+            doc = read_yaml(path)
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"{rel}: could not parse YAML: {e}")
+            continue
+        try:
+            ar = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
+            items.append((path, ar, compile_request(ar, env_map)))
+        except IntentError as e:
+            problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
+        except ResolveError as e:
+            problems.append(f"{rel}: {e}")
+    if problems:
+        print(f"REJECTED — {len(problems)} of {len(intents)} intent file(s) invalid:", file=err)
+        for p in problems:
+            print(f"  - {p}", file=err)
+        return 2
+
+    policy = PolicyContext.from_changes([ch for _, _, ch in items])
+    ci = CIContext.from_env(os.environ)
+    now = datetime.now(timezone.utc)
+    written: List[Path] = []
+    for path, ar, ch in items:
+        tfvars = tfvars_root / ch.rule.folder / "rules.auto.tfvars.json"
+        try:
+            bundle = build_bundle(
+                request=ar, change=ch, status=status, generated_at=now,
+                intent_sha256=sha256_file(path), intent_path=_display_path(path),
+                tfvars_sha256=sha256_file(tfvars) if tfvars.is_file() else None,
+                risk=classify(ch, policy=policy), ci=ci,
+            )
+        except EvidenceError as e:
+            print(f"error: could not build evidence for {ch.rule.name}: {e}", file=err)
+            return 1
+        written.append(write_bundle(bundle, out_root))
+
+    print(f"wrote {len(written)} evidence bundle(s) to {out_root}:", file=out)
+    for p in written:
+        print(f"  - {p}", file=out)
+    return 0
+
+
 def run_push(
     folder: str,
     *,
@@ -438,6 +535,19 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path,
                     help="app name catalog (Phase 2)")
 
+    e = sub.add_parser("evidence", help="write NIST-mapped evidence bundles per change (Phase 2)")
+    e.add_argument("intent_root", nargs="?", default="intent", type=Path,
+                   help="directory of intent YAML (default: intent)")
+    e.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path)
+    e.add_argument("--out", default=Path("evidence"), type=Path,
+                   help="output root; writes <out>/<folder>/<req_id>.json")
+    e.add_argument("--status", default="applied", choices=("applied", "rejected", "failed"),
+                   help="outcome recorded in each bundle (default: applied)")
+    e.add_argument("--tfvars-root", default=Path("terraform"), type=Path,
+                   help="where the compiled rules.auto.tfvars.json live (for the hash)")
+    e.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
+    e.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
     p.add_argument("folder", help="SCM folder to push")
     p.add_argument("--admin", action="append", dest="admins",
@@ -476,6 +586,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "classify":
         return run_classify(
             args.intent_root, args.env_map, gate=args.gate,
+            service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+        )
+    if args.command == "evidence":
+        return run_evidence(
+            args.intent_root, args.env_map, args.out, status=args.status,
+            tfvars_root=args.tfvars_root,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "push":
