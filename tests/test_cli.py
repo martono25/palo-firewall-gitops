@@ -191,6 +191,36 @@ def test_evidence_rejects_invalid_intent_exits_2(tmp_path, capsys):
     assert run_evidence(intent_root, env_map, tmp_path / "ev") == 2
 
 
+# ── fwgitops drift (Phase 2) ───────────────────────────────────────────────
+from fwgitops.cli import run_drift  # noqa: E402
+
+_MANAGED_417 = ["gitops:managed", "gitops:req:REQ-2026-0417"]
+
+
+def test_drift_flags_unmanaged_exit_3(tmp_path, capsys):
+    intent_root, env_map, _ = _setup(tmp_path)  # declares REQ-2026-0417 in prod-edge
+    snap = tmp_path / "snap.json"
+    snap.write_text(json.dumps([
+        {"folder": "prod-edge", "name": "REQ-2026-0417", "tags": _MANAGED_417},
+        {"folder": "prod-edge", "name": "MANUAL-RULE", "tags": []},
+    ]))
+    rc = run_drift(intent_root, env_map, snap)
+    assert rc == 3
+    assert "MANUAL-RULE" in capsys.readouterr().out
+
+
+def test_drift_clean_exit_0(tmp_path, capsys):
+    intent_root, env_map, _ = _setup(tmp_path)
+    snap = tmp_path / "snap.json"
+    snap.write_text(json.dumps([{"folder": "prod-edge", "name": "REQ-2026-0417", "tags": _MANAGED_417}]))
+    assert run_drift(intent_root, env_map, snap) == 0
+
+
+def test_drift_missing_snapshot_exit_1(tmp_path, capsys):
+    intent_root, env_map, _ = _setup(tmp_path)
+    assert run_drift(intent_root, env_map, tmp_path / "nope.json") == 1
+
+
 # ── fwgitops push (T13) ────────────────────────────────────────────────────
 from fwgitops.cli import run_push  # noqa: E402
 from fwgitops.scmapi import ScmCredentials, ScmSession  # noqa: E402
