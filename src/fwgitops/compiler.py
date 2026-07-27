@@ -24,7 +24,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Union
 
-from fwgitops.intent import AccessRequest, Endpoint, Service
+from fwgitops.intent import AccessRequest, Endpoint, Service, ZoneRequest
 from fwgitops.resolve import EnvMap
 from fwgitops.tags import MANAGED_TAG, Section, managed_tags, object_name
 
@@ -70,6 +70,30 @@ class CompiledChange:
     address_objects: List[AddressObject]
     service_objects: List[ServiceObject]
     rule: SecurityRule
+
+
+@dataclass(frozen=True)
+class CompiledZone:
+    """Compiled output of a ZoneRequest (kind #2) — one scm_zone in a folder."""
+
+    folder: str
+    name: str
+    zone_type: str
+    interfaces: List[str]
+
+
+def compile_any(request: Any, env_map: EnvMap, section: "Section" = None) -> Any:
+    """Dispatch a typed request to its kind's compiler (ADR-0001).
+
+    Returns a CompiledChange (AccessRequest) or CompiledZone (ZoneRequest). The
+    downstream stages handle the type they care about (policy stages take
+    CompiledChange; the zone tfvars takes CompiledZone).
+    """
+    if isinstance(request, AccessRequest):
+        return compile_request(request, env_map, section or Section.SPECIFIC_ALLOW)
+    if isinstance(request, ZoneRequest):
+        return _compile_zone(request, env_map)
+    raise CompileError(f"no compiler registered for request type {type(request).__name__}")
 
 
 def _address_for(ep: Endpoint, folder: str) -> AddressObject:
@@ -226,3 +250,31 @@ def dumps_tfvars(changes: List[CompiledChange]) -> str:
     the file and PR diffs reflect only real changes.
     """
     return json.dumps(to_tfvars(changes), sort_keys=True, indent=2) + "\n"
+
+
+# ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────
+def _compile_zone(zr: ZoneRequest, env_map: EnvMap) -> CompiledZone:
+    res = env_map.resolve(zr.spec.environment)  # raises ResolveError (fail closed)
+    return CompiledZone(
+        folder=res.folder, name=zr.spec.zone,
+        zone_type=zr.spec.zone_type, interfaces=list(zr.spec.interfaces),
+    )
+
+
+def zone_tfvars(zones: List[CompiledZone]) -> Dict[str, Any]:
+    """Aggregate compiled zones into the per-folder `zones` tfvars structure.
+
+    scm_zone's `network` selects the type: {layer3: [ifaces]} etc. — an empty
+    interface list is a valid typed zone (references resolve; traffic needs ifaces).
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    for z in zones:
+        if z.name in out:
+            raise CompileError(f"duplicate zone key {z.name!r} — two ZoneRequests share metadata.id/zone")
+        out[z.name] = {"name": z.name, "folder": z.folder, "network": {z.zone_type: list(z.interfaces)}}
+    return {"zones": out}
+
+
+def dumps_zone_tfvars(zones: List[CompiledZone]) -> str:
+    """Byte-stable JSON for `zones.auto.tfvars.json` (terraform auto-loads it)."""
+    return json.dumps(zone_tfvars(zones), sort_keys=True, indent=2) + "\n"
