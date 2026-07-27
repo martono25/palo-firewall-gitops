@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Tuple
 from fwgitops.compiler import (
     CompiledChange,
     CompiledZone,
+    check_zone_consistency,
     compile_any,
     dumps_tfvars,
     dumps_zone_tfvars,
@@ -105,6 +106,17 @@ def run_compile(
 
     changes = [c for c in compiled if isinstance(c, CompiledChange)]
     zones = [c for c in compiled if isinstance(c, CompiledZone)]
+
+    # Cross-kind check (ADR-0001): a rule may only use a zone declared by the env
+    # map or a ZoneRequest — caught here, not at the firewall's device commit.
+    zone_violations = check_zone_consistency(changes, zones, env_map)
+    if zone_violations:
+        print(f"REJECTED — {len(zone_violations)} zone-consistency problem(s); nothing written:",
+              file=err)
+        for v in zone_violations:
+            print(f"  - {v}", file=err)
+        return 2
+
     written: List[Path] = []
     # AccessRequest -> rules.auto.tfvars.json per folder.
     for folder, folder_changes in sorted(_group_by_folder(changes).items()):

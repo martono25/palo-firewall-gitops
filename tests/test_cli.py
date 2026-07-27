@@ -102,6 +102,35 @@ def test_example_files_are_skipped(tmp_path):
     assert rc == 0  # example ignored, valid intent still compiles
 
 
+def test_compile_rejects_undeclared_zone(tmp_path, capsys):
+    root = tmp_path / "intent" / "prod"
+    root.mkdir(parents=True)
+    (root / "REQ.yaml").write_text(
+        "apiVersion: fw-intent/v1\n"
+        "kind: AccessRequest\n"
+        "metadata: {id: REQ-Z, requester: m@corp, ticket: J-1, justification: x, requested: 2026-07-27}\n"
+        "spec:\n"
+        "  environment: prod\n"
+        "  action: allow\n"
+        "  source: [{app: dmz-app}]\n"
+        "  destination: [{cidr: 10.20.9.10/32}]\n"
+        "  service: [{protocol: tcp, port: \"443\"}]\n"
+        "  log: true\n"
+    )
+    env_map = tmp_path / "env.yaml"
+    env_map.write_text(ENV_MAP)  # prod -> prod-edge, zones trust/app
+    apps = tmp_path / "apps.yaml"
+    apps.write_text(
+        "apps:\n  dmz-app: {environment: prod, folder: prod-edge, zone: dmz, addresses: [10.20.1.0/24]}\n"
+    )
+    out = tmp_path / "tf"
+    rc = run_compile(tmp_path / "intent", env_map, out, app_catalog_path=apps)
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "dmz" in err and "ZoneRequest" in err
+    assert not (out / "prod-edge" / "rules.auto.tfvars.json").exists()  # nothing written
+
+
 def test_compile_zone_request_writes_zones_tfvars(tmp_path, capsys):
     root = tmp_path / "intent" / "prod"
     root.mkdir(parents=True)

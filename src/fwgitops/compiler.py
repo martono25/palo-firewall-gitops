@@ -278,3 +278,31 @@ def zone_tfvars(zones: List[CompiledZone]) -> Dict[str, Any]:
 def dumps_zone_tfvars(zones: List[CompiledZone]) -> str:
     """Byte-stable JSON for `zones.auto.tfvars.json` (terraform auto-loads it)."""
     return json.dumps(zone_tfvars(zones), sort_keys=True, indent=2) + "\n"
+
+
+def check_zone_consistency(
+    changes: List[CompiledChange], zones: List[CompiledZone], env_map: EnvMap
+) -> List[str]:
+    """Cross-kind check: every zone a rule uses must be DECLARED for its folder.
+
+    Declared = the env-map baseline (from_zone/to_zone, which exist on the device)
+    PLUS any zone a ZoneRequest declares. So a rule referencing a zone (via an app
+    or otherwise) that no ZoneRequest backs is caught HERE, at compile/PR time —
+    not at the firewall's device commit ("zone 'X' is not a valid reference").
+    Returns actionable violation messages (empty list = consistent).
+    """
+    declared: Dict[str, set] = {f: set(z) for f, z in env_map.baseline_zones_by_folder().items()}
+    for z in zones:
+        declared.setdefault(z.folder, set()).add(z.name)
+
+    violations: List[str] = []
+    for ch in sorted(changes, key=lambda c: c.rule.name):
+        used = set(ch.rule.from_zones) | set(ch.rule.to_zones)
+        undeclared = used - declared.get(ch.rule.folder, set())
+        if undeclared:
+            have = sorted(declared.get(ch.rule.folder, set())) or ["(none)"]
+            violations.append(
+                f"{ch.rule.name}: zone(s) {sorted(undeclared)} in folder {ch.rule.folder!r} "
+                f"are not declared — add a ZoneRequest (or fix the app/env). Declared: {have}"
+            )
+    return violations

@@ -54,6 +54,18 @@ class EnvMap:
             )
         return cls(out)
 
+    def baseline_zones_by_folder(self) -> Dict[str, set]:
+        """Per folder, the default zones the env map declares (from_zone + to_zone).
+
+        These are the baseline zones that already exist on the folder's device;
+        additional zones must be declared by a ZoneRequest. Used by the cross-kind
+        zone-consistency check so a rule can only reference a declared zone.
+        """
+        out: Dict[str, set] = {}
+        for res in self._map.values():
+            out.setdefault(res.folder, set()).update((res.from_zone, res.to_zone))
+        return out
+
     def resolve(self, environment: str) -> EnvResolution:
         try:
             return self._map[environment]
