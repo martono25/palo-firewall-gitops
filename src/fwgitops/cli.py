@@ -266,6 +266,103 @@ def run_classify(
     return 0
 
 
+def _compile_intents(intent_root, env_map_path, catalog, app_catalog, err):
+    """Shared load+compile for classify/evidence/drift. Returns (items, code).
+
+    items = list of (path, request, change) on success (code 0); None on error
+    (code 1 usage/IO, 2 invalid intent) — the caller returns that code.
+    """
+    if not env_map_path.is_file():
+        print(f"error: env map not found: {env_map_path}", file=err)
+        return None, 1
+    try:
+        env_map = EnvMap.from_dict(read_yaml(env_map_path))
+    except ResolveError as e:
+        print(f"error: invalid env map {env_map_path}: {e}", file=err)
+        return None, 1
+    if not intent_root.exists():
+        print(f"error: intent root not found: {intent_root}", file=err)
+        return None, 1
+    intents = discover_intents(intent_root)
+    items, problems = [], []
+    for path in intents:
+        rel = _display_path(path)
+        try:
+            doc = read_yaml(path)
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"{rel}: could not parse YAML: {e}")
+            continue
+        try:
+            ar = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
+            items.append((path, ar, compile_request(ar, env_map)))
+        except IntentError as e:
+            problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
+        except ResolveError as e:
+            problems.append(f"{rel}: {e}")
+    if problems:
+        print(f"REJECTED — {len(problems)} of {len(intents)} intent file(s) invalid:", file=err)
+        for p in problems:
+            print(f"  - {p}", file=err)
+        return None, 2
+    return items, 0
+
+
+def run_drift(
+    intent_root: Path,
+    env_map_path: Path,
+    snapshot_path: Path,
+    *,
+    service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
+    out=None,
+    err=None,
+) -> int:
+    """Detect drift: declared intents vs a snapshot of SCM's actual rules.
+
+    The snapshot is a JSON/YAML list of {folder, name, tags} (what a folder rule
+    read returns). Reports UNMANAGED (added outside GitOps), ORPHANED (managed but
+    no longer declared), and MALFORMED rules. Exit: 0 clean · 1 usage · 2 invalid
+    intent · 3 drift found.
+    """
+    from fwgitops.drift import ActualRule, detect_drift
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    catalog, ok = _load_service_catalog(service_catalog_path, err)
+    if not ok:
+        return 1
+    app_catalog, ok = _load_app_catalog(app_catalog_path, err)
+    if not ok:
+        return 1
+    items, code = _compile_intents(intent_root, env_map_path, catalog, app_catalog, err)
+    if items is None:
+        return code
+
+    if not snapshot_path.is_file():
+        print(f"error: SCM snapshot not found: {snapshot_path}", file=err)
+        return 1
+    try:
+        raw = read_yaml(snapshot_path)
+    except Exception as e:  # noqa: BLE001
+        print(f"error: could not read snapshot {snapshot_path}: {e}", file=err)
+        return 1
+    rows = raw.get("data") if isinstance(raw, dict) else raw
+    if not isinstance(rows, list):
+        print(f"error: snapshot must be a list of {{folder, name, tags}} rules", file=err)
+        return 1
+    actual = []
+    for i, x in enumerate(rows):
+        if not isinstance(x, dict) or "folder" not in x or "name" not in x:
+            print(f"error: snapshot[{i}] must have 'folder' and 'name'", file=err)
+            return 1
+        actual.append(ActualRule(folder=str(x["folder"]), name=str(x["name"]),
+                                  tags=tuple(x.get("tags", []) or [])))
+
+    report = detect_drift([ch for _, _, ch in items], actual)
+    print(report.summary(), file=out)
+    return 0 if report.is_clean else 3
+
+
 def run_evidence(
     intent_root: Path,
     env_map_path: Path,
@@ -548,6 +645,14 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     e.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
 
+    dr = sub.add_parser("drift", help="detect drift: declared intents vs an SCM rule snapshot (Phase 2)")
+    dr.add_argument("intent_root", nargs="?", default="intent", type=Path)
+    dr.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path)
+    dr.add_argument("--snapshot", required=True, type=Path,
+                    help="JSON/YAML list of the folder's actual rules {folder, name, tags}")
+    dr.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
+    dr.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
     p.add_argument("folder", help="SCM folder to push")
     p.add_argument("--admin", action="append", dest="admins",
@@ -592,6 +697,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_evidence(
             args.intent_root, args.env_map, args.out, status=args.status,
             tfvars_root=args.tfvars_root,
+            service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+        )
+    if args.command == "drift":
+        return run_drift(
+            args.intent_root, args.env_map, args.snapshot,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "push":
