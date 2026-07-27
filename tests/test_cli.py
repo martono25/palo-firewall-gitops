@@ -124,10 +124,18 @@ from fwgitops.cli import run_classify  # noqa: E402
 
 def test_classify_reports_tier(tmp_path, capsys):
     intent_root, env_map, _ = _setup(tmp_path)
-    rc = run_classify(intent_root, env_map)
+    rc = run_classify(intent_root, env_map)  # report-only -> exit 0 whatever the tier
     assert rc == 0
     o = capsys.readouterr().out
-    assert "REQ-2026-0417" in o and "LOW" in o and "classified 1" in o
+    assert "REQ-2026-0417" in o and "classified 1" in o
+
+
+def _second_intent_same_zone_pair(intent_root):
+    # A second prod intent (same trust->app zone-pair, different source) so
+    # neither rule is a "novel zone-pair" -> both classify on stateless merits.
+    body = VALID_INTENT.replace("REQ-2026-0417", "REQ-2026-0999").replace(
+        "10.20.1.0/24", "10.20.5.0/24")
+    (intent_root / "prod" / "REQ2.yaml").write_text(body)
 
 
 def test_classify_rejects_invalid_intent_exits_2(tmp_path, capsys):
@@ -148,7 +156,8 @@ def test_classify_gate_blocks_change_above_tier(tmp_path, capsys):
 
 
 def test_classify_gate_allows_low_change(tmp_path, capsys):
-    intent_root, env_map, _ = _setup(tmp_path)  # VALID_INTENT is LOW
+    intent_root, env_map, _ = _setup(tmp_path)
+    _second_intent_same_zone_pair(intent_root)  # shared zone-pair -> not novel -> LOW
     assert run_classify(intent_root, env_map, gate="LOW") == 0
 
 

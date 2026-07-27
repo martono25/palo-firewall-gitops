@@ -8,7 +8,8 @@ from fwgitops.classify import CLASSIFIER_VERSION, DEFAULT_THRESHOLDS, Thresholds
 from fwgitops.compiler import AddressObject, CompiledChange, SecurityRule, ServiceObject
 
 
-def _change(*, srcs, dsts, services, from_zones=("local",), to_zones=("internet",), action="allow"):
+def _change(*, srcs, dsts, services, from_zones=("local",), to_zones=("internet",),
+            action="allow", name="R", folder="f"):
     """Build a CompiledChange.
 
     srcs/dsts: list of (name, type, value); services: list of (name, proto, port).
@@ -25,7 +26,7 @@ def _change(*, srcs, dsts, services, from_zones=("local",), to_zones=("internet"
     src_names, dst_names = add(srcs), add(dsts)
     svcs = [ServiceObject(name=n, protocol=p, port=pt, folder="f", tags=[]) for n, p, pt in services]
     rule = SecurityRule(
-        name="R", folder="f", from_zones=list(from_zones), to_zones=list(to_zones),
+        name=name, folder=folder, from_zones=list(from_zones), to_zones=list(to_zones),
         sources=src_names, destinations=dst_names, services=[s.name for s in svcs],
         action=action, log_end=True, tags=[],
     )
@@ -153,3 +154,49 @@ def test_custom_thresholds_version_recorded():
                  thresholds=th)
     # /24 <= 24 is now "broad" under these thresholds
     assert v.tier == "HIGH" and v.thresholds_version == "test-1"
+
+
+# ── Stateful checks (policy context) ──────────────────────────────────────
+from fwgitops.classify import PolicyContext  # noqa: E402
+
+
+def _spec(name, fz, tz, src="10.20.1.0/24"):
+    return _change(srcs=[("s", "ip-netmask", src)], dsts=[HOST], services=[HTTPS],
+                   from_zones=(fz,), to_zones=(tz,), name=name)
+
+
+def test_novel_zone_pair_fires_for_a_new_path():
+    a = _spec("A", "local", "internet")
+    b = _spec("B", "dmz", "app")          # nobody else uses dmz->app
+    policy = PolicyContext.from_changes([a, b])
+    v = classify(b, policy=policy)
+    assert v.tier == "HIGH" and "novel_zone_pair" in _fired(v)
+
+
+def test_shared_zone_pair_is_not_novel():
+    a = _spec("A", "local", "internet")
+    b = _spec("B", "local", "internet", src="10.20.2.0/24")  # same pair as A
+    policy = PolicyContext.from_changes([a, b])
+    assert classify(b, policy=policy).tier == "LOW"          # A shares the pair
+    assert "novel_zone_pair" not in _fired(classify(b, policy=policy))
+
+
+def test_lone_rule_is_novel_against_itself_only():
+    a = _spec("A", "local", "internet")
+    v = classify(a, policy=PolicyContext.from_changes([a]))  # only A uses the pair
+    assert v.tier == "HIGH" and "novel_zone_pair" in _fired(v)
+
+
+def test_redundant_rule_flagged_low():
+    a = _spec("A", "local", "internet")
+    b = _spec("B", "local", "internet")   # identical match to A (diff id)
+    policy = PolicyContext.from_changes([a, b])
+    v = classify(b, policy=policy)
+    assert "redundant_rule" in _fired(v)
+    # redundancy is a hygiene note, not a risk escalation
+    assert v.tier == "LOW"
+
+
+def test_no_policy_means_no_stateful_checks():
+    b = _spec("B", "dmz", "app")
+    assert classify(b).tier == "LOW"      # without policy, novel_zone_pair can't fire

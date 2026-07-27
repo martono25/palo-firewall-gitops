@@ -24,10 +24,11 @@ against the ruleset that produced it).
 from __future__ import annotations
 
 import ipaddress
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
-from fwgitops.compiler import AddressObject, CompiledChange
+from fwgitops.compiler import AddressObject, CompiledChange, SecurityRule
 from fwgitops.evidence import RiskVerdict
 
 CLASSIFIER_VERSION = "1.0"
@@ -64,6 +65,51 @@ class Thresholds:
 
 
 DEFAULT_THRESHOLDS = Thresholds()
+
+
+#: A rule's normalized match signature (folder-scoped). Object names are
+#: value-derived (deterministic), so equal signatures == equal effective match.
+_Sig = Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...], Tuple[str, ...], Tuple[str, ...], str]
+
+
+def _rule_sig(rule: SecurityRule) -> _Sig:
+    return (
+        tuple(sorted(rule.from_zones)), tuple(sorted(rule.to_zones)),
+        tuple(sorted(rule.sources)), tuple(sorted(rule.destinations)),
+        tuple(sorted(rule.services)), rule.action,
+    )
+
+
+@dataclass(frozen=True)
+class PolicyContext:
+    """The rest of the declared policy a change is judged against.
+
+    GitOps is source of truth, so "current policy" = all the other committed
+    intents. Built once per run; each change is then classified against it. Keyed
+    by folder (rules in different folders are independent), and by RULE ID so a
+    change is never compared against itself (a rule doesn't make its own zone-pair
+    "established" or itself "redundant").
+    """
+
+    #: (folder, (from_zone, to_zone)) -> ids of rules using that pair
+    zone_pair_rules: Dict[Tuple[str, Tuple[str, str]], FrozenSet[str]]
+    #: (folder, signature) -> ids of rules with that exact match
+    sig_rules: Dict[Tuple[str, _Sig], FrozenSet[str]]
+
+    @classmethod
+    def from_changes(cls, changes: Iterable[CompiledChange]) -> "PolicyContext":
+        zp: Dict[Tuple[str, Tuple[str, str]], Set[str]] = defaultdict(set)
+        sg: Dict[Tuple[str, _Sig], Set[str]] = defaultdict(set)
+        for ch in changes:
+            r = ch.rule
+            for fz in r.from_zones:
+                for tz in r.to_zones:
+                    zp[(r.folder, (fz, tz))].add(r.name)
+            sg[(r.folder, _rule_sig(r))].add(r.name)
+        return cls(
+            zone_pair_rules={k: frozenset(v) for k, v in zp.items()},
+            sig_rules={k: frozenset(v) for k, v in sg.items()},
+        )
 
 
 class _Unclassifiable(Exception):
@@ -118,8 +164,19 @@ def _ports(port: str) -> List[int]:
     return []  # "any" etc. handled by span, not membership
 
 
-def classify(change: CompiledChange, *, thresholds: Thresholds = DEFAULT_THRESHOLDS) -> RiskVerdict:
-    """Classify a compiled change into a RiskVerdict (fail-closed)."""
+def classify(
+    change: CompiledChange,
+    *,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+    policy: Optional[PolicyContext] = None,
+) -> RiskVerdict:
+    """Classify a compiled change into a RiskVerdict (fail-closed).
+
+    Stateless checks always run. If `policy` (the rest of the declared policy) is
+    given, STATEFUL checks also run: `novel_zone_pair` (this rule uses a from/to
+    zone-pair no OTHER rule in its folder uses — a new traffic path, HIGH) and
+    `redundant_rule` (its match is identical to another rule — sprawl, LOW note).
+    """
     rule = change.rule
     by_name = {a.name: a for a in change.address_objects}
     fired: List[Dict[str, str]] = []
@@ -169,6 +226,23 @@ def classify(change: CompiledChange, *, thresholds: Thresholds = DEFAULT_THRESHO
             thresholds_version=thresholds.version,
             checks_fired=({"check": "unclassifiable_input", "reason": str(e), "tier": "HIGH"},),
         )
+
+    # ── Stateful checks (this change vs the rest of the declared policy) ──────
+    if policy is not None:
+        rid = rule.name
+        novel = [
+            f"{fz}->{tz}"
+            for fz in rule.from_zones for tz in rule.to_zones
+            if not (policy.zone_pair_rules.get((rule.folder, (fz, tz)), frozenset()) - {rid})
+        ]
+        if novel:
+            fire("HIGH", "novel_zone_pair",
+                 f"zone-pair(s) {novel} used by no other rule in folder {rule.folder!r} "
+                 "(a new traffic path)")
+        dupes = sorted(policy.sig_rules.get((rule.folder, _rule_sig(rule)), frozenset()) - {rid})
+        if dupes:
+            fire("LOW", "redundant_rule",
+                 f"identical match to existing rule(s) {dupes} — possible duplicate/sprawl")
 
     tier = "LOW"
     for f in fired:
