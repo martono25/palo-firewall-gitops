@@ -1,0 +1,178 @@
+# Provisioning a firewall (operator guide)
+
+**Audience: platform operator** — the person who stands up firewalls. This is
+**not** the rule-request flow (that's [`requesting-rules.md`](requesting-rules.md),
+and needs no cloud/licensing access). Provisioning stands up the VM-Series itself
+so that rule requests have somewhere to land.
+
+> **Status: manual pilot flow (Day-1 is v2.0).** Today provisioning is a single
+> `terraform apply` you run with the right inputs. Making it fully GitOps-driven —
+> interfaces, IP, zones, virtual router, all from Git — is the v2.0 target
+> ([`docs/adr/0002-day1-provisioning-thin-bootstrap.md`](adr/0002-day1-provisioning-thin-bootstrap.md)).
+> The steps below are what actually works now.
+
+---
+
+## What it does
+
+`provisioning/aws-vmseries-pilot` (Terraform) stands up, on AWS:
+VPC + mgmt/dataplane subnets, a VM-Series instance, an EIP, and a bootstrap S3
+bucket (init-cfg + license authcode). On first boot the firewall:
+licenses itself (BYOL), fetches its device certificate (registration PIN),
+connects to SCM, and **auto-onboards** into the target folder via a serial-number
+onboarding rule. After that, Day-2 rule requests flow to it.
+
+---
+
+## Prerequisites
+
+### 1. Install the tools (one time, on your machine)
+
+| Tool | macOS (Homebrew) | Other |
+|---|---|---|
+| **Git** | `brew install git` | <https://git-scm.com/downloads> |
+| **Terraform** ≥ 1.6 | `brew install terraform` | <https://developer.hashicorp.com/terraform/install> |
+| **AWS CLI** v2 | `brew install awscli` | <https://aws.amazon.com/cli/> |
+| **Python** ≥ 3.11 | `brew install python@3.11` | <https://www.python.org/downloads/> |
+
+Then clone the repo and install the `fwgitops` CLI:
+
+```bash
+git clone https://github.com/martono25/palo-firewall-gitops.git
+cd palo-firewall-gitops
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .            # installs the `fwgitops` command
+fwgitops --help             # verify
+terraform version           # verify
+```
+
+### 2. Configure credentials (one time)
+
+```bash
+aws configure               # or `aws configure sso` — access to the target account/region
+export SCM_CLIENT_ID=...     # SCM service account (for `fwgitops onboard`, and the
+export SCM_CLIENT_SECRET=... # scm Terraform provider). Keep the secret out of shell
+export SCM_SCOPE=tsg_id:XXXX # history — e.g. `read -rs SCM_CLIENT_SECRET`.
+```
+
+Verify AWS works: `aws sts get-caller-identity`.
+
+### 3. Palo Alto / licensing inputs (operator-held)
+
+| Need | Where it comes from |
+|---|---|
+| VM-Series **BYOL AMI** subscription | AWS Marketplace, same region |
+| VM-Series **BYOL auth code** | Palo Alto CSP (Assets → licenses) |
+| **Registration PIN** (id + value) | CSP → Products → Device Certificates → Generate Registration PIN (time-limited) |
+| An existing **EC2 SSH key pair** in the region | your AWS |
+| A **serial-number onboarding rule** in SCM | SCM UI, once — matches the device serial prefix → target folder |
+
+All secret inputs go in `terraform.tfvars` (**gitignored — never committed**).
+
+---
+
+## One-time platform bootstrap (before the *first* firewall)
+
+These exist **once per platform**, not per firewall. Skip this section if the
+platform is already set up (state backend + SCM folder + onboarding rule exist).
+
+1. **Terraform state backend** (S3 bucket for state) — `terraform/bootstrap-backend`
+   (`terraform init && terraform apply`). One-off.
+2. **SCM folder** the firewalls land in — `terraform/bootstrap-scm-folder`.
+3. **CI OIDC role** (so GitHub Actions can reach the state backend, no stored keys)
+   — `terraform/github-oidc`.
+4. **`backend.hcl`** in each Terraform dir — this file is **gitignored** (points at
+   the state bucket from step 1), so a fresh clone won't have it. Create it from
+   the example, e.g.:
+   ```bash
+   cp terraform/prod-edge/backend.hcl.example terraform/prod-edge/backend.hcl
+   $EDITOR terraform/prod-edge/backend.hcl        # set bucket/key/region
+   # (CI generates this automatically via terraform/make-backend.sh)
+   ```
+5. **Serial-number onboarding rule** in the SCM UI — one rule that matches your
+   VM-Series serial-number prefix → the target folder, so devices auto-place on
+   registration. (Device-onboarding APIs are a separate privileged domain; this is
+   a one-time UI step.)
+
+---
+
+## Steps (per firewall)
+
+```bash
+cd provisioning/aws-vmseries-pilot
+
+# 0. create backend.hcl if it doesn't exist (gitignored S3 state config:
+#    bucket / key / region — use terraform/prod-edge/backend.hcl.example as the format)
+$EDITOR backend.hcl
+
+# 1. Fill in your inputs (secrets stay local — this file is gitignored)
+cp terraform.tfvars.example terraform.tfvars
+$EDITOR terraform.tfvars     # ssh_key_name, mgmt_allowed_cidr, vmseries_ami_id,
+                             # scm_folder, scm_registration_pin_id/value, vmseries_authcode
+
+# 2. Stand it up (~2-3 min for the infra)
+terraform init -backend-config=backend.hcl
+terraform apply
+
+# 3. Wait ~10-20 min: boot -> license -> register -> auto-onboard to the folder.
+#    A fresh device also downloads content (App-ID/AV) before its first config push.
+```
+
+### Verify it came up
+
+```bash
+# On the device (SSH key = your EC2 key pair; pipe commands to skip the pager):
+printf 'set cli pager off\nshow system info\nshow cloud-management-status\n' \
+  | ssh -T -i <ec2-key>.pem admin@<mgmt_public_ip>
+#   serial: 0079...            <- device licensed
+#   device-certificate-status: Valid
+#   Cloud Management: Connected: yes
+
+# In SCM (via the API), the device appears as {name:<serial>, parent:<folder>}:
+fwgitops onboard <serial> --folder <scm_folder> --name fw-<folder>-<suffix>
+#   verifies placement + sets a friendly display name
+```
+
+Once it shows in the folder and connected, it's ready — Day-2 rule requests to
+that `environment` (which maps to the folder) will apply to it.
+
+---
+
+## Tear down
+
+```bash
+terraform destroy    # in provisioning/aws-vmseries-pilot
+```
+
+Two **manual CSP follow-ups** (there is no API for these):
+
+1. **Delete the device in CSP** (Customer Support Portal). `terraform destroy`
+   removes the AWS resources but the SCM/CSP device record persists. SCM can only
+   *unassign* a device; **deletion is CSP-only**.
+2. **This also frees the BYOL license seat.** `terraform destroy` does **not**
+   deactivate the license, so each provision/destroy cycle leaks a seat until you
+   delete the device in CSP. If you cycle VMs often and skip this, new VMs
+   eventually fail to license (`serial: unknown`, *"device not found"*). Clean up
+   stale CSP devices to reclaim seats.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| Device never appears in SCM; SSH shows `serial: unknown`, `device-certificate-status: None` | Registration/licensing failed — registration PIN expired/used up, or **no free license seats** (delete stale devices in CSP). |
+| Device onboards but rules don't reach it for 20-30 min | Normal — a fresh VM finishes content bootstrap before its first config push. Verify on-device with `show running security-policy`, not just the SCM `is_first_push_done` flag (it lags). |
+| `mgmt` unreachable | `mgmt_allowed_cidr` doesn't include your IP; or the device is still booting. |
+| Device lands in "Available Devices", not the folder | The serial-number onboarding rule didn't match — check the rule's serial regex vs the device serial in SCM. |
+
+---
+
+## Provisioning vs requesting — who does what
+
+| | Provisioning (this doc) | Requesting rules ([that doc](requesting-rules.md)) |
+|---|---|---|
+| Who | Platform operator | Any engineer |
+| Needs | AWS + CSP + licensing access | Just write a YAML + open a PR |
+| Frequency | Once per firewall | Every rule change |
+| Interface | `terraform apply` (manual, v2.0 = GitOps) | Pull request |
