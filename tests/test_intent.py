@@ -85,6 +85,61 @@ def test_rule_components_fail_closed(bad, path):
     assert path in problems(doc)
 
 
+# ── v1.0 rule completeness fields ──────────────────────────────────────────
+def test_v1_fields_default_when_omitted():
+    sp = load_intent(valid_doc()).spec
+    assert sp.description is None
+    assert sp.log_start is False
+    assert sp.source_user == ["any"]
+    assert sp.category == ["any"]
+    assert sp.negate_source is False and sp.negate_destination is False
+
+
+def test_v1_fields_explicit():
+    doc = valid_doc()
+    doc["spec"].update({
+        "description": "web tier to payments",
+        "log_start": True,
+        "source_user": ["corp\\alice", "grp-payments"],
+        "category": ["financial-services"],
+        "negate_source": True,
+        "negate_destination": False,
+    })
+    sp = load_intent(doc).spec
+    assert sp.description == "web tier to payments"
+    assert sp.log_start is True
+    assert sp.source_user == ["corp\\alice", "grp-payments"]
+    assert sp.category == ["financial-services"]
+    assert sp.negate_source is True
+
+
+@pytest.mark.parametrize("action", ["drop", "reset-client", "reset-server", "reset-both"])
+def test_extended_actions_accepted(action):
+    doc = valid_doc()
+    doc["spec"]["action"] = action
+    assert load_intent(doc).spec.action == action
+
+
+def test_unknown_action_rejected():
+    doc = valid_doc()
+    doc["spec"]["action"] = "bounce"
+    assert "spec.action" in problems(doc)
+
+
+@pytest.mark.parametrize("bad,path", [
+    ({"log_start": "yes"}, "spec.log_start"),
+    ({"negate_source": 1}, "spec.negate_source"),
+    ({"source_user": []}, "spec.source_user"),
+    ({"source_user": "alice"}, "spec.source_user"),
+    ({"category": [""]}, "spec.category"),
+    ({"description": "  "}, "spec.description"),
+])
+def test_v1_fields_fail_closed(bad, path):
+    doc = valid_doc()
+    doc["spec"].update(bad)
+    assert path in problems(doc)
+
+
 # ── Catalog-backed name validation (ADR-0003) ─────────────────────────────
 from fwgitops.catalog import NameCatalog  # noqa: E402
 

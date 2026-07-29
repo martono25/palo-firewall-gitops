@@ -186,6 +186,13 @@ def build_bundle(
                 "rulebase": rule.rulebase,
                 "relative_position": rule.relative_position,
                 "target_rule": rule.target_rule,
+                # v1.0 completeness
+                "description": rule.description,
+                "log_start": rule.log_start,
+                "source_user": list(rule.source_user),
+                "category": list(rule.category),
+                "negate_source": rule.negate_source,
+                "negate_destination": rule.negate_destination,
             },
             "tags": list(rule.tags),
             "tfvars_sha256": tfvars_sha256,

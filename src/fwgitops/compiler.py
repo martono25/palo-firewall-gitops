@@ -75,6 +75,13 @@ class SecurityRule:
     relative_position: str = "bottom"
     #: Anchor rule for before/after ordering; None for top/bottom.
     target_rule: Optional[str] = None
+    # ── v1.0 rule completeness (all set via enrich; provider drops them too) ──
+    description: Optional[str] = None
+    log_start: bool = False
+    source_user: List[str] = field(default_factory=lambda: ["any"])
+    category: List[str] = field(default_factory=lambda: ["any"])
+    negate_source: bool = False
+    negate_destination: bool = False
 
 
 @dataclass(frozen=True)
@@ -192,6 +199,12 @@ def compile_request(
         log_setting=ar.spec.log_forwarding,
         relative_position=rel,
         target_rule=tgt,
+        description=ar.spec.description,
+        log_start=ar.spec.log_start,
+        source_user=list(ar.spec.source_user),
+        category=list(ar.spec.category),
+        negate_source=ar.spec.negate_source,
+        negate_destination=ar.spec.negate_destination,
     )
     return CompiledChange(
         address_objects=address_objects, service_objects=service_objects, rule=rule

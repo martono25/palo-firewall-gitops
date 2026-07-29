@@ -31,7 +31,7 @@ KIND = "AccessRequest"
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]+$")  # flows into PAN-OS tags downstream
 _FQDN = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})+$")
-_ACTIONS = {"allow", "deny"}
+_ACTIONS = {"allow", "deny", "drop", "reset-client", "reset-server", "reset-both"}
 _PROTOCOLS = {"tcp", "udp"}
 _ENDPOINT_KEYS = {"cidr", "fqdn", "app"}
 
@@ -103,6 +103,19 @@ class Spec:
     log_forwarding: Optional[str] = None
     #: Ordering: top | bottom | before:<rule> | after:<rule>. Default bottom.
     position: str = "bottom"
+    # ── v1.0 rule completeness ──
+    #: Free-text rule documentation (audit). None -> no description.
+    description: Optional[str] = None
+    #: Log at session start too (pairs with `log`, which is session end).
+    log_start: bool = False
+    #: User-ID match (users/groups). Omitted -> ["any"].
+    source_user: List[str] = field(default_factory=lambda: ["any"])
+    #: URL categories to match. Omitted -> ["any"].
+    category: List[str] = field(default_factory=lambda: ["any"])
+    #: Invert the source match (applies to everything EXCEPT source).
+    negate_source: bool = False
+    #: Invert the destination match.
+    negate_destination: bool = False
 
 
 @dataclass(frozen=True)
@@ -337,16 +350,53 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     _validate_name(log_forwarding, c.log_forwarding_catalog, f"{path}.log_forwarding", c)
     position = _load_position(sp, path, c)
 
+    # ── v1.0 rule-completeness fields ──
+    description, desc_ok = _opt_str(sp, "description", path, c)
+    log_start, ls_ok = _opt_bool(sp, "log_start", path, c)
+    negate_source, ns_ok = _opt_bool(sp, "negate_source", path, c)
+    negate_destination, nd_ok = _opt_bool(sp, "negate_destination", path, c)
+    source_user = _opt_str_list(sp, "source_user", path, c)
+    category = _opt_str_list(sp, "category", path, c)
+
     if environment is None or action not in _ACTIONS or source is None or destination is None \
             or service is None or not isinstance(log, bool) \
-            or application is None or position is None or not profile_ok or not logfwd_ok:
+            or application is None or position is None or not profile_ok or not logfwd_ok \
+            or not desc_ok or not ls_ok or not ns_ok or not nd_ok \
+            or source_user is None or category is None:
         return None
     return Spec(
         environment=environment, action=action, source=source,
         destination=destination, service=service, log=log,
         application=application, profile=profile,
         log_forwarding=log_forwarding, position=position,
+        description=description, log_start=bool(log_start),
+        source_user=source_user, category=category,
+        negate_source=bool(negate_source), negate_destination=bool(negate_destination),
     )
+
+
+def _opt_bool(obj: dict, key: str, path: str, c: _Collector):
+    """Optional boolean: (value, ok). Absent -> (False, True)."""
+    if key not in obj:
+        return False, True
+    val = obj.get(key)
+    if not isinstance(val, bool):
+        c.add(f"{path}.{key}", f"must be a boolean, got {type(val).__name__}")
+        return None, False
+    return val, True
+
+
+def _opt_str_list(sp: dict, key: str, path: str, c: _Collector) -> Optional[List[str]]:
+    """Optional list of non-empty strings (e.g. source_user, category). Omitted -> ['any']."""
+    raw = sp.get(key)
+    if raw is None:
+        return ["any"]
+    if not isinstance(raw, list) or not raw or not all(
+        isinstance(x, str) and x.strip() for x in raw
+    ):
+        c.add(f"{path}.{key}", "must be a non-empty list of strings")
+        return None
+    return [x.strip() for x in raw]
 
 
 def _opt_str(obj: dict, key: str, path: str, c: _Collector):

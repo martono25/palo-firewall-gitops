@@ -144,6 +144,19 @@ def _merged_body(current: Dict[str, Any], rule: SecurityRule) -> Dict[str, Any]:
         body["profile_setting"] = {"group": [rule.profile_group]}
     if rule.log_setting:
         body["log_setting"] = rule.log_setting
+    # v1.0 completeness. These carry declared defaults (any / false), so they
+    # always reflect desired state — set unconditionally (like application). The
+    # provider drops config-driven fields, so enrich is authoritative; `action` is
+    # re-asserted here to guarantee drop/reset-* land even if the provider mangles
+    # it. `description` is opt-in (set only when declared) to stay non-destructive.
+    body["action"] = rule.action
+    body["source_user"] = list(rule.source_user)
+    body["category"] = list(rule.category)
+    body["negate_source"] = rule.negate_source
+    body["negate_destination"] = rule.negate_destination
+    body["log_start"] = rule.log_start
+    if rule.description is not None:
+        body["description"] = rule.description
     for k in ("id", "tfid"):
         body.pop(k, None)
     return body

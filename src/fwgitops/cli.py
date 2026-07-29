@@ -634,10 +634,24 @@ def run_enrich(
         print(f"enrich (dry-run) — folder {folder!r}: {len(changes)} rule(s):", file=out)
         for ch in sorted(changes, key=lambda c: c.rule.name):
             r = ch.rule
-            print(f"  {r.name}: application={list(r.application)} "
+            neg = []
+            if r.negate_source:
+                neg.append("src")
+            if r.negate_destination:
+                neg.append("dst")
+            extras = f" negate={','.join(neg)}" if neg else ""
+            if r.source_user != ["any"]:
+                extras += f" user={list(r.source_user)}"
+            if r.category != ["any"]:
+                extras += f" url-category={list(r.category)}"
+            if r.log_start:
+                extras += " log_start=true"
+            if r.description:
+                extras += f" description={r.description!r}"
+            print(f"  {r.name}: action={r.action} application={list(r.application)} "
                   f"profile={r.profile_group or '(none)'} "
                   f"log_forwarding={r.log_setting or '(none)'} "
-                  f"position={_position_str(r)}", file=out)
+                  f"position={_position_str(r)}{extras}", file=out)
         return 0
 
     if session is None:

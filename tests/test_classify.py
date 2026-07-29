@@ -9,7 +9,8 @@ from fwgitops.compiler import AddressObject, CompiledChange, SecurityRule, Servi
 
 
 def _change(*, srcs, dsts, services, from_zones=("local",), to_zones=("internet",),
-            action="allow", name="R", folder="f", profile_group="inspect-grp"):
+            action="allow", name="R", folder="f", profile_group="inspect-grp",
+            negate_source=False, negate_destination=False):
     """Build a CompiledChange.
 
     srcs/dsts: list of (name, type, value); services: list of (name, proto, port).
@@ -32,6 +33,7 @@ def _change(*, srcs, dsts, services, from_zones=("local",), to_zones=("internet"
         name=name, folder=folder, from_zones=list(from_zones), to_zones=list(to_zones),
         sources=src_names, destinations=dst_names, services=[s.name for s in svcs],
         action=action, log_end=True, tags=[], profile_group=profile_group,
+        negate_source=negate_source, negate_destination=negate_destination,
     )
     return CompiledChange(address_objects=list(addr.values()), service_objects=svcs, rule=rule)
 
@@ -112,6 +114,24 @@ def test_risky_port_internal_is_not_flagged():
         from_zones=("local",), to_zones=("local",),
     ))
     assert v.tier == "LOW"
+
+
+# ── Negation (v1.0) — fail closed ─────────────────────────────────────────
+def test_negated_source_escalates_high():
+    v = classify(_change(srcs=[("s", "ip-netmask", "10.20.1.0/24")], dsts=[HOST],
+                         services=[HTTPS], negate_source=True))
+    assert v.tier == "HIGH" and "negated_match" in _fired(v)
+
+
+def test_negated_destination_escalates_high():
+    v = classify(_change(srcs=[("s", "ip-netmask", "10.20.1.0/24")], dsts=[HOST],
+                         services=[HTTPS], negate_destination=True))
+    assert "negated_match" in _fired(v)
+
+
+def test_no_negation_does_not_fire():
+    v = classify(_change(srcs=[("s", "ip-netmask", "10.20.1.0/24")], dsts=[HOST], services=[HTTPS]))
+    assert "negated_match" not in _fired(v)
 
 
 # ── Inspection posture (ADR-0003) ─────────────────────────────────────────

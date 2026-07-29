@@ -84,6 +84,19 @@ def test_rule_components_explicit_compiled():
     assert r.relative_position == "after" and r.target_rule == "REQ-9"
 
 
+def test_v1_fields_compiled():
+    from test_intent import valid_doc as _vd
+    doc = _vd()
+    doc["spec"].update({
+        "action": "drop", "description": "blocklist", "log_start": True,
+        "source_user": ["corp\\bob"], "category": ["gambling"], "negate_source": True,
+    })
+    r = compile_request(load_intent(doc), env_map()).rule
+    assert r.action == "drop" and r.description == "blocklist" and r.log_start is True
+    assert r.source_user == ["corp\\bob"] and r.category == ["gambling"]
+    assert r.negate_source is True and r.negate_destination is False
+
+
 def test_position_top_has_no_target():
     doc = valid_doc()
     doc["spec"]["position"] = "top"

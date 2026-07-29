@@ -17,14 +17,40 @@ from fwgitops.scmapi import ScmCredentials, ScmSession
 
 
 def _rule(name="R", *, application=("any",), profile_group=None, log_setting=None,
-          relative_position="bottom", rulebase="pre", target_rule=None, folder="prod-edge"):
+          relative_position="bottom", rulebase="pre", target_rule=None, folder="prod-edge",
+          action="allow", description=None, log_start=False, source_user=("any",),
+          category=("any",), negate_source=False, negate_destination=False):
     return SecurityRule(
         name=name, folder=folder, from_zones=["local"], to_zones=["internet"],
-        sources=["s"], destinations=["d"], services=["svc"], action="allow",
+        sources=["s"], destinations=["d"], services=["svc"], action=action,
         log_end=True, tags=[], application=list(application), profile_group=profile_group,
         log_setting=log_setting, rulebase=rulebase, relative_position=relative_position,
-        target_rule=target_rule,
+        target_rule=target_rule, description=description, log_start=log_start,
+        source_user=list(source_user), category=list(category),
+        negate_source=negate_source, negate_destination=negate_destination,
     )
+
+
+def test_enrich_sets_v1_fields():
+    r = _rule("R", action="drop", source_user=("corp\\bob",), category=("gambling",),
+              negate_source=True, log_start=True, description="blocklist")
+    c = FakeRuleClient({"R": "id1"})
+    enrich_folder(c, "prod-edge", [_change(r)])
+    (_, body), = c.updates
+    assert body["action"] == "drop"                 # re-asserted (drop/reset guaranteed)
+    assert body["source_user"] == ["corp\\bob"]
+    assert body["category"] == ["gambling"]
+    assert body["negate_source"] is True and body["negate_destination"] is False
+    assert body["log_start"] is True
+    assert body["description"] == "blocklist"
+
+
+def test_enrich_omits_description_when_none():
+    c = FakeRuleClient({"R": "id1"}, current={"id1": {"id": "id1", "name": "R",
+                                                      "description": "existing"}})
+    enrich_folder(c, "prod-edge", [_change(_rule("R", description=None))])
+    (_, body), = c.updates
+    assert body["description"] == "existing"   # opt-in: preserved, not cleared
 
 
 def _change(rule):
