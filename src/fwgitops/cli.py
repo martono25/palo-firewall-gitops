@@ -593,6 +593,7 @@ def run_enrich(
     *,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
+    dry_run: bool = False,
     session=None,
     out=None,
     err=None,
@@ -605,9 +606,13 @@ def run_enrich(
     via the SCM API — landing in the same candidate so the push commits skeleton +
     enrichment atomically. Exit codes: 0 ok/noop · 1 config/auth · 2 invalid intent
     · 3 enrich failed.
+
+    `dry_run` previews what WOULD be set (from the compiled intents) and makes NO
+    SCM calls — safe for PR CI, where the terraform plan alone no longer shows
+    these fields (the module is skeleton-only; enrich owns them).
     """
     from fwgitops.clients import ScmRuleClient
-    from fwgitops.enrich import EnrichError, enrich_folder
+    from fwgitops.enrich import EnrichError, _position_str, enrich_folder
     from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
 
     out = out if out is not None else sys.stdout
@@ -622,6 +627,17 @@ def run_enrich(
                if isinstance(ch, CompiledChange) and ch.rule.folder == folder]
     if not changes:
         print(f"no managed rules for folder {folder!r} — nothing to enrich", file=out)
+        return 0
+
+    if dry_run:
+        # PR preview: what enrich WOULD set on each rule. No SCM contact.
+        print(f"enrich (dry-run) — folder {folder!r}: {len(changes)} rule(s):", file=out)
+        for ch in sorted(changes, key=lambda c: c.rule.name):
+            r = ch.rule
+            print(f"  {r.name}: application={list(r.application)} "
+                  f"profile={r.profile_group or '(none)'} "
+                  f"log_forwarding={r.log_setting or '(none)'} "
+                  f"position={_position_str(r)}", file=out)
         return 0
 
     if session is None:
@@ -808,6 +824,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="environment resolution map (default: catalog/environments.yaml)")
     en.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     en.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+    en.add_argument("--dry-run", action="store_true",
+                    help="preview what would be set (no SCM calls) — for PR validation")
 
     o = sub.add_parser("onboard", help="finalize onboarding: verify placement + set display name")
     o.add_argument("serial", help="device serial number (from ssh 'show system info')")
@@ -860,6 +878,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_enrich(
             args.folder, args.intent_root, args.env_map,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+            dry_run=args.dry_run,
         )
     if args.command == "onboard":
         return run_onboard(args.serial, folder=args.folder, name=args.name)

@@ -33,7 +33,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - run: pip install -e .
+      - run: pip install -e ".[dev]"
+
+      # 0. Unit tests — a PR must not regress the compiler/enrich/classifier.
+      - name: Run tests
+        run: python -m pytest -q
 
       # 1. Fail-closed intent validation. Any invalid intent fails the PR here
       #    with an actionable report — the requester sees exactly what to fix.
@@ -45,6 +49,20 @@ jobs:
       #     CRITICAL dual-control) is wired on the apply side as it matures.
       - name: Risk-classify (preview)
         run: fwgitops classify intent
+
+      # 1c. Enrich PREVIEW (dry-run, no SCM). The module is skeleton-only, so the
+      #     terraform plan below does NOT show App-ID / profile / log-forwarding /
+      #     ordering — enrich sets those. This surfaces them for review so the
+      #     security-relevant fields aren't invisible in the PR. No side effects.
+      - name: Enrich preview (dry-run)
+        run: |
+          set -euo pipefail
+          for dir in terraform/*/; do
+            folder=$(basename "$dir")
+            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
+            [ -f "$dir/main.tf" ] || continue
+            fwgitops enrich "$folder" --dry-run | tee "enrich-$folder.txt"
+          done
 
       # 2. The committed rules.auto.tfvars.json must match a fresh compile, so
       #    the artifact reviewed in the PR is exactly what apply will use.
@@ -86,15 +104,23 @@ jobs:
       - name: Upload plans
         uses: actions/upload-artifact@v7
         with:
-          name: terraform-plans
-          path: plan-*.txt
+          name: pr-previews
+          path: |
+            plan-*.txt
+            enrich-*.txt
 
       - name: Comment plan summary on PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo "### Terraform plan (PR preview)"
+            echo "### Enrich preview (App-ID / profile / log-forwarding / ordering)"
+            echo "_These fields are set by \`fwgitops enrich\` via the SCM API — the scm provider drops them, so they do NOT appear in the terraform plan below._"
+            for f in enrich-*.txt; do
+              [ -f "$f" ] || continue
+              echo '```'; cat "$f"; echo '```'
+            done
+            echo "### Terraform plan (skeleton: zones / addresses / service / action / tags)"
             for f in plan-*.txt; do
               [ -f "$f" ] || continue
               echo "<details><summary>$f</summary>"
