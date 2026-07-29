@@ -1,0 +1,68 @@
+# App-ID catalog (ADR-0003) — the curated allowlist of App-IDs a rule may use.
+#
+# Platform-maintained; adding a name is a reviewed PR. When present, this file
+# turns `spec.application` into a VALIDATED field: a typo'd or unvetted App-ID is
+# rejected at PR time instead of failing at the SCM device commit.
+#
+# The authoritative universe of App-IDs is PANW Applipedia
+# (https://applipedia.paloaltonetworks.com/). This is NOT the full database —
+# it is the subset this platform has vetted for use. Add new App-IDs here (as
+# published by Applipedia) as real requests need them.
+#
+# `any` is always accepted (built-in) and does not need to be listed — it is the
+# default when `spec.application` is omitted (a plain L4/port rule).
+#
+# Names below are exact PANW App-IDs (case- and hyphen-sensitive).
+applications:
+  # ── Web / general ────────────────────────────────────────────────────────
+  - web-browsing
+  - ssl
+  - dns
+  - dns-base
+  - ntp
+  - ntp-base
+  - ocsp
+  - ping
+
+  # ── Auth / directory ─────────────────────────────────────────────────────
+  - ldap
+  - kerberos
+  - radius
+  - tacacs-plus
+
+  # ── Remote access / management ───────────────────────────────────────────
+  - ssh
+  - ms-rdp
+  - vnc-base
+
+  # ── File transfer ────────────────────────────────────────────────────────
+  - ftp
+  - tftp
+  - scp
+  - sftp
+
+  # ── Mail ─────────────────────────────────────────────────────────────────
+  - smtp
+  - smtp-base
+  - imap
+  - imap-base
+  - pop3
+  - pop3-base
+
+  # ── Databases ────────────────────────────────────────────────────────────
+  - mssql-db
+  - mysql
+  - postgres
+  - oracle
+  - mongodb
+  - redis
+
+  # ── Infrastructure / APIs ────────────────────────────────────────────────
+  - snmp
+  - snmp-base
+  - syslog
+  - kubernetes
+  - docker
+  - git
+  - soap
+  - rest

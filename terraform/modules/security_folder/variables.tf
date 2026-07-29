@@ -45,6 +45,13 @@ variable "security_rules" {
     log_end      = bool
     disabled     = optional(bool, false)
     tags         = list(string)
+    # ── ADR-0003 rule components (optional; defaults = plain L4 allow) ──
+    application       = optional(list(string), ["any"])
+    profile_group     = optional(string)      # null -> no security profile
+    log_setting       = optional(string)      # null -> local logs only
+    rulebase          = optional(string, "pre")
+    relative_position = optional(string, "bottom") # top|bottom|before|after
+    target_rule       = optional(string)      # anchor for before/after
   }))
   default = {}
 }

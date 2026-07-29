@@ -305,6 +305,16 @@ def classify(
                     if exposed:
                         fire("HIGH", "risky_port_from_internet",
                              f"exposes port(s) {exposed} inbound from an internet/untrust zone")
+
+            # ── Inspection posture (ADR-0003) ──
+            # An allow with no security profile group permits traffic with zero
+            # threat inspection (no IPS/AV/anti-spyware/URL/WildFire). Not blocked
+            # — profiles are opt-in by design — but recorded so the evidence
+            # bundle shows a human accepted an uninspected allow.
+            if rule.profile_group is None:
+                fire("LOW", "allow_without_inspection",
+                     "allow rule has no security profile group — traffic is permitted "
+                     "without threat inspection")
     except _Unclassifiable as e:
         # Fail closed: we could not fully evaluate the change -> never LOW.
         return RiskVerdict(

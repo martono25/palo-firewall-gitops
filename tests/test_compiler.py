@@ -60,6 +60,46 @@ def test_rule_identity_and_zones():
     assert ch.rule.log_end is True
 
 
+# ── ADR-0003 rule components → SecurityRule + tfvars ───────────────────────
+def test_rule_component_defaults_compiled():
+    r = compiled().rule
+    assert r.application == ["any"]
+    assert r.profile_group is None
+    assert r.log_setting is None
+    assert r.rulebase == "pre"
+    assert r.relative_position == "bottom"
+    assert r.target_rule is None
+
+
+def test_rule_components_explicit_compiled():
+    from test_intent import valid_doc as _vd
+    doc = _vd()
+    doc["spec"].update({
+        "application": ["ssl"], "profile": "strict",
+        "log_forwarding": "siem", "position": "after:REQ-9",
+    })
+    r = compile_request(load_intent(doc), env_map()).rule
+    assert r.application == ["ssl"] and r.profile_group == "strict"
+    assert r.log_setting == "siem"
+    assert r.relative_position == "after" and r.target_rule == "REQ-9"
+
+
+def test_position_top_has_no_target():
+    doc = valid_doc()
+    doc["spec"]["position"] = "top"
+    r = compile_request(load_intent(doc), env_map()).rule
+    assert r.relative_position == "top" and r.target_rule is None
+
+
+def test_tfvars_carries_rule_components():
+    rule = to_tfvars([compiled()])["security_rules"]["REQ-2026-0417"]
+    for k in ("application", "profile_group", "log_setting",
+              "rulebase", "relative_position", "target_rule"):
+        assert k in rule
+    assert rule["application"] == ["any"]
+    assert rule["rulebase"] == "pre"
+
+
 def _app_catalog():
     from fwgitops.catalog import AppCatalog
     return AppCatalog.from_dict({"apps": {

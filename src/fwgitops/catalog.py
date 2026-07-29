@@ -16,7 +16,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, FrozenSet, List, Tuple
 
 _PROTOCOLS = {"tcp", "udp"}
 _PORT_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
@@ -86,6 +86,64 @@ class ServiceCatalog:
         if problems:
             raise CatalogError("invalid service catalog:\n  - " + "\n  - ".join(problems))
         return cls(services=out)
+
+
+@dataclass(frozen=True)
+class NameCatalog:
+    """A curated allowlist of named firewall references (validation-only).
+
+    Unlike Service/App catalogs, there is no expansion — a NameCatalog answers a
+    single question: does this name exist on the firewall? It backs the ADR-0003
+    `profile` (security profile group), `application` (App-ID), and
+    `log_forwarding` (log-forwarding profile) fields, so a typo'd name is caught
+    at PR time instead of at the device commit ("profile 'X' is not a valid
+    reference"). Names are platform-maintained config — adding one is a reviewed
+    PR — which keeps the reference surface curated. Fail-closed: an unknown name
+    is an error, never a silent default.
+
+    `always_valid` holds names that are always accepted without being listed
+    (e.g. the built-in App-ID `any`).
+    """
+
+    kind: str                                      # human label, e.g. "App-ID"
+    names: FrozenSet[str]
+    always_valid: FrozenSet[str] = frozenset()
+
+    def validate(self, name: str) -> None:
+        """Raise CatalogError if `name` is not a known (or always-valid) name."""
+        if name in self.always_valid or name in self.names:
+            return
+        known = sorted(self.names) or "(catalog is empty)"
+        raise CatalogError(f"unknown {self.kind} {name!r}; known: {known}")
+
+    @classmethod
+    def from_dict(
+        cls, raw: Any, *, kind: str, key: str, always_valid: FrozenSet[str] = frozenset()
+    ) -> "NameCatalog":
+        """Build from a mapping `{<key>: {name: {...}}}`, `{<key>: [name, ...]}`,
+        or a bare mapping/list of names. Metadata per name is accepted and ignored
+        (room to grow); only the name is validated."""
+        if isinstance(raw, dict):
+            entries: Any = raw.get(key, raw) if key in raw else raw
+        else:
+            entries = raw
+        if isinstance(entries, dict):
+            items = list(entries.keys())
+        elif isinstance(entries, list):
+            items = entries
+        else:
+            raise CatalogError(f"'{key}' must be a mapping or a list of names")
+
+        out: set = set()
+        problems: List[str] = []
+        for name in items:
+            if not isinstance(name, str) or not name.strip():
+                problems.append(f"{name!r}: name must be a non-empty string")
+                continue
+            out.add(name.strip())
+        if problems:
+            raise CatalogError(f"invalid {kind} catalog:\n  - " + "\n  - ".join(problems))
+        return cls(kind=kind, names=frozenset(out), always_valid=always_valid)
 
 
 @dataclass(frozen=True)

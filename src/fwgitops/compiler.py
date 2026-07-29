@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fwgitops.intent import AccessRequest, Endpoint, Service, ZoneRequest
 from fwgitops.resolve import EnvMap
@@ -63,6 +63,18 @@ class SecurityRule:
     action: str
     log_end: bool
     tags: List[str]
+    # ── ADR-0003 rule components (defaults = plain L4 allow, no inspection) ──
+    application: List[str] = field(default_factory=lambda: ["any"])
+    #: Security profile group name; None -> no threat inspection.
+    profile_group: Optional[str] = None
+    #: External log-forwarding profile name; None -> local logs only.
+    log_setting: Optional[str] = None
+    #: Rulebase (pre|post) — where managed policy lives above device-local rules.
+    rulebase: str = "pre"
+    #: Ordering within the rulebase: top | bottom | before | after.
+    relative_position: str = "bottom"
+    #: Anchor rule for before/after ordering; None for top/bottom.
+    target_rule: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +122,18 @@ def _service_for(svc: Service, folder: str) -> ServiceObject:
     )
 
 
+def _parse_position(position: str) -> Tuple[str, Optional[str]]:
+    """Intent position -> (relative_position, target_rule) for scm_security_rule.
+
+    'top'/'bottom' -> (that, None); 'before:R'/'after:R' -> ('before'|'after', 'R').
+    The intent loader has already validated the shape.
+    """
+    if position in ("top", "bottom"):
+        return position, None
+    rel, _, tgt = position.partition(":")
+    return rel, (tgt.strip() or None)
+
+
 def _zones_for(endpoints, default_zone: str) -> List[str]:
     """Zones for a rule side: each endpoint's zone (from its app) or the env
     default (explicit endpoints). Order-preserving dedup — PAN-OS allows a rule
@@ -143,6 +167,7 @@ def compile_request(
     address_objects = _dedup_by_name([*src_objs, *dst_objs])
     service_objects = _dedup_by_name(svc_objs)
 
+    rel, tgt = _parse_position(ar.spec.position)
     rule = SecurityRule(
         name=ar.metadata.id,
         folder=res.folder,
@@ -162,6 +187,11 @@ def compile_request(
             ticket=ar.metadata.ticket,
             expires=ar.metadata.expires,
         ),
+        application=list(ar.spec.application),
+        profile_group=ar.spec.profile,
+        log_setting=ar.spec.log_forwarding,
+        relative_position=rel,
+        target_rule=tgt,
     )
     return CompiledChange(
         address_objects=address_objects, service_objects=service_objects, rule=rule
@@ -240,6 +270,12 @@ def _rule_dict(r: SecurityRule) -> Dict[str, Any]:
         "sources": list(r.sources), "destinations": list(r.destinations),
         "services": list(r.services), "action": r.action,
         "log_end": r.log_end, "tags": list(r.tags),
+        "application": list(r.application),
+        "profile_group": r.profile_group,
+        "log_setting": r.log_setting,
+        "rulebase": r.rulebase,
+        "relative_position": r.relative_position,
+        "target_rule": r.target_rule,
     }
 
 

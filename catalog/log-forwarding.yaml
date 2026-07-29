@@ -1,0 +1,11 @@
+# Log-forwarding profile catalog (ADR-0003) — ACTIVE.
+#
+# Log-forwarding profile names that exist in the SCM folder(s). When present,
+# `spec.log_forwarding` is validated: an unknown name is rejected at PR time
+# instead of failing at the device commit.
+#
+# List ONLY profiles that actually exist in SCM (Objects > Log Forwarding).
+# Maps to `scm_security_rule.log_setting`. The key is `profiles:` (shared
+# NameCatalog shape) even though these are log-forwarding profiles.
+profiles:
+  - log-best

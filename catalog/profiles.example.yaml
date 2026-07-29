@@ -1,0 +1,20 @@
+# Security profile GROUP catalog (ADR-0003) — TEMPLATE.
+#
+# Copy to `catalog/profiles.yaml` and fill in with the security profile GROUP
+# names that ACTUALLY EXIST in your SCM folder(s). When `catalog/profiles.yaml`
+# is present, `spec.profile` becomes a validated field: a name not listed here is
+# rejected at PR time instead of failing at the device commit
+# ("profile 'X' is not a valid reference").
+#
+# IMPORTANT: this list is only as correct as its correspondence to the firewall.
+# List names you have actually created in SCM (Objects > Security Profile Groups),
+# NOT aspirational ones — otherwise a valid-looking intent still fails at commit.
+# That is why no active profiles.yaml ships by default: until you enumerate your
+# real groups, `spec.profile` is accepted free-form (no false confidence).
+#
+# These map to `scm_security_rule.profile_setting.group`. A rule with no profile
+# (the default) is surfaced by the classifier's `allow_without_inspection` check.
+profiles:
+  - strict           # e.g. blocks all threat categories (AV/AS/VP/URL/FB/WF)
+  - default          # e.g. alert-only baseline
+  - outbound-web     # e.g. URL-filtering + WildFire for egress web
