@@ -191,6 +191,56 @@ class ScmDeviceClient:
         self.session.request("DELETE", self.DEVICE_PATH.format(serial=serial))
 
 
+class ScmRuleClient:
+    """RuleClient over the SCM REST API — the enrich step (ADR-0003).
+
+    Writes the security-rule fields the `scm` Terraform provider silently drops
+    (application / profile_setting / log_setting / ordering). Consumed by
+    `fwgitops.enrich.enrich_folder`, which owns the GET-modify-PUT merge, the
+    non-destructive opt-in semantics, and fail-closed behaviour.
+
+    ✅ Paths CONFIRMED live (2026-07-28): a POST→GET→DELETE round-trip on
+    `/config/security/v1/security-rules` set application/profile_setting/log_setting
+    and read them back identical. Move path + body from pan.dev (move-security-rules-by-id):
+    POST `.../{id}:move` {destination: top|bottom|before|after, rulebase: pre|post,
+    destination_rule?}.
+    """
+
+    RULES_PATH = "/config/security/v1/security-rules"
+    RULE_PATH = "/config/security/v1/security-rules/{id}"
+    MOVE_PATH = "/config/security/v1/security-rules/{id}:move"
+
+    def __init__(self, session: ScmSession, *, position: str = "pre"):
+        self.session = session
+        self.position = position  # rulebase the managed rules live in
+
+    def rule_ids_by_name(self, folder: str) -> Dict[str, str]:
+        """Map rule name -> UUID for a folder's rulebase (name = metadata.id)."""
+        payload = self.session.request(
+            "GET", self.RULES_PATH, params={"folder": folder, "position": self.position}
+        )
+        items = payload if isinstance(payload, list) else _first_present(payload, "data", default=[])
+        out: Dict[str, str] = {}
+        for r in items or []:
+            if isinstance(r, dict) and r.get("name") and r.get("id"):
+                out[str(r["name"])] = str(r["id"])
+        return out
+
+    def get_rule(self, rule_id: str) -> Dict[str, Any]:
+        return self.session.request("GET", self.RULE_PATH.format(id=rule_id))
+
+    def update_rule(self, rule_id: str, body: Dict[str, Any]) -> None:
+        self.session.request("PUT", self.RULE_PATH.format(id=rule_id), body=body)
+
+    def move_rule(
+        self, rule_id: str, *, destination: str, rulebase: str, target: Optional[str] = None
+    ) -> None:
+        body: Dict[str, Any] = {"destination": destination, "rulebase": rulebase}
+        if target:
+            body["destination_rule"] = target
+        self.session.request("POST", self.MOVE_PATH.format(id=rule_id), body=body)
+
+
 class ScmProvisionClient:
     """ProvisionClient over the SCM REST API (Day-1, T3).
 

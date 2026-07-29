@@ -1,0 +1,18 @@
+# Log-forwarding profile catalog (ADR-0003) — TEMPLATE.
+#
+# Copy to `catalog/log-forwarding.yaml` and fill in with the log-forwarding
+# profile names that ACTUALLY EXIST in your SCM folder(s). When present,
+# `spec.log_forwarding` becomes a validated field: an unknown name is rejected at
+# PR time instead of failing at the device commit.
+#
+# List real objects only (Objects > Log Forwarding). Until you do, no active
+# log-forwarding.yaml ships, so `spec.log_forwarding` is accepted free-form.
+#
+# These map to `scm_security_rule.log_setting`. A rule with no forwarding profile
+# (the default) still logs locally (log_end) but does not forward off-box.
+#
+# NOTE: the key is `profiles:` (shared NameCatalog shape), even though these are
+# log-forwarding profiles.
+profiles:
+  - default-forwarding   # e.g. -> Strata Logging Service
+  - siem-forward         # e.g. -> external SIEM via syslog

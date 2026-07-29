@@ -1,0 +1,10 @@
+# Security profile GROUP catalog (ADR-0003) — ACTIVE.
+#
+# Security profile GROUP names that exist in the SCM folder(s). When present,
+# `spec.profile` is validated: a name not listed here is rejected at PR time
+# instead of failing at the device commit ("profile 'X' is not a valid reference").
+#
+# List ONLY groups that actually exist in SCM (Objects > Security Profile Groups).
+# Maps to `scm_security_rule.profile_setting.group`.
+profiles:
+  - best-practice

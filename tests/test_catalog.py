@@ -93,3 +93,57 @@ def test_unknown_app_raises():
 def test_malformed_app_fails_closed(bad):
     with pytest.raises(CatalogError):
         app(bad)
+
+
+# ── NameCatalog (ADR-0003 reference allowlists) ────────────────────────────
+from fwgitops.catalog import NameCatalog  # noqa: E402
+
+
+def ncat(entries, **kw):
+    return NameCatalog.from_dict(entries, kind="App-ID", key="applications", **kw)
+
+
+def test_namecatalog_list_form():
+    c = ncat({"applications": ["ssl", "web-browsing"]})
+    c.validate("ssl")  # no raise
+    with pytest.raises(CatalogError):
+        c.validate("nope")
+
+
+def test_namecatalog_mapping_form_ignores_metadata():
+    c = ncat({"applications": {"ssl": {"desc": "x"}, "dns": None}})
+    c.validate("dns")
+    assert c.names == frozenset({"ssl", "dns"})
+
+
+def test_namecatalog_bare_list_and_map():
+    NameCatalog.from_dict(["a", "b"], kind="k", key="applications").validate("a")
+    NameCatalog.from_dict({"a": None}, kind="k", key="applications").validate("a")
+
+
+def test_namecatalog_always_valid_not_listed():
+    c = ncat({"applications": ["ssl"]}, always_valid=frozenset({"any"}))
+    c.validate("any")  # accepted though not in names
+    assert "any" not in c.names
+
+
+def test_namecatalog_unknown_lists_known():
+    with pytest.raises(CatalogError) as ei:
+        ncat({"applications": ["ssl"]}).validate("bogus")
+    assert "ssl" in str(ei.value) and "bogus" in str(ei.value)
+
+
+def test_namecatalog_empty_reports_empty():
+    with pytest.raises(CatalogError) as ei:
+        ncat({"applications": []}).validate("x")
+    assert "catalog is empty" in str(ei.value)
+
+
+@pytest.mark.parametrize("bad", [
+    {"applications": {"": None}},   # blank name
+    {"applications": [123]},        # non-string
+    {"applications": 5},            # not a mapping/list
+])
+def test_namecatalog_malformed_fails_closed(bad):
+    with pytest.raises(CatalogError):
+        ncat(bad)

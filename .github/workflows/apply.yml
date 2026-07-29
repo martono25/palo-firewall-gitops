@@ -14,6 +14,16 @@ name: apply
 # commit. Restore the push trigger below (and drop workflow_dispatch) once the
 # stubbed steps are implemented.
 on:
+  # Auto-apply on merge to main. Fail-closed: a push runs the risk gate at LOW
+  # (see the gate step's `|| 'LOW'`), so only LOW-risk changes auto-apply; HIGH/
+  # CRITICAL require an explicit manual dispatch with a higher max_auto_tier.
+  push:
+    branches: [main]
+    paths:
+      - "intent/**"
+      - "catalog/**"
+      - "terraform/**"
+  # Manual override path: dispatch with a higher tier to apply HIGH/CRITICAL.
   workflow_dispatch:
     inputs:
       max_auto_tier:
@@ -21,12 +31,6 @@ on:
         type: choice
         options: [LOW, HIGH, CRITICAL]
         default: LOW
-  # push:
-  #   branches: [main]
-  #   paths:
-  #     - "terraform/**"
-  #     - "intent/**"
-  #     - "catalog/**"
 
 permissions:
   contents: read
@@ -67,12 +71,21 @@ jobs:
           python-version: "3.11"
       - run: pip install -e .
 
+      # Compile intents -> tfvars FRESH so the apply always reflects the current
+      # intents (source of truth), not a possibly-stale committed tfvars. Compile
+      # is deterministic/byte-stable, so this matches the reviewed output when the
+      # author recompiled in the PR, and self-corrects if they forgot. Fail-closed:
+      # any invalid intent aborts here, before anything is applied.
+      - name: Compile intents
+        run: fwgitops compile
+
       # Fail-closed RISK GATE (Phase 2): block the apply if any change exceeds the
-      # dispatched max-auto tier. LOW auto-applies; HIGH/CRITICAL require an
-      # explicit, logged re-dispatch with a higher tier (the human override). This
-      # is the tier gate that does NOT need required-reviewers (plan-limited).
+      # max-auto tier. On a push (merge) the input is unset, so it defaults to LOW
+      # — only LOW-risk changes auto-apply; HIGH/CRITICAL require an explicit,
+      # logged manual dispatch with a higher tier. This tier gate does NOT need
+      # required-reviewers (works on any plan).
       - name: Risk gate (fail-closed)
-        run: fwgitops classify intent --gate "${{ inputs.max_auto_tier }}"
+        run: fwgitops classify intent --gate "${{ inputs.max_auto_tier || 'LOW' }}"
 
       - uses: hashicorp/setup-terraform@v4
 
@@ -104,6 +117,13 @@ jobs:
             # -parallelism=1 REQUIRED: the scm provider cannot handle concurrent
             # token acquisition (spike 2026-07-19) — serial apply only.
             terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1
+            # ADR-0003 enrich: the scm provider silently drops application /
+            # profile_setting / log_setting / ordering on security rules (verified
+            # live on v1.0.11 + 1.0.12-beta.3). This sets them via the SCM API on
+            # the just-applied rules — landing in the SAME candidate, so the push
+            # below commits skeleton + enrichment as one atomic change. Fail-closed:
+            # if enrich errors, we never push.
+            fwgitops enrich "$folder"
             # Atomic commit boundary (Topic-1): terraform only STAGES config; this
             # push makes it live (scm provider has no push). The push is
             # admin-scoped (defaults to SCM_CLIENT_ID) so a shared-candidate folder

@@ -61,10 +61,7 @@ def run_compile(
     except ResolveError as e:
         print(f"error: invalid env map {env_map_path}: {e}", file=err)
         return 1
-    catalog, ok = _load_service_catalog(service_catalog_path, err)
-    if not ok:
-        return 1
-    app_catalog, ok = _load_app_catalog(app_catalog_path, err)
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
     if not ok:
         return 1
 
@@ -87,7 +84,7 @@ def run_compile(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            req = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
+            req = load_intent(doc, **cats)
             compiled.append(compile_any(req, env_map))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -198,6 +195,63 @@ def _load_app_catalog(path: Path, err) -> Tuple[Optional[object], bool]:
         return None, False
 
 
+def _load_name_catalog(
+    path: Path, *, kind: str, key: str, err, always_valid=frozenset()
+) -> Tuple[Optional[object], bool]:
+    """Load an optional NameCatalog (profiles/App-ID/log-forwarding). (cat_or_None, ok).
+
+    Absent is fine — the field is then accepted free-form (back-compat). A
+    present-but-malformed catalog is a hard error (fail-closed).
+    """
+    if not path.is_file():
+        return None, True
+    from fwgitops.catalog import CatalogError, NameCatalog
+    try:
+        return NameCatalog.from_dict(read_yaml(path), kind=kind, key=key,
+                                     always_valid=always_valid), True
+    except CatalogError as e:
+        print(f"error: invalid {kind} catalog {path}: {e}", file=err)
+        return None, False
+    except Exception as e:  # noqa: BLE001 - YAML parse / IO
+        print(f"error: could not read {kind} catalog {path}: {e}", file=err)
+        return None, False
+
+
+def _load_catalogs(
+    service_catalog_path: Path, app_catalog_path: Path, err
+) -> Tuple[Optional[Dict[str, object]], bool]:
+    """Load every reference catalog into a kwargs dict for `load_intent`.
+
+    The three ADR-0003 name catalogs live at conventional paths next to the
+    service catalog (`profiles.yaml`, `applications.yaml`, `log-forwarding.yaml`);
+    each is optional. Returns (kwargs, ok) — any malformed catalog fails the run.
+    """
+    catalog_dir = service_catalog_path.parent
+    svc, ok = _load_service_catalog(service_catalog_path, err)
+    if not ok:
+        return None, False
+    app, ok = _load_app_catalog(app_catalog_path, err)
+    if not ok:
+        return None, False
+    prof, ok = _load_name_catalog(catalog_dir / "profiles.yaml",
+                                  kind="security profile group", key="profiles", err=err)
+    if not ok:
+        return None, False
+    appid, ok = _load_name_catalog(catalog_dir / "applications.yaml",
+                                   kind="App-ID", key="applications",
+                                   always_valid=frozenset({"any"}), err=err)
+    if not ok:
+        return None, False
+    logf, ok = _load_name_catalog(catalog_dir / "log-forwarding.yaml",
+                                  kind="log-forwarding profile", key="profiles", err=err)
+    if not ok:
+        return None, False
+    return {
+        "service_catalog": svc, "app_catalog": app, "profile_catalog": prof,
+        "application_catalog": appid, "log_forwarding_catalog": logf,
+    }, True
+
+
 def run_classify(
     intent_root: Path,
     env_map_path: Path,
@@ -230,10 +284,7 @@ def run_classify(
     except ResolveError as e:
         print(f"error: invalid env map {env_map_path}: {e}", file=err)
         return 1
-    catalog, ok = _load_service_catalog(service_catalog_path, err)
-    if not ok:
-        return 1
-    app_catalog, ok = _load_app_catalog(app_catalog_path, err)
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
     if not ok:
         return 1
     if not intent_root.exists():
@@ -255,8 +306,7 @@ def run_classify(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            c = compile_any(
-                load_intent(doc, service_catalog=catalog, app_catalog=app_catalog), env_map)
+            c = compile_any(load_intent(doc, **cats), env_map)
             if isinstance(c, CompiledChange):  # policy stages: rules only (zones are infra)
                 changes.append(c)
         except IntentError as e:
@@ -298,11 +348,12 @@ def run_classify(
     return 0
 
 
-def _compile_intents(intent_root, env_map_path, catalog, app_catalog, err):
+def _compile_intents(intent_root, env_map_path, cats, err):
     """Shared load+compile for classify/evidence/drift. Returns (items, code).
 
     items = list of (path, request, change) on success (code 0); None on error
-    (code 1 usage/IO, 2 invalid intent) — the caller returns that code.
+    (code 1 usage/IO, 2 invalid intent) — the caller returns that code. `cats` is
+    the load_intent kwargs dict from `_load_catalogs`.
     """
     if not env_map_path.is_file():
         print(f"error: env map not found: {env_map_path}", file=err)
@@ -325,7 +376,7 @@ def _compile_intents(intent_root, env_map_path, catalog, app_catalog, err):
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            ar = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
+            ar = load_intent(doc, **cats)
             ch = compile_any(ar, env_map)
             if isinstance(ch, CompiledChange):  # rules only (zones are infra)
                 items.append((path, ar, ch))
@@ -362,13 +413,10 @@ def run_drift(
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
-    catalog, ok = _load_service_catalog(service_catalog_path, err)
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
     if not ok:
         return 1
-    app_catalog, ok = _load_app_catalog(app_catalog_path, err)
-    if not ok:
-        return 1
-    items, code = _compile_intents(intent_root, env_map_path, catalog, app_catalog, err)
+    items, code = _compile_intents(intent_root, env_map_path, cats, err)
     if items is None:
         return code
 
@@ -433,10 +481,7 @@ def run_evidence(
     except ResolveError as e:
         print(f"error: invalid env map {env_map_path}: {e}", file=err)
         return 1
-    catalog, ok = _load_service_catalog(service_catalog_path, err)
-    if not ok:
-        return 1
-    app_catalog, ok = _load_app_catalog(app_catalog_path, err)
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
     if not ok:
         return 1
     if not intent_root.exists():
@@ -458,7 +503,7 @@ def run_evidence(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            ar = load_intent(doc, service_catalog=catalog, app_catalog=app_catalog)
+            ar = load_intent(doc, **cats)
             ch = compile_any(ar, env_map)
             if isinstance(ch, CompiledChange):  # evidence covers policy; zones are infra (follow-up)
                 items.append((path, ar, ch))
@@ -537,6 +582,91 @@ def run_push(
         return 3
 
     print(f"OK — {result.status} (folder={result.folder} job={result.job_id})", file=out)
+    print(json.dumps(result.to_evidence(), sort_keys=True), file=out)
+    return 0
+
+
+def run_enrich(
+    folder: str,
+    intent_root: Path,
+    env_map_path: Path,
+    *,
+    service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
+    dry_run: bool = False,
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Write the security-rule fields the scm provider drops (ADR-0003 enrich).
+
+    Runs AFTER `terraform apply` and BEFORE `fwgitops push`: it compiles the
+    intents (same fail-closed path as compile/classify), filters to `folder`, and
+    PUTs application/profile_setting/log_setting + ordering onto each managed rule
+    via the SCM API — landing in the same candidate so the push commits skeleton +
+    enrichment atomically. Exit codes: 0 ok/noop · 1 config/auth · 2 invalid intent
+    · 3 enrich failed.
+
+    `dry_run` previews what WOULD be set (from the compiled intents) and makes NO
+    SCM calls — safe for PR CI, where the terraform plan alone no longer shows
+    these fields (the module is skeleton-only; enrich owns them).
+    """
+    from fwgitops.clients import ScmRuleClient
+    from fwgitops.enrich import EnrichError, _position_str, enrich_folder
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
+    if not ok:
+        return 1
+    items, code = _compile_intents(intent_root, env_map_path, cats, err)
+    if items is None:
+        return code
+    changes = [ch for _, _, ch in items
+               if isinstance(ch, CompiledChange) and ch.rule.folder == folder]
+    if not changes:
+        print(f"no managed rules for folder {folder!r} — nothing to enrich", file=out)
+        return 0
+
+    if dry_run:
+        # PR preview: what enrich WOULD set on each rule. No SCM contact.
+        print(f"enrich (dry-run) — folder {folder!r}: {len(changes)} rule(s):", file=out)
+        for ch in sorted(changes, key=lambda c: c.rule.name):
+            r = ch.rule
+            neg = []
+            if r.negate_source:
+                neg.append("src")
+            if r.negate_destination:
+                neg.append("dst")
+            extras = f" negate={','.join(neg)}" if neg else ""
+            if r.source_user != ["any"]:
+                extras += f" user={list(r.source_user)}"
+            if r.category != ["any"]:
+                extras += f" url-category={list(r.category)}"
+            if r.log_start:
+                extras += " log_start=true"
+            if r.description:
+                extras += f" description={r.description!r}"
+            print(f"  {r.name}: action={r.action} application={list(r.application)} "
+                  f"profile={r.profile_group or '(none)'} "
+                  f"log_forwarding={r.log_setting or '(none)'} "
+                  f"position={_position_str(r)}{extras}", file=out)
+        return 0
+
+    if session is None:
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except ScmConfigError as e:
+            print(f"error: {e}", file=err)
+            return 1
+    try:
+        result = enrich_folder(ScmRuleClient(session), folder, changes)
+    except (EnrichError, ScmApiError) as e:
+        print(f"ENRICH FAILED: {e}", file=err)
+        return 3
+
+    print(f"OK — enriched {len(result.records)} rule(s) in folder {folder!r}", file=out)
     print(json.dumps(result.to_evidence(), sort_keys=True), file=out)
     return 0
 
@@ -699,6 +829,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="BREAK-GLASS: push the WHOLE candidate (every editor's staged "
                         "changes), e.g. to absorb the device-onboarding baseline")
 
+    en = sub.add_parser("enrich",
+                        help="set the security-rule fields the scm provider drops (ADR-0003)")
+    en.add_argument("folder", help="SCM folder to enrich (rules must already be applied)")
+    en.add_argument("intent_root", nargs="?", default="intent", type=Path,
+                    help="directory of intent YAML (default: intent)")
+    en.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path,
+                    help="environment resolution map (default: catalog/environments.yaml)")
+    en.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
+    en.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+    en.add_argument("--dry-run", action="store_true",
+                    help="preview what would be set (no SCM calls) — for PR validation")
+
     o = sub.add_parser("onboard", help="finalize onboarding: verify placement + set display name")
     o.add_argument("serial", help="device serial number (from ssh 'show system info')")
     o.add_argument("--folder", required=True,
@@ -745,6 +887,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.folder,
             admins=args.admins,
             all_admins=args.all_admins,
+        )
+    if args.command == "enrich":
+        return run_enrich(
+            args.folder, args.intent_root, args.env_map,
+            service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+            dry_run=args.dry_run,
         )
     if args.command == "onboard":
         return run_onboard(args.serial, folder=args.folder, name=args.name)

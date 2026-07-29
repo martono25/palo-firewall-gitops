@@ -31,7 +31,7 @@ KIND = "AccessRequest"
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]+$")  # flows into PAN-OS tags downstream
 _FQDN = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})+$")
-_ACTIONS = {"allow", "deny"}
+_ACTIONS = {"allow", "deny", "drop", "reset-client", "reset-server", "reset-both"}
 _PROTOCOLS = {"tcp", "udp"}
 _ENDPOINT_KEYS = {"cidr", "fqdn", "app"}
 
@@ -95,6 +95,27 @@ class Spec:
     destination: List[Endpoint]
     service: List[Service]
     log: bool = True
+    #: App-ID match. Omitted -> ["any"] (L4/port-only rule). ADR-0003.
+    application: List[str] = field(default_factory=lambda: ["any"])
+    #: Security profile GROUP name. None -> no threat inspection (plain allow).
+    profile: Optional[str] = None
+    #: External log-forwarding profile name. None -> local logs only.
+    log_forwarding: Optional[str] = None
+    #: Ordering: top | bottom | before:<rule> | after:<rule>. Default bottom.
+    position: str = "bottom"
+    # ── v1.0 rule completeness ──
+    #: Free-text rule documentation (audit). None -> no description.
+    description: Optional[str] = None
+    #: Log at session start too (pairs with `log`, which is session end).
+    log_start: bool = False
+    #: User-ID match (users/groups). Omitted -> ["any"].
+    source_user: List[str] = field(default_factory=lambda: ["any"])
+    #: URL categories to match. Omitted -> ["any"].
+    category: List[str] = field(default_factory=lambda: ["any"])
+    #: Invert the source match (applies to everything EXCEPT source).
+    negate_source: bool = False
+    #: Invert the destination match.
+    negate_destination: bool = False
 
 
 @dataclass(frozen=True)
@@ -121,18 +142,39 @@ class ZoneRequest:
 
 # ── Loader ────────────────────────────────────────────────────────────────
 class _Collector:
-    def __init__(self, service_catalog: Any = None, app_catalog: Any = None) -> None:
+    def __init__(
+        self,
+        service_catalog: Any = None,
+        app_catalog: Any = None,
+        profile_catalog: Any = None,
+        application_catalog: Any = None,
+        log_forwarding_catalog: Any = None,
+    ) -> None:
         self.problems: List[Problem] = []
         #: Optional ServiceCatalog (Phase 2). Enables the `service: name:` form.
         self.service_catalog = service_catalog
         #: Optional AppCatalog (Phase 2). Enables the `source/destination: app:` form.
         self.app_catalog = app_catalog
+        #: Optional NameCatalogs (ADR-0003). When present, validate the rule's
+        #: profile / application / log_forwarding names against the firewall's
+        #: known references — a typo fails here, not at the device commit.
+        self.profile_catalog = profile_catalog
+        self.application_catalog = application_catalog
+        self.log_forwarding_catalog = log_forwarding_catalog
 
     def add(self, path: str, message: str) -> None:
         self.problems.append(Problem(path, message))
 
 
-def load_intent(data: Any, *, service_catalog: Any = None, app_catalog: Any = None) -> AccessRequest:
+def load_intent(
+    data: Any,
+    *,
+    service_catalog: Any = None,
+    app_catalog: Any = None,
+    profile_catalog: Any = None,
+    application_catalog: Any = None,
+    log_forwarding_catalog: Any = None,
+) -> AccessRequest:
     """Parse + validate an intent dict, dispatching on `kind` (ADR-0001).
 
     The envelope (`apiVersion` + `kind`) is common to every kind; the kind-
@@ -142,12 +184,19 @@ def load_intent(data: Any, *, service_catalog: Any = None, app_catalog: Any = No
 
     Catalogs (Phase 2) are passed through to the loader: `service_catalog`
     enables `service: - name: https`; `app_catalog` enables `source: - app: X`
-    (resolving to the app's addresses/fqdns + zone). Without them only the
-    explicit forms are accepted.
+    (resolving to the app's addresses/fqdns + zone). The ADR-0003 name catalogs
+    (`profile_catalog`, `application_catalog`, `log_forwarding_catalog`) validate
+    the rule's reference names. Any catalog left None disables only its check —
+    the corresponding field is then accepted as free-form (back-compat).
     """
     if not isinstance(data, dict):
         raise IntentError([Problem("$", "document must be a mapping")])
 
+    catalogs = dict(
+        service_catalog=service_catalog, app_catalog=app_catalog,
+        profile_catalog=profile_catalog, application_catalog=application_catalog,
+        log_forwarding_catalog=log_forwarding_catalog,
+    )
     kind = data.get("kind")
     loader = _KIND_LOADERS.get(kind)
     if loader is None:
@@ -162,14 +211,12 @@ def load_intent(data: Any, *, service_catalog: Any = None, app_catalog: Any = No
 
     # Known kind: the loader validates apiVersion + the kind schema together, so a
     # requester sees every problem in one pass.
-    return loader(data, service_catalog=service_catalog, app_catalog=app_catalog)
+    return loader(data, **catalogs)
 
 
-def _load_access_request(
-    data: dict, *, service_catalog: Any = None, app_catalog: Any = None
-) -> AccessRequest:
+def _load_access_request(data: dict, **catalogs: Any) -> AccessRequest:
     """Loader for `kind: AccessRequest` — the security-rule kind (kind #1)."""
-    c = _Collector(service_catalog=service_catalog, app_catalog=app_catalog)
+    c = _Collector(**catalogs)
     if data.get("apiVersion") != API_VERSION:
         c.add("apiVersion", f"must be {API_VERSION!r}, got {data.get('apiVersion')!r}")
     metadata = _load_metadata(data.get("metadata"), c)
@@ -207,9 +254,7 @@ def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
     return ZoneSpec(environment=environment, zone=zone, zone_type=ztype, interfaces=list(interfaces))
 
 
-def _load_zone_request(
-    data: dict, *, service_catalog: Any = None, app_catalog: Any = None
-) -> ZoneRequest:
+def _load_zone_request(data: dict, **catalogs: Any) -> ZoneRequest:
     """Loader for `kind: ZoneRequest` (kind #2). Catalogs are unused (no names)."""
     c = _Collector()
     if data.get("apiVersion") != API_VERSION:
@@ -297,13 +342,122 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     if not isinstance(log, bool):
         c.add(f"{path}.log", f"must be a boolean, got {type(log).__name__}")
 
+    # ADR-0003 optional rule components (all default to the "plain L4 allow" shape).
+    application = _load_application(sp, path, c)
+    profile, profile_ok = _opt_str(sp, "profile", path, c)
+    _validate_name(profile, c.profile_catalog, f"{path}.profile", c)
+    log_forwarding, logfwd_ok = _opt_str(sp, "log_forwarding", path, c)
+    _validate_name(log_forwarding, c.log_forwarding_catalog, f"{path}.log_forwarding", c)
+    position = _load_position(sp, path, c)
+
+    # ── v1.0 rule-completeness fields ──
+    description, desc_ok = _opt_str(sp, "description", path, c)
+    log_start, ls_ok = _opt_bool(sp, "log_start", path, c)
+    negate_source, ns_ok = _opt_bool(sp, "negate_source", path, c)
+    negate_destination, nd_ok = _opt_bool(sp, "negate_destination", path, c)
+    source_user = _opt_str_list(sp, "source_user", path, c)
+    category = _opt_str_list(sp, "category", path, c)
+
     if environment is None or action not in _ACTIONS or source is None or destination is None \
-            or service is None or not isinstance(log, bool):
+            or service is None or not isinstance(log, bool) \
+            or application is None or position is None or not profile_ok or not logfwd_ok \
+            or not desc_ok or not ls_ok or not ns_ok or not nd_ok \
+            or source_user is None or category is None:
         return None
     return Spec(
         environment=environment, action=action, source=source,
         destination=destination, service=service, log=log,
+        application=application, profile=profile,
+        log_forwarding=log_forwarding, position=position,
+        description=description, log_start=bool(log_start),
+        source_user=source_user, category=category,
+        negate_source=bool(negate_source), negate_destination=bool(negate_destination),
     )
+
+
+def _opt_bool(obj: dict, key: str, path: str, c: _Collector):
+    """Optional boolean: (value, ok). Absent -> (False, True)."""
+    if key not in obj:
+        return False, True
+    val = obj.get(key)
+    if not isinstance(val, bool):
+        c.add(f"{path}.{key}", f"must be a boolean, got {type(val).__name__}")
+        return None, False
+    return val, True
+
+
+def _opt_str_list(sp: dict, key: str, path: str, c: _Collector) -> Optional[List[str]]:
+    """Optional list of non-empty strings (e.g. source_user, category). Omitted -> ['any']."""
+    raw = sp.get(key)
+    if raw is None:
+        return ["any"]
+    if not isinstance(raw, list) or not raw or not all(
+        isinstance(x, str) and x.strip() for x in raw
+    ):
+        c.add(f"{path}.{key}", "must be a non-empty list of strings")
+        return None
+    return [x.strip() for x in raw]
+
+
+def _opt_str(obj: dict, key: str, path: str, c: _Collector):
+    """An optional string field: (value|None, ok). None+ok means 'omitted'."""
+    val = obj.get(key)
+    if val is None:
+        return None, True
+    if not isinstance(val, str) or not val.strip():
+        c.add(f"{path}.{key}", "must be a non-empty string when set")
+        return None, False
+    return val.strip(), True
+
+
+def _validate_name(value: Optional[str], catalog: Any, path: str, c: _Collector) -> None:
+    """If a NameCatalog is configured, the reference name must be known (ADR-0003).
+
+    No catalog -> no check (the name is accepted free-form; back-compat). Omitted
+    value (None) is always fine — the field is optional.
+    """
+    if value is None or catalog is None:
+        return
+    from fwgitops.catalog import CatalogError  # local import: no hard dep in Phase 1
+    try:
+        catalog.validate(value)
+    except CatalogError as e:
+        c.add(path, str(e))
+
+
+def _load_application(sp: dict, path: str, c: _Collector) -> Optional[List[str]]:
+    """App-ID list. Omitted -> ['any']; else a non-empty list of App-ID names.
+
+    When an application catalog is configured, every name (except the built-in
+    `any`) must be known — a typo'd App-ID fails here, not at the device commit.
+    """
+    raw = sp.get("application")
+    if raw is None:
+        return ["any"]
+    if not isinstance(raw, list) or not raw or not all(
+        isinstance(a, str) and a.strip() for a in raw
+    ):
+        c.add(f"{path}.application", "must be a non-empty list of App-ID names (strings)")
+        return None
+    apps = [a.strip() for a in raw]
+    for a in apps:
+        _validate_name(a, c.application_catalog, f"{path}.application", c)
+    return apps
+
+
+def _load_position(sp: dict, path: str, c: _Collector) -> Optional[str]:
+    """Ordering directive: top | bottom | before:<rule> | after:<rule>."""
+    val = sp.get("position", "bottom")
+    if isinstance(val, str) and val.strip():
+        v = val.strip()
+        if v in ("top", "bottom"):
+            return v
+        rel, sep, tgt = v.partition(":")
+        if sep and rel in ("before", "after") and tgt.strip():
+            return f"{rel}:{tgt.strip()}"
+    c.add(f"{path}.position",
+          f"invalid position {val!r}; use top | bottom | before:<rule> | after:<rule>")
+    return None
 
 
 def _load_endpoints(

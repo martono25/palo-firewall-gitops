@@ -305,6 +305,28 @@ def classify(
                     if exposed:
                         fire("HIGH", "risky_port_from_internet",
                              f"exposes port(s) {exposed} inbound from an internet/untrust zone")
+
+            # ── Negation (v1.0) ──
+            # A negated source/destination inverts the match ("everything EXCEPT
+            # X"), so the CIDR-breadth analysis above is not valid — a negated
+            # specific source on an allow can be extremely broad. Fail closed: we
+            # cannot confidently call a negated allow low-risk.
+            if rule.negate_source or rule.negate_destination:
+                sides = [s for s, on in (("source", rule.negate_source),
+                                         ("destination", rule.negate_destination)) if on]
+                fire("HIGH", "negated_match",
+                     f"negated {', '.join(sides)} inverts the match — breadth analysis is "
+                     "not valid, so this cannot be auto-classified as low risk")
+
+            # ── Inspection posture (ADR-0003) ──
+            # An allow with no security profile group permits traffic with zero
+            # threat inspection (no IPS/AV/anti-spyware/URL/WildFire). Not blocked
+            # — profiles are opt-in by design — but recorded so the evidence
+            # bundle shows a human accepted an uninspected allow.
+            if rule.profile_group is None:
+                fire("LOW", "allow_without_inspection",
+                     "allow rule has no security profile group — traffic is permitted "
+                     "without threat inspection")
     except _Unclassifiable as e:
         # Fail closed: we could not fully evaluate the change -> never LOW.
         return RiskVerdict(

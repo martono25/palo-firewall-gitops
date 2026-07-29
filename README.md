@@ -4,8 +4,11 @@ GitOps-driven firewall automation for Palo Alto (Strata Cloud Manager / Panorama
 covering **Day-1 provisioning + onboarding** through **Day-2 rule changes**, automated as far
 as is safe.
 
-> **Status: design approved, pre-implementation.** This repo currently holds the design and a
-> directory skeleton. No implementation code yet. The full design lives in
+> **Status: v1.0 — Day-2 rule provisioning shipped.** The full Day-2 loop
+> (`intent → compile → classify → risk-gate → terraform apply → enrich → push`) is
+> implemented, tested, and **proven end-to-end on live VM-Series hardware** (rule
+> verified in the device running config). See [`CHANGELOG.md`](CHANGELOG.md) and
+> [`docs/adr/`](docs/adr/). Day-1 provisioning is the v2.0 target. Full design:
 > [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## The stack (locked)

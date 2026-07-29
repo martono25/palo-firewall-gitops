@@ -44,9 +44,9 @@ resource "scm_address" "this" {
   ip_netmask = each.value.type == "ip-netmask" ? each.value.value : null
   fqdn       = each.value.type == "fqdn" ? each.value.value : null
 
-  tag = each.value.tags # provider attr is `tag`, list(string)
-
-  depends_on = [scm_tag.this]
+  # Reference each tag resource (not raw strings) so this object depends on ONLY
+  # the tags it uses — a fine-grained edge, not a blanket `depends_on`.
+  tag = [for t in each.value.tags : scm_tag.this[t].name]
 }
 
 # ── Service objects ───────────────────────────────────────────────────────
@@ -63,9 +63,7 @@ resource "scm_service" "this" {
     udp = each.value.protocol == "udp" ? { port = each.value.port } : null
   }
 
-  tag = each.value.tags
-
-  depends_on = [scm_tag.this]
+  tag = [for t in each.value.tags : scm_tag.this[t].name]
 }
 
 # ── Security rules ────────────────────────────────────────────────────────
@@ -75,25 +73,38 @@ resource "scm_security_rule" "this" {
   name   = each.value.name
   folder = each.value.folder
 
-  from        = each.value.from_zones
-  to          = each.value.to_zones
-  source      = each.value.sources
-  destination = each.value.destinations
-  service     = each.value.services
+  from = each.value.from_zones
+  to   = each.value.to_zones
 
-  # Phase 1 is service/port-based; App-ID is a known Phase-2 gap (docs/DESIGN.md).
-  application = ["any"]
+  # Reference the object RESOURCES (not raw strings from tfvars) so each rule
+  # depends on ONLY the addresses/services/tags it actually uses. This replaces a
+  # coarse `depends_on = [scm_address.this, ...]` (which made every rule depend on
+  # EVERY object instance) — under which a `terraform destroy -target` of one
+  # address cascaded into destroying ALL rules. Fine-grained edges also give
+  # correct create ordering (objects before the rule that references them) with
+  # no explicit depends_on.
+  source      = [for s in each.value.sources : scm_address.this[s].name]
+  destination = [for d in each.value.destinations : scm_address.this[d].name]
+  service     = [for v in each.value.services : scm_service.this[v].name]
+  tag         = [for t in each.value.tags : scm_tag.this[t].name]
 
   action   = each.value.action
   log_end  = each.value.log_end
   disabled = each.value.disabled
-  tag      = each.value.tags
 
-  # Objects (and their tags) before rules — a rule must never reference
-  # something that does not yet exist (design: Change Rollback, ordering rule).
-  depends_on = [
-    scm_tag.this,
-    scm_address.this,
-    scm_service.this,
-  ]
+  # `application` is REQUIRED by the SCM API on every write, so it stays here as
+  # the ["any"] skeleton default (omitting it makes the provider send an invalid
+  # payload — API_I00035). Its REAL App-ID value is set by `fwgitops enrich`; the
+  # provider treats application as computed (ignores config for diffing), so it
+  # never reverts enrich's value.
+  application = each.value.application
+
+  # The rest of the ADR-0003 enrichment — profile_setting / log_setting / ordering
+  # — is deliberately NOT wired here. The scm provider (v1.0.11 AND 1.0.12-beta.3)
+  # silently DROPS these on security rules (accepts them in config, treats them as
+  # computed, never writes them — verified live 2026-07-28). Wiring them only
+  # produced churn (e.g. a log_setting -> null clobber diff) with no on-device
+  # effect. `fwgitops enrich` sets them via the SCM API post-apply / pre-push (same
+  # candidate, so the push commits skeleton + enrichment atomically). See
+  # docs/adr/0003 + src/fwgitops/enrich.py.
 }

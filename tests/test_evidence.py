@@ -84,6 +84,21 @@ def test_compiled_section_records_what_was_built():
     assert len(c["tfvars_sha256"]) == 64
 
 
+def test_compiled_rule_records_adr0003_enrichment():
+    r = bundle()["compiled"]["rule"]
+    # the effective (enriched) rule an assessor reads — set on-device by enrich
+    for k in ("application", "profile_group", "log_setting",
+              "rulebase", "relative_position", "target_rule"):
+        assert k in r
+    assert r["application"] == ["any"]             # default when intent omits App-ID
+    assert r["rulebase"] == "pre"
+    # v1.0 completeness fields present
+    for k in ("description", "log_start", "source_user", "category",
+              "negate_source", "negate_destination"):
+        assert k in r
+    assert r["source_user"] == ["any"] and r["category"] == ["any"]
+
+
 def test_approval_and_apply_sections():
     b = bundle()
     assert b["approval"]["approvers"] == ["alice@corp"]

@@ -5,4 +5,4 @@ tag/identity convention (`fwgitops.tags`), the shared contract every other
 subsystem depends on.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

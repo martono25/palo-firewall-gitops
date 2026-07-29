@@ -45,6 +45,171 @@ def problems(doc: dict) -> list[str]:
     return [p.path for p in ei.value.problems]
 
 
+# ── ADR-0003 rule components (optional; default = plain L4 allow) ──────────
+def test_rule_components_default_when_omitted():
+    sp = load_intent(valid_doc()).spec
+    assert sp.application == ["any"]
+    assert sp.profile is None
+    assert sp.log_forwarding is None
+    assert sp.position == "bottom"
+
+
+def test_rule_components_explicit():
+    doc = valid_doc()
+    doc["spec"].update({
+        "application": ["ssl", "web-browsing"],
+        "profile": "strict-inspection",
+        "log_forwarding": "siem-forward",
+        "position": "before:REQ-2026-0001",
+    })
+    sp = load_intent(doc).spec
+    assert sp.application == ["ssl", "web-browsing"]
+    assert sp.profile == "strict-inspection"
+    assert sp.log_forwarding == "siem-forward"
+    assert sp.position == "before:REQ-2026-0001"
+
+
+@pytest.mark.parametrize("bad,path", [
+    ({"application": []}, "spec.application"),
+    ({"application": ["", "x"]}, "spec.application"),
+    ({"application": "ssl"}, "spec.application"),
+    ({"profile": ""}, "spec.profile"),
+    ({"log_forwarding": "  "}, "spec.log_forwarding"),
+    ({"position": "middle"}, "spec.position"),
+    ({"position": "before:"}, "spec.position"),
+    ({"position": "before"}, "spec.position"),
+])
+def test_rule_components_fail_closed(bad, path):
+    doc = valid_doc()
+    doc["spec"].update(bad)
+    assert path in problems(doc)
+
+
+# ── v1.0 rule completeness fields ──────────────────────────────────────────
+def test_v1_fields_default_when_omitted():
+    sp = load_intent(valid_doc()).spec
+    assert sp.description is None
+    assert sp.log_start is False
+    assert sp.source_user == ["any"]
+    assert sp.category == ["any"]
+    assert sp.negate_source is False and sp.negate_destination is False
+
+
+def test_v1_fields_explicit():
+    doc = valid_doc()
+    doc["spec"].update({
+        "description": "web tier to payments",
+        "log_start": True,
+        "source_user": ["corp\\alice", "grp-payments"],
+        "category": ["financial-services"],
+        "negate_source": True,
+        "negate_destination": False,
+    })
+    sp = load_intent(doc).spec
+    assert sp.description == "web tier to payments"
+    assert sp.log_start is True
+    assert sp.source_user == ["corp\\alice", "grp-payments"]
+    assert sp.category == ["financial-services"]
+    assert sp.negate_source is True
+
+
+@pytest.mark.parametrize("action", ["drop", "reset-client", "reset-server", "reset-both"])
+def test_extended_actions_accepted(action):
+    doc = valid_doc()
+    doc["spec"]["action"] = action
+    assert load_intent(doc).spec.action == action
+
+
+def test_unknown_action_rejected():
+    doc = valid_doc()
+    doc["spec"]["action"] = "bounce"
+    assert "spec.action" in problems(doc)
+
+
+@pytest.mark.parametrize("bad,path", [
+    ({"log_start": "yes"}, "spec.log_start"),
+    ({"negate_source": 1}, "spec.negate_source"),
+    ({"source_user": []}, "spec.source_user"),
+    ({"source_user": "alice"}, "spec.source_user"),
+    ({"category": [""]}, "spec.category"),
+    ({"description": "  "}, "spec.description"),
+])
+def test_v1_fields_fail_closed(bad, path):
+    doc = valid_doc()
+    doc["spec"].update(bad)
+    assert path in problems(doc)
+
+
+# ── Catalog-backed name validation (ADR-0003) ─────────────────────────────
+from fwgitops.catalog import NameCatalog  # noqa: E402
+
+
+def _app_cat(names=("ssl", "web-browsing")):
+    return NameCatalog.from_dict(list(names), kind="App-ID", key="applications",
+                                 always_valid=frozenset({"any"}))
+
+
+def _profile_cat(names=("strict", "default")):
+    return NameCatalog.from_dict(list(names), kind="security profile group", key="profiles")
+
+
+def test_application_validated_against_catalog():
+    doc = valid_doc()
+    doc["spec"]["application"] = ["ssl"]
+    ar = load_intent(doc, application_catalog=_app_cat())
+    assert ar.spec.application == ["ssl"]
+
+
+def test_unknown_application_rejected():
+    doc = valid_doc()
+    doc["spec"]["application"] = ["ssl", "bogus-app"]
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc, application_catalog=_app_cat())
+    paths = [p.path for p in ei.value.problems]
+    assert "spec.application" in paths
+    assert any("bogus-app" in p.message for p in ei.value.problems)
+
+
+def test_application_any_always_valid_even_with_catalog():
+    # default application is ["any"]; must pass without being listed
+    load_intent(valid_doc(), application_catalog=_app_cat())
+
+
+def test_no_application_catalog_accepts_free_form():
+    doc = valid_doc()
+    doc["spec"]["application"] = ["anything-goes"]
+    assert load_intent(doc).spec.application == ["anything-goes"]
+
+
+def test_profile_validated_against_catalog():
+    doc = valid_doc()
+    doc["spec"]["profile"] = "strict"
+    assert load_intent(doc, profile_catalog=_profile_cat()).spec.profile == "strict"
+
+
+def test_unknown_profile_rejected():
+    doc = valid_doc()
+    doc["spec"]["profile"] = "loose"
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc, profile_catalog=_profile_cat())
+    assert "spec.profile" in [p.path for p in ei.value.problems]
+
+
+def test_unknown_log_forwarding_rejected():
+    doc = valid_doc()
+    doc["spec"]["log_forwarding"] = "nowhere"
+    lf = NameCatalog.from_dict(["siem-forward"], kind="log-forwarding profile", key="profiles")
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc, log_forwarding_catalog=lf)
+    assert "spec.log_forwarding" in [p.path for p in ei.value.problems]
+
+
+def test_omitted_optional_fields_skip_catalog_checks():
+    # profile/log_forwarding omitted -> no validation even with catalogs present
+    load_intent(valid_doc(), profile_catalog=_profile_cat(),
+                log_forwarding_catalog=_profile_cat())
+
+
 # ── Happy path ────────────────────────────────────────────────────────────
 def test_valid_intent_parses():
     ar = load_intent(valid_doc())

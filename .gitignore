@@ -70,3 +70,5 @@ Thumbs.db
 
 # Per-folder filled backend config (names the AWS account)
 backend.hcl
+tfplan
+tfplan-*
