@@ -11,6 +11,15 @@ as is safe.
 > [`docs/adr/`](docs/adr/). Day-1 provisioning is the v2.0 target. Full design:
 > [`docs/DESIGN.md`](docs/DESIGN.md).
 
+## Guides
+
+| I want to… | Guide | Who |
+|---|---|---|
+| **Request a firewall rule** (write intent → PR) | [`docs/requesting-rules.md`](docs/requesting-rules.md) | any engineer |
+| **Provision a firewall** (stand up a VM-Series) | [`docs/provisioning.md`](docs/provisioning.md) | platform operator |
+| What each rule field maps to on the firewall | [`docs/adr/0003-security-rule-component-model.md`](docs/adr/0003-security-rule-component-model.md) | — |
+| Release notes | [`CHANGELOG.md`](CHANGELOG.md) | — |
+
 ## The stack (locked)
 
 | Layer | Choice |
