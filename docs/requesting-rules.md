@@ -1,158 +1,170 @@
 # Requesting a firewall rule
 
-This is the day-to-day guide for **requesting a firewall rule change**. You do
-not touch the firewall, SCM, or Terraform. You describe *what you need* in a small
-YAML file, open a pull request, and the platform validates it, shows you the risk
-and the exact change, and — once approved — applies it to the firewall for you.
+This guide walks you through requesting a firewall rule change **from start to
+finish**, using only your web browser. You describe *what you need* in a small
+file, open a pull request, and — once approved and merged — the platform applies
+it to the firewall automatically.
 
-You do **not** need to know Terraform, the SCM API, or PAN-OS internals to use this.
+You do **not** need to install anything, and you do **not** need to know
+Terraform, the SCM API, or PAN-OS internals. Just follow the steps.
 
----
-
-## Before you start (prerequisites)
-
-**The easy path (website only) needs almost nothing:**
-- A **GitHub account** that has been granted access to the
-  `martono25/palo-firewall-gitops` repository (ask the platform team to add you).
-- A web browser.
-
-That's it — if you use **Option A (GitHub website)** below, you don't install
-anything.
-
-**Only if you prefer the command line (Option B),** install these one time:
-- **Git** — macOS: `xcode-select --install` (or `brew install git`);
-  Windows: <https://git-scm.com/download/win>; Linux: `sudo apt install git`.
-- **(optional) GitHub CLI** `gh` for the `gh pr create` shortcut —
-  <https://cli.github.com/>, then `gh auth login`.
-- **Clone the repo once** (this is the step that was missing if you saw
-  *"fatal: not a git repository"* — you must be *inside* the cloned folder):
-  ```bash
-  git clone https://github.com/martono25/palo-firewall-gitops.git
-  cd palo-firewall-gitops
-  ```
-
-You do **not** need Terraform, the SCM/AWS credentials, Python, or `fwgitops`
-installed to request a rule — those are for the platform operator, not you.
+> **Two ways to do this:** [**Part 1 — Website**](#part-1--the-website-walkthrough)
+> (recommended, nothing to install) and
+> [**Part 2 — Command line**](#part-2--command-line-alternative) (for developers).
+> Everything else — the field reference, examples, and troubleshooting — is at the
+> bottom.
 
 ---
 
-## The workflow (5 steps)
+## Before you start
 
-1. **Add an intent file** under `intent/<environment>/<app-or-team>/`, named after
-   your request id, e.g. `intent/prod/payments/REQ-2026-0142.yaml`.
-2. **Open a pull request.** CI (`pr-validate`) automatically:
-   - validates your request (and tells you exactly what to fix if it's wrong),
-   - classifies its **risk** (LOW / HIGH / CRITICAL),
-   - shows the **enrich preview** (App-ID, profile, log-forwarding, ordering) and
-     the **Terraform plan** as a PR comment.
-3. **Get it reviewed.** A reviewer reads the risk + preview and approves.
-4. **Merge.** On merge, the rule is applied to the firewall automatically.
-   LOW-risk changes auto-apply; HIGH/CRITICAL require an explicit approval step.
-5. **Done.** The rule is live. An evidence record (who/why/what/when) is stored
-   automatically.
+- A **GitHub account** that has been added to the `martono25/palo-firewall-gitops`
+  repository. If you can't open <https://github.com/martono25/palo-firewall-gitops>,
+  ask the platform team to grant you access. **This is the only prerequisite for
+  the website path.**
+- Decide your request's **id** (the rule name), e.g. `REQ-2026-0142`. It must be
+  unique (no existing rule with that id) and use only letters, digits, `.`, `_`,
+  `-`. Convention is `REQ-<year>-<number>`, but any unique id works.
 
 ---
 
-## How to open the pull request
+## Part 1 — the website walkthrough
 
-You do not need the command line. Two ways:
+### Step 1. Open the repository
 
-### A. GitHub website (easiest)
+Go to <https://github.com/martono25/palo-firewall-gitops> and make sure you are on
+the **`main`** branch (the branch dropdown, top-left of the file list, should say
+`main`).
 
-1. Go to the repo: **github.com/martono25/palo-firewall-gitops**
-2. Click **Add file → Create new file**.
-3. In the filename box, type the full path — typing `/` makes folders:
-   `intent/prod/payments/REQ-2026-0142.yaml`
-4. Paste your intent YAML into the editor.
-5. Click **Commit changes…**, choose **"Create a new branch for this commit and
-   start a pull request"**, then **Propose changes**.
-6. Give the PR a title (e.g. *"Request REQ-2026-0142: web → payments"*) and click
-   **Create pull request**.
-7. Watch the automated checks + the PR comment (validation, risk, preview).
+### Step 2. Start a new request file
 
-### B. Command line
+1. Click **Add file** (top-right of the file list) → **Create new file**.
+2. In the filename box at the top, type the **full path**, using your team name
+   and your request id. Typing `/` creates folders as you go:
+   ```
+   intent/prod/payments/REQ-2026-0142.yaml
+   ```
+   - `prod` = the environment (which firewall). Valid environments are listed in
+     `catalog/environments.yaml`.
+   - `payments` = your app or team (any short name — just for organisation).
+   - `REQ-2026-0142.yaml` = your request id + `.yaml`.
 
-Requires the one-time setup above (Git installed + repo cloned). **Run every
-command from *inside* the cloned `palo-firewall-gitops` folder** — running from
-your home directory is what causes `fatal: not a git repository`.
+### Step 3. Paste your request and fill it in
+
+Paste this template into the editor, then change the values to what you need.
+Everything under `# ` is a comment you can delete or leave.
+
+```yaml
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0142                 # <- must match your filename; becomes the rule name
+  requester: you@corp.com           # <- your email
+  ticket: JIRA-4821                 # <- your change ticket
+  justification: "Web tier needs to reach the payments API"   # <- why, one line
+  requested: "2026-08-01"           # <- today's date, YYYY-MM-DD
+spec:
+  environment: prod                 # <- which firewall (see catalog/environments.yaml)
+  action: allow                     # <- allow | deny | drop | reset-both | reset-client | reset-server
+  source: [{cidr: "10.20.1.0/24"}]        # <- where the traffic comes FROM
+  destination: [{cidr: "10.20.9.10/32"}]  # <- where it goes TO
+  service: [{protocol: tcp, port: "443"}] # <- protocol + port
+```
+
+That's a complete, valid request. Optional fields (App-ID, inspection profile,
+logging, user/URL matching, ordering) are in the [field reference](#field-reference)
+below — add them if you need them.
+
+### Step 4. Propose the change (create the pull request)
+
+1. Scroll to the bottom of the page to the **Commit changes** box.
+2. Choose **"Create a new branch for this commit and start a pull request."**
+   (GitHub picks a branch name for you — you can accept it.)
+3. Click **Propose changes**.
+4. On the next screen, give it a title (e.g. *"Request REQ-2026-0142: web →
+   payments"*) and click **Create pull request**.
+
+You are now on your pull request page. **You do not need to know or type a PR
+number anywhere** — every action from here is a button on this page.
+
+### Step 5. Wait for the automatic checks (~1–2 minutes)
+
+Near the bottom of the PR page you'll see a checks section:
+
+- **Green check ✅** — your request is valid. Scroll up to the **bot comment**: it
+  shows the **risk level** and a **preview** of the exact rule (App-ID, profile,
+  ordering) plus the Terraform plan. Continue to Step 6.
+- **Red ✗** — something needs fixing. Click **Details** to read the exact message
+  (e.g. *"spec.action: must be one of …"*). Then fix it: click the **Files
+  changed** tab → the pencil ✏️ on your file → edit → **Commit changes** to *the
+  same branch*. The checks re-run automatically.
+
+You never run any command to fix things — you edit the file on the website.
+
+### Step 6. Get it reviewed and merge
+
+1. Ask a reviewer (per your team's process) to approve — they read the risk +
+   preview and approve on the PR page.
+2. Once approved and the checks are green, click the green **Merge pull request**
+   button → **Confirm merge**.
+
+### Step 7. It goes live automatically (~2 minutes)
+
+Merging kicks off the **apply** automatically. To watch it:
+
+- Go to the **Actions** tab → the **apply** workflow → the run named after your
+  merge. Green ✅ = your rule is now applied to the firewall.
+
+That's it. Your rule is live, and an evidence record (who / why / what / when) was
+stored automatically. If the traffic is to a firewall with a live device, the rule
+reaches the device shortly after (a brand-new device can take 20–30 min on its
+first sync).
+
+> **Risk note:** LOW-risk changes apply automatically on merge. HIGH/CRITICAL ones
+> (broad `0.0.0.0/0`, exposing risky ports from the internet, negated matches, an
+> uninspected allow, or a brand-new zone path) are held for an explicit approval
+> step and will **not** auto-apply — the PR check tells you which tier you're in.
+
+---
+
+## Part 2 — command line alternative
+
+For developers who prefer the terminal. One-time setup: install **Git**
+(<https://git-scm.com/downloads>), optionally the **GitHub CLI**
+(<https://cli.github.com/>, then `gh auth login`), and clone the repo:
 
 ```bash
-# 0. one-time: clone + enter the repo (skip if you already have it)
 git clone https://github.com/martono25/palo-firewall-gitops.git
-cd palo-firewall-gitops
+cd palo-firewall-gitops           # <- run everything from INSIDE this folder
+```
 
-# 1. make sure you're on the latest main, then branch for your request
-git checkout main
-git pull
-git checkout -b req/REQ-2026-0142
+Then, per request (run all of this from inside the repo folder):
 
-# 2. create your intent file
+```bash
+# 1. start from the latest main, on a new branch
+git checkout main && git pull
+git checkout -b req/REQ-2026-0142        # branch name = anything unique
+
+# 2. create your request file (any editor)
 mkdir -p intent/prod/payments
-$EDITOR intent/prod/payments/REQ-2026-0142.yaml   # paste your request
+nano intent/prod/payments/REQ-2026-0142.yaml    # paste the template from Step 3
 
 # 3. commit, push, open the PR
 git add intent/prod/payments/REQ-2026-0142.yaml
 git commit -m "request: REQ-2026-0142 web -> payments"
 git push -u origin req/REQ-2026-0142
-gh pr create --fill        # or open the PR link that `git push` prints
+gh pr create --fill                       # prints your PR's URL
+
+# 4. after checks pass and it's approved — merge (no PR number needed:
+#    this merges the PR for the branch you're currently on)
+gh pr merge --squash --delete-branch
 ```
 
-Either way: the PR runs validation automatically. If it fails, read the message,
-fix the file, and push again (web: edit the file on your branch and commit; CLI:
-edit the file, then `git add … && git commit --amend --no-edit && git push -f`).
+You do **not** run `fwgitops` or compile anything — CI does that. You only edit
+files under `intent/` and open/merge the PR.
 
----
-
-## Quick start — a minimal request
-
-```yaml
-# intent/prod/payments/REQ-2026-0142.yaml
-apiVersion: fw-intent/v1
-kind: AccessRequest
-metadata:
-  id: REQ-2026-0142            # your request id (also the rule name)
-  requester: jane.doe@corp     # you
-  ticket: JIRA-4821            # the change ticket (audit linkage)
-  justification: "Web tier needs to reach the payments API"
-  requested: "2026-08-01"
-spec:
-  environment: prod            # which firewall/folder (see catalog/environments.yaml)
-  action: allow
-  source: [{cidr: "10.20.1.0/24"}]
-  destination: [{cidr: "10.20.9.10/32"}]
-  service: [{protocol: tcp, port: "443"}]
-```
-
-That is a valid request. Everything below is optional and adds precision
-(App-ID, inspection, logging, user/URL matching, ordering, …).
-
----
-
-## Full example — an inspected, App-ID rule
-
-```yaml
-apiVersion: fw-intent/v1
-kind: AccessRequest
-metadata:
-  id: REQ-2026-0143
-  requester: jane.doe@corp
-  ticket: JIRA-4830
-  justification: "Web tier to payments API, HTTPS only, inspected"
-  requested: "2026-08-01"
-  expires: "2026-11-01"          # optional: mark when this should be reviewed/removed
-spec:
-  environment: prod
-  action: allow
-  source: [{cidr: "10.20.1.0/24"}]
-  destination: [{fqdn: "payments.internal"}]
-  service: [{protocol: tcp, port: "443"}]
-  application: ["ssl", "web-browsing"]   # App-ID (not just the port)
-  profile: best-practice                 # security profile group -> threat inspection
-  log_forwarding: log-best               # forward logs to the SIEM/data lake
-  log_start: true
-  description: "web -> payments (inspected)"
-  position: top                          # place at the top of the rulebase
-```
+If a check fails: edit the file, then
+`git add … && git commit --amend --no-edit && git push -f`, and the checks re-run.
 
 ---
 
@@ -162,27 +174,27 @@ spec:
 
 | Field | Meaning |
 |---|---|
-| `id` | Your request id — becomes the rule name. Letters/digits/`.`/`_`/`-` only. |
-| `requester` | Who is asking. |
-| `ticket` | Change ticket id (audit linkage). Letters/digits/`.`/`_`/`-` only. |
-| `justification` | Why — one line of business reason. |
+| `id` | Your request id — becomes the rule name. Letters/digits/`.`/`_`/`-` only, unique. |
+| `requester` | Your email. |
+| `ticket` | Change ticket id (audit linkage). Same character rules as `id`. |
+| `justification` | One line: why you need this. |
 | `requested` | Date requested, `YYYY-MM-DD`. |
-| `expires` | *(optional)* Review/expiry date, `YYYY-MM-DD`. |
+| `expires` | *(optional)* Review/removal date, `YYYY-MM-DD`. |
 
 ### `spec`
 
 | Field | Required | Default | Meaning |
 |---|:--:|---|---|
-| `environment` | ✅ | — | Which firewall/folder. Valid values live in `catalog/environments.yaml`. |
+| `environment` | ✅ | — | Which firewall/folder. Valid values in `catalog/environments.yaml`. |
 | `action` | ✅ | — | `allow` · `deny` · `drop` · `reset-client` · `reset-server` · `reset-both`. |
 | `source` | ✅ | — | List of endpoints (see **Endpoints**). |
 | `destination` | ✅ | — | List of endpoints. |
 | `service` | ✅ | — | List of services (see **Services**). |
 | `application` | | `["any"]` | App-ID names, e.g. `["ssl","web-browsing"]`. Port-only if omitted. |
-| `profile` | | *(none)* | Security profile **group** name → threat inspection. Omitted = **no inspection** (flagged, not blocked). |
-| `log_forwarding` | | *(none)* | Log-forwarding profile name (send logs off-box). |
+| `profile` | | *(none)* | Security profile **group** → threat inspection. Omitted = **no inspection** (flagged, not blocked). |
+| `log_forwarding` | | *(none)* | Log-forwarding profile (send logs off-box). |
 | `source_user` | | `["any"]` | User-ID users/groups. Reserved: `any`, `pre-login`, `known-user`, `unknown`. |
-| `category` | | `["any"]` | URL categories to match, e.g. `["financial-services"]`. |
+| `category` | | `["any"]` | URL categories, e.g. `["financial-services"]`. |
 | `negate_source` | | `false` | Match everything **except** the source. |
 | `negate_destination` | | `false` | Match everything **except** the destination. |
 | `log` | | `true` | Log at session **end**. |
@@ -198,7 +210,7 @@ Each entry is exactly one of:
 - {cidr: "10.20.1.0/24"}      # a network (use the network address, not a host in it)
 - {cidr: "10.20.9.10/32"}     # a single host
 - {fqdn: "payments.internal"} # a hostname
-- {app: "payments-api"}       # a named app from catalog/apps.yaml (carries its own zone)
+- {app: "payments-api"}       # a named app from catalog/apps.yaml
 ```
 
 ### Services
@@ -212,7 +224,20 @@ Each entry is exactly one of:
 
 ---
 
-## More examples
+## Examples
+
+**Inspected HTTPS allow (App-ID + profile + logging):**
+```yaml
+spec:
+  environment: prod
+  action: allow
+  source: [{cidr: "10.20.1.0/24"}]
+  destination: [{fqdn: "payments.internal"}]
+  service: [{protocol: tcp, port: "443"}]
+  application: ["ssl", "web-browsing"]
+  profile: best-practice
+  log_forwarding: log-best
+```
 
 **Block (drop) telnet to a host:**
 ```yaml
@@ -235,63 +260,28 @@ spec:
   source_user: ["corp\\payments-admins"]
 ```
 
-**Allow HTTPS but only to financial URLs, place after another rule:**
-```yaml
-spec:
-  environment: prod
-  action: allow
-  source: [{cidr: "10.20.5.0/24"}]
-  destination: [{cidr: "0.0.0.0/0"}]
-  service: [{protocol: tcp, port: "443"}]
-  category: ["financial-services"]
-  position: "after:REQ-2026-0142"
-```
-
----
-
-## Reading the PR feedback
-
-When you open the PR, CI comments with three things:
-
-- **Validation** — if your request is malformed, the job fails with a line-by-line
-  message (`spec.action: must be one of [...]`). Fix and push again.
-- **Risk tier** — each change is classified:
-  - **LOW** — auto-applies on merge.
-  - **HIGH / CRITICAL** — needs an explicit approval step; will **not** auto-apply.
-    Common triggers: broad source/destination, `0.0.0.0/0` any-any, exposing risky
-    ports from the internet, a negated match, a brand-new zone path, or an
-    uninspected allow.
-- **Enrich preview + plan** — the exact fields that will be set (App-ID, profile,
-  log-forwarding, ordering) and the Terraform plan for the objects/skeleton. This
-  is what a reviewer approves against.
-
-> **Note:** an `allow` with no `profile` is flagged (`allow_without_inspection`) —
-> it's permitted, but it means the traffic is allowed **without threat inspection**.
-> Add a `profile` unless you deliberately want an uninspected allow.
-
 ---
 
 ## Common mistakes
 
 | Message / symptom | Fix |
 |---|---|
-| `spec.action: must be one of [...]` | Use a valid action (see the list above). |
+| PR check red, `spec.action: must be one of [...]` | Use a valid action (see the table). |
 | `invalid CIDR ... (host bits set …)` | Use the network address (`10.20.1.0/24`, not `10.20.1.5/24`). |
 | `unknown environment 'staging'; known: [...]` | Use an environment from `catalog/environments.yaml`. |
-| `unknown App-ID 'ssll'; known: [...]` | Fix the App-ID name (see `catalog/applications.yaml`). |
-| `unknown security profile group '…'` | Use a profile group that exists (see `catalog/profiles.yaml`). |
+| `unknown App-ID / security profile group / …` | Fix the name, or ask the platform team to add it to the relevant `catalog/*.yaml`. |
+| Nothing changed on the firewall after opening the PR | **A PR only proposes the change — you must *merge* it.** The rule applies on merge. |
 | Change is **HIGH/CRITICAL** and won't auto-apply | Expected for broad/any-any/exposed/negated rules — get the explicit approval, or tighten the rule. |
-| `rules.auto.tfvars.json is stale` | You edited an intent but didn't recompile — run `fwgitops compile intent --out terraform` and commit, or just let CI regenerate it. |
 
 ---
 
 ## Where things live
 
-- **Your requests:** `intent/<environment>/<team>/REQ-*.yaml`
+- **Requests:** `intent/<environment>/<team>/REQ-*.yaml`
 - **Valid environments:** `catalog/environments.yaml`
 - **Named services / apps / App-IDs / profiles:** `catalog/*.yaml`
 - **What each field maps to on the firewall:** `docs/adr/0003-security-rule-component-model.md`
 
 If a name you need (a service, app, profile, or App-ID) isn't in the catalogs,
-open a PR adding it — those are platform-maintained lists and adding to them is a
-reviewed change, just like a rule request.
+open a PR adding it to the relevant `catalog/*.yaml` — those are platform-
+maintained lists, and adding to them is a reviewed change just like a rule request.
