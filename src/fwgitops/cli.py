@@ -736,6 +736,49 @@ def run_deregister(serial: str, *, session=None, out=None, err=None) -> int:
     return 0
 
 
+def run_rules(
+    folder: str,
+    *,
+    contains: Optional[str] = None,
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """List the security rules currently LIVE in an SCM folder (reads SCM, no UI).
+
+    This is the "is my rule deployed?" check — it queries SCM's committed state,
+    so it is reliable any time (no apply run needed). With `--has <id>` it checks
+    one rule and exits 3 if absent (scriptable). Credentials come from SCM_* env.
+    Exit codes: 0 ok/present · 1 config/auth · 3 rule not found.
+    """
+    from fwgitops.clients import ScmRuleClient
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    if session is None:
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except ScmConfigError as e:
+            print(f"error: {e}", file=err)
+            return 1
+    try:
+        names = sorted(ScmRuleClient(session).rule_ids_by_name(folder))
+    except ScmApiError as e:
+        print(f"error: could not read folder {folder!r}: {e}", file=err)
+        return 1
+
+    if contains is not None:
+        present = contains in names
+        print(f"{contains}: {'LIVE' if present else 'NOT FOUND'} in folder {folder!r}", file=out)
+        return 0 if present else 3
+
+    print(f"{len(names)} rule(s) live in folder {folder!r}:", file=out)
+    for n in names:
+        print(f"  {n}", file=out)
+    return 0
+
+
 def run_set_admin_password(
     mgmt_ip: str,
     *,
@@ -847,6 +890,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="SCM folder the device should have auto-placed into")
     o.add_argument("--name", help="display name to set in SCM (e.g. fw-prod-edge-682)")
 
+    rl = sub.add_parser("rules", help="list the security rules currently live in an SCM folder")
+    rl.add_argument("folder", help="SCM folder to read")
+    rl.add_argument("--has", dest="contains",
+                    help="check a specific rule id is live (exit 3 if not found)")
+
     d = sub.add_parser("deregister", help="remove a device's SCM registration (teardown)")
     d.add_argument("serial", help="device serial number")
 
@@ -896,6 +944,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     if args.command == "onboard":
         return run_onboard(args.serial, folder=args.folder, name=args.name)
+    if args.command == "rules":
+        return run_rules(args.folder, contains=args.contains)
     if args.command == "deregister":
         return run_deregister(args.serial)
     if args.command == "set-admin-password":
