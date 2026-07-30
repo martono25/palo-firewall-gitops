@@ -1,0 +1,15 @@
+# intent/prod/payments/REQ-2026-0142.yaml
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0730            # your request id (also the rule name)
+  requester: jane.doe@corp     # you
+  ticket: JIRA-4821            # the change ticket (audit linkage)
+  justification: "Web tier needs to reach the payments API"
+  requested: "2026-07-30"
+spec:
+  environment: prod            # which firewall/folder (see catalog/environments.yaml)
+  action: allow
+  source: [{cidr: "10.20.1.0/24"}]
+  destination: [{cidr: "10.20.9.10/32"}]
+  service: [{protocol: tcp, port: "443"}]
