@@ -108,55 +108,12 @@ You never run any command to fix things — you edit the file on the website.
 2. Once approved and the checks are green, click the green **Merge pull request**
    button → **Confirm merge**.
 
-### Step 7. It goes live automatically (~2 minutes)
+### Step 7. It goes live automatically — then confirm it
 
-Merging kicks off the **apply** automatically — you don't do anything.
-
-### Step 8. Confirm your rule deployed (no SCM login needed)
-
-Everything you need is on GitHub:
-
-1. Click the repo's **Actions** tab → the **apply** workflow → the run named after
-   your merge (it starts within a few seconds of merging).
-2. Wait for it to finish (~2 min). A **green ✅** means the deploy succeeded; a
-   **red ✗** means it failed and **nothing was changed** (fail-closed) — open the
-   run to read why.
-3. On the run page, look at the **Summary** at the top — the **"Firewall rules
-   deployed"** section lists every rule now live, including yours:
-   ```
-   Firewall rules deployed
-   Result: success
-   Folder `prod-edge`:
-     - REQ-2026-0142      <- your rule
-     - REQ-2026-0725
-     - ...
-   ```
-   Seeing your `id` there = your rule is live on the firewall.
-   You don't run an apply yourself — **merging triggered this run.** If you don't
-   see a run, wait a few seconds and refresh the Actions tab.
-4. *(Optional, deeper proof)* Expand the **"terraform apply + SCM push"** step to
-   see `REQ-2026-0142 … Creation complete` and `OK — success … job=<n>`. And the
-   run's **Artifacts** include an **evidence bundle** (a JSON record of exactly
-   what was applied, who approved it, and when) you can download.
-
-**Prefer the command line? (or want to check any time, not just after a deploy)**
-
-If you have the `fwgitops` CLI set up (operator setup — repo cloned,
-`pip install -e .`, and `SCM_*` credentials in your shell), you can ask SCM
-directly whether a rule is live — this reads the firewall's current state, so it
-works **any time**, no deploy run required:
-
-```bash
-fwgitops rules prod-edge --has REQ-2026-0142
-#   REQ-2026-0142: LIVE in folder 'prod-edge'      (exit code 0)
-#   REQ-2026-0142: NOT FOUND in folder 'prod-edge' (exit code 3)
-
-fwgitops rules prod-edge          # or list everything live in the folder
-```
-
-That's it — your rule is live, with an audit record stored automatically. If the
-firewall has a live device attached, the rule reaches the device shortly after (a
-brand-new device can take 20–30 min on its very first sync).
+Merging kicks off the **apply** automatically — you don't run anything. To check
+that your rule actually deployed, go to
+**[Confirm your rule deployed](#confirm-your-rule-deployed)** below (it covers both
+the website and the command line).
 
 > **Risk note:** LOW-risk changes apply automatically on merge. HIGH/CRITICAL ones
 > (broad `0.0.0.0/0`, exposing risky ports from the internet, negated matches, an
@@ -203,6 +160,57 @@ files under `intent/` and open/merge the PR.
 
 If a check fails: edit the file, then
 `git add … && git commit --amend --no-edit && git push -f`, and the checks re-run.
+
+After merge, confirm it deployed — see
+**[Confirm your rule deployed](#confirm-your-rule-deployed)** below. From the
+command line the quickest check is:
+
+```bash
+set -a; source ~/.fwgitops/scm.env; set +a          # once per shell (SCM creds)
+fwgitops rules prod-edge --has REQ-2026-0142         # LIVE (exit 0) / NOT FOUND (exit 3)
+```
+
+---
+
+## Confirm your rule deployed
+
+Two ways, both **without logging into SCM**. Use whichever fits your path.
+
+### From GitHub (website)
+
+1. Repo → **Actions** tab → **apply** workflow → the run named after your merge
+   (it starts within seconds of merging — **you don't run it, the merge does**).
+2. Wait ~2 min. **Green ✅** = deployed; **red ✗** = failed and *nothing changed*
+   (fail-closed) — open the run to read why.
+3. At the top of the run page, the **"Firewall rules deployed"** summary lists
+   every live rule, including yours:
+   ```
+   Firewall rules deployed
+   Result: success
+   Folder `prod-edge`:
+     - REQ-2026-0142      <- your rule
+     - ...
+   ```
+   Seeing your `id` = it's live. *(Deeper proof: the run's **Artifacts** include an
+   evidence bundle — a JSON audit record of exactly what was applied.)*
+
+### From the command line (any time)
+
+Reads SCM's current state, so it works **whenever** — not only right after a
+deploy. Needs the `fwgitops` CLI + `SCM_*` credentials (operator setup):
+
+```bash
+set -a; source ~/.fwgitops/scm.env; set +a           # once per shell (SCM creds)
+
+fwgitops rules prod-edge --has REQ-2026-0142
+#   REQ-2026-0142: LIVE in folder 'prod-edge'      (exit 0)
+#   REQ-2026-0142: NOT FOUND in folder 'prod-edge' (exit 3)
+
+fwgitops rules prod-edge          # or list everything live in the folder
+```
+
+Once live, if the firewall has a device attached, the rule reaches the device
+shortly after (a brand-new device can take 20–30 min on its very first sync).
 
 ---
 
