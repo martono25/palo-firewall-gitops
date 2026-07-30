@@ -132,10 +132,27 @@ Everything you need is on GitHub:
      - ...
    ```
    Seeing your `id` there = your rule is live on the firewall.
+   You don't run an apply yourself — **merging triggered this run.** If you don't
+   see a run, wait a few seconds and refresh the Actions tab.
 4. *(Optional, deeper proof)* Expand the **"terraform apply + SCM push"** step to
    see `REQ-2026-0142 … Creation complete` and `OK — success … job=<n>`. And the
    run's **Artifacts** include an **evidence bundle** (a JSON record of exactly
    what was applied, who approved it, and when) you can download.
+
+**Prefer the command line? (or want to check any time, not just after a deploy)**
+
+If you have the `fwgitops` CLI set up (operator setup — repo cloned,
+`pip install -e .`, and `SCM_*` credentials in your shell), you can ask SCM
+directly whether a rule is live — this reads the firewall's current state, so it
+works **any time**, no deploy run required:
+
+```bash
+fwgitops rules prod-edge --has REQ-2026-0142
+#   REQ-2026-0142: LIVE in folder 'prod-edge'      (exit code 0)
+#   REQ-2026-0142: NOT FOUND in folder 'prod-edge' (exit code 3)
+
+fwgitops rules prod-edge          # or list everything live in the folder
+```
 
 That's it — your rule is live, with an audit record stored automatically. If the
 firewall has a live device attached, the rule reaches the device shortly after (a

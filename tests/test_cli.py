@@ -336,3 +336,37 @@ def test_cli_set_admin_password_missing_phash_exits_1(monkeypatch, capsys):
     rc = run_set_admin_password("10.0.0.1", ssh_key="k.pem")  # no phash -> 1, no SSH
     assert rc == 1
     assert "FWGITOPS_ADMIN_PHASH" in capsys.readouterr().err
+
+
+# ── fwgitops rules (live SCM read — the "is my rule deployed?" check) ───────
+from fwgitops.cli import run_rules  # noqa: E402
+
+
+def _rules_transport(names):
+    def t(method, url, headers, body):
+        if "oauth2" in url:
+            return 200, json.dumps({"access_token": "tok", "expires_in": 3600}).encode()
+        if "/security-rules" in url:
+            return 200, json.dumps({"data": [{"name": n, "id": f"id-{n}"} for n in names]}).encode()
+        return 404, b"{}"
+    return t
+
+
+def _rules_session(names):
+    return ScmSession(CREDS, transport=_rules_transport(names))
+
+
+def test_cli_rules_lists_live(capsys):
+    rc = run_rules("prod-edge", session=_rules_session(["REQ-B", "REQ-A"]))
+    out = capsys.readouterr().out
+    assert rc == 0 and "REQ-A" in out and "REQ-B" in out
+
+
+def test_cli_rules_has_present(capsys):
+    rc = run_rules("prod-edge", contains="REQ-A", session=_rules_session(["REQ-A", "REQ-B"]))
+    assert rc == 0 and "LIVE" in capsys.readouterr().out
+
+
+def test_cli_rules_has_absent(capsys):
+    rc = run_rules("prod-edge", contains="REQ-Z", session=_rules_session(["REQ-A"]))
+    assert rc == 3 and "NOT FOUND" in capsys.readouterr().out
