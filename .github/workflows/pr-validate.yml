@@ -64,16 +64,12 @@ jobs:
             fwgitops enrich "$folder" --dry-run | tee "enrich-$folder.txt"
           done
 
-      # 2. The committed rules.auto.tfvars.json must match a fresh compile, so
-      #    the artifact reviewed in the PR is exactly what apply will use.
-      - name: Check generated tfvars is up to date
-        run: |
-          fwgitops compile intent --out terraform
-          if ! git diff --quiet -- 'terraform/**/rules.auto.tfvars.json'; then
-            echo "::error::rules.auto.tfvars.json is stale. Run: fwgitops compile intent --out terraform, then commit."
-            git --no-pager diff -- 'terraform/**/rules.auto.tfvars.json'
-            exit 1
-          fi
+      # 2. Compile intents -> tfvars FRESH (a build artifact, not committed). The
+      #    plan/preview steps below read these. Requesters never run this — they
+      #    only edit intent/** and open the PR; CI compiles deterministically, so
+      #    the reviewed intent is exactly what apply uses.
+      - name: Compile (generate tfvars)
+        run: fwgitops compile intent --out terraform
 
       - uses: hashicorp/setup-terraform@v4
 

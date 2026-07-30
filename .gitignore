@@ -16,9 +16,12 @@ terraform.rc
 # Commit the provider lock file for reproducible plans:
 !.terraform.lock.hcl
 
-# NOTE: rules.auto.tfvars.json is GENERATED DESIRED-STATE (rules, no secrets)
-# and is intentionally TRACKED — it is part of the Git source of truth and the
-# PR diff. Do not ignore *.auto.tfvars.json.
+# Compiled desired-state is a BUILD ARTIFACT, not source. Intents (intent/**) are
+# the source of truth; CI compiles them fresh for plan/apply, so requesters never
+# run the compiler and never commit these. (Do NOT track them — that forced a
+# manual `fwgitops compile` step on requesters, breaking the no-tooling path.)
+terraform/*/rules.auto.tfvars.json
+terraform/*/zones.auto.tfvars.json
 # Secret-bearing tfvars (conventional) stay out:
 terraform.tfvars
 *.secret.tfvars
