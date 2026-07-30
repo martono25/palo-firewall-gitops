@@ -132,6 +132,24 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Confirmation a requester can read on the run page (Actions -> this run ->
+      # Summary) without opening SCM: which rules are now live in which folder.
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "## Firewall rules deployed"
+            echo ""
+            echo "Result: **${{ job.status }}**"
+            for f in terraform/*/rules.auto.tfvars.json; do
+              [ -f "$f" ] || continue
+              folder=$(basename "$(dirname "$f")")
+              echo ""
+              echo "**Folder \`$folder\`:**"
+              jq -r '.security_rules | keys[] | "- `" + . + "`"' "$f" 2>/dev/null || true
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Evidence (Phase 2): one NIST-mapped bundle per applied change, carrying
       # the risk verdict, intent/tfvars hashes, and CI provenance (GITHUB_* env).
       # Uploaded as a run artifact — the audit record for this apply.

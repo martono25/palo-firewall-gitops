@@ -110,15 +110,36 @@ You never run any command to fix things — you edit the file on the website.
 
 ### Step 7. It goes live automatically (~2 minutes)
 
-Merging kicks off the **apply** automatically. To watch it:
+Merging kicks off the **apply** automatically — you don't do anything.
 
-- Go to the **Actions** tab → the **apply** workflow → the run named after your
-  merge. Green ✅ = your rule is now applied to the firewall.
+### Step 8. Confirm your rule deployed (no SCM login needed)
 
-That's it. Your rule is live, and an evidence record (who / why / what / when) was
-stored automatically. If the traffic is to a firewall with a live device, the rule
-reaches the device shortly after (a brand-new device can take 20–30 min on its
-first sync).
+Everything you need is on GitHub:
+
+1. Click the repo's **Actions** tab → the **apply** workflow → the run named after
+   your merge (it starts within a few seconds of merging).
+2. Wait for it to finish (~2 min). A **green ✅** means the deploy succeeded; a
+   **red ✗** means it failed and **nothing was changed** (fail-closed) — open the
+   run to read why.
+3. On the run page, look at the **Summary** at the top — the **"Firewall rules
+   deployed"** section lists every rule now live, including yours:
+   ```
+   Firewall rules deployed
+   Result: success
+   Folder `prod-edge`:
+     - REQ-2026-0142      <- your rule
+     - REQ-2026-0725
+     - ...
+   ```
+   Seeing your `id` there = your rule is live on the firewall.
+4. *(Optional, deeper proof)* Expand the **"terraform apply + SCM push"** step to
+   see `REQ-2026-0142 … Creation complete` and `OK — success … job=<n>`. And the
+   run's **Artifacts** include an **evidence bundle** (a JSON record of exactly
+   what was applied, who approved it, and when) you can download.
+
+That's it — your rule is live, with an audit record stored automatically. If the
+firewall has a live device attached, the rule reaches the device shortly after (a
+brand-new device can take 20–30 min on its very first sync).
 
 > **Risk note:** LOW-risk changes apply automatically on merge. HIGH/CRITICAL ones
 > (broad `0.0.0.0/0`, exposing risky ports from the internet, negated matches, an
@@ -226,8 +247,19 @@ Each entry is exactly one of:
 
 ## Examples
 
+Every example below is a **complete file** — copy the whole thing into a new
+`intent/prod/<team>/REQ-<id>.yaml` and change the values.
+
 **Inspected HTTPS allow (App-ID + profile + logging):**
 ```yaml
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0201
+  requester: you@corp.com
+  ticket: JIRA-5001
+  justification: "Web tier to payments API, HTTPS only, inspected"
+  requested: "2026-08-01"
 spec:
   environment: prod
   action: allow
@@ -241,6 +273,14 @@ spec:
 
 **Block (drop) telnet to a host:**
 ```yaml
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0202
+  requester: you@corp.com
+  ticket: JIRA-5002
+  justification: "Block legacy telnet to the jump host"
+  requested: "2026-08-01"
 spec:
   environment: prod
   action: drop
@@ -249,8 +289,16 @@ spec:
   service: [{protocol: tcp, port: "23"}]
 ```
 
-**Allow a specific user group only:**
+**Allow a specific user group only (User-ID):**
 ```yaml
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0203
+  requester: you@corp.com
+  ticket: JIRA-5003
+  justification: "Only the payments-admins group may reach the admin console"
+  requested: "2026-08-01"
 spec:
   environment: prod
   action: allow
