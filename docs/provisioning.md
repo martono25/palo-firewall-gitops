@@ -46,16 +46,31 @@ fwgitops --help             # verify
 terraform version           # verify
 ```
 
-### 2. Configure credentials (one time)
+### 2. Configure credentials
+
+**AWS** (one time): `aws configure` (or `aws configure sso`) for access to the
+target account/region. Verify: `aws sts get-caller-identity`.
+
+**SCM** — the `fwgitops` commands that talk to SCM (`onboard`, `push`, `enrich`)
+read the service-account credentials from **environment variables**, so they must
+be present in **every shell** you run them from:
 
 ```bash
-aws configure               # or `aws configure sso` — access to the target account/region
-export SCM_CLIENT_ID=...     # SCM service account (for `fwgitops onboard`, and the
-export SCM_CLIENT_SECRET=... # scm Terraform provider). Keep the secret out of shell
-export SCM_SCOPE=tsg_id:XXXX # history — e.g. `read -rs SCM_CLIENT_SECRET`.
+export SCM_CLIENT_ID=...
+export SCM_CLIENT_SECRET=...   # keep out of shell history, e.g. `read -rs SCM_CLIENT_SECRET`
+export SCM_SCOPE=tsg_id:XXXX
 ```
 
-Verify AWS works: `aws sts get-caller-identity`.
+Convenient pattern — keep them in a **gitignored, mode-0600 file** and source it
+per shell (this is what avoids retyping the secret):
+
+```bash
+# one time: create ~/.fwgitops/scm.env (chmod 600) containing the three exports
+set -a; source ~/.fwgitops/scm.env; set +a   # run this in each new terminal
+```
+
+If you skip this, `fwgitops onboard/push/enrich` fail with a config/credentials
+error.
 
 ### 3. Palo Alto / licensing inputs (operator-held)
 
@@ -161,6 +176,8 @@ Two **manual CSP follow-ups** (there is no API for these):
 
 | Symptom | Likely cause / fix |
 |---|---|
+| `zsh: command not found: fwgitops` (venv is active) | The package isn't installed in the venv. Run `pip install -e .` (from the repo root, venv active), then `rehash` (zsh) or open a new shell. |
+| `fwgitops onboard/push/enrich` → config/credentials error | SCM env vars not loaded in this shell — run `set -a; source ~/.fwgitops/scm.env; set +a` first (see *Configure credentials*). |
 | Device never appears in SCM; SSH shows `serial: unknown`, `device-certificate-status: None` | Registration/licensing failed — registration PIN expired/used up, or **no free license seats** (delete stale devices in CSP). |
 | Device onboards but rules don't reach it for 20-30 min | Normal — a fresh VM finishes content bootstrap before its first config push. Verify on-device with `show running security-policy`, not just the SCM `is_first_push_done` flag (it lags). |
 | `mgmt` unreachable | `mgmt_allowed_cidr` doesn't include your IP; or the device is still booting. |
