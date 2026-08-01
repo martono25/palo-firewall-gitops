@@ -17,8 +17,11 @@ provider "scm" {
   # account, per-run token exchange on a GitHub-hosted runner). Supplied via
   # environment, NEVER hardcoded here.
   #
-  # VERIFY: exact provider auth attributes / env vars
-  #   (host / auth_url / client_id / client_secret / scope / token).
+  # VERIFIED 2026-07-31 against the v1.0.11 provider schema and a live apply:
+  # the provider reads SCM_CLIENT_ID / SCM_CLIENT_SECRET / SCM_SCOPE from the
+  # environment — the same names `fwgitops` uses (see scmapi.ScmCredentials),
+  # so one `set -a; source ~/.fwgitops/scm.env` covers both. Optional overrides:
+  # SCM_HOST, SCM_AUTH_URL. An empty block is therefore correct, not a TODO.
 }
 
 module "security_folder" {

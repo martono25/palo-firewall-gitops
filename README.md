@@ -58,31 +58,36 @@ pip install -e '.[dev]'
 fwgitops compile intent --env-map catalog/environments.yaml --out terraform
 fwgitops compile intent --check      # validate only, write nothing
 
-pytest -q                            # 75 tests
+pytest -q                            # 349 tests
 ```
 
 Fail-closed and all-or-nothing: if any intent is invalid, the compiler prints an
-actionable report and writes nothing (exit 2). What's built so far: the tag/identity
-convention, the intent schema + validator, the compiler, and this CLI. Terraform
-module, pipeline, and provisioning are next (see `docs/DESIGN.md`).
+actionable report and writes nothing (exit 2). The same applies to the
+**compiler → Terraform contract** — compiling data that no Terraform module
+declares and wires is an error, not a silent no-op (ADR-0004).
+
+Built and proven end-to-end on live hardware: the tag/identity convention, the
+intent schema + validator, the compiler, the risk classifier, the Terraform
+module, `enrich`, `push`, drift detection, evidence bundles, the CI pipeline,
+and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
+[`docs/adr/`](docs/adr/) for what is built versus designed, and
+[`TODOS.md`](TODOS.md) for deferred work.
 
 ## Roadmap
 
-- **Phase 1 — Walking skeleton:** provision ONE pilot firewall end-to-end + one Day-2 rule
-  flow, human-approved, on the lowest-blast-radius greenfield device group.
-- **Phase 2 — Risk-tiering + evidence:** add the risk classifier (or borrow AlgoSec/Tufin/
-  FireMon), enable auto-apply for low-risk classes, generate evidence bundles, add drift
-  detect-and-alert.
-- **Phase 3 — Scale + self-service:** SCM + Panorama backends, multi-device-group, self-service
+- **Phase 1 — Walking skeleton — DONE.** One pilot VM-Series provisioned end-to-end and one
+  Day-2 rule flow proven in the device running config.
+- **Phase 2 — Risk-tiering + evidence — DONE.** Risk classifier built in-house (no commercial
+  tool in the estate), auto-apply at LOW, NIST-mapped evidence bundles, drift detect-and-alert.
+- **Phase 3 — Scale + self-service — NEXT.** Multi-folder, Panorama backend, self-service
   intake, break-glass with automated evidence.
+- **Day-1 as GitOps (ADR-0002) — IN DESIGN.** The bootstrap half is built; the data-plane half
+  (`InterfaceRequest` → `ZoneRequest` → `RouteRequest`) is not. `InterfaceRequest` is the
+  prerequisite — a zone cannot carry traffic without it. See [`TODOS.md`](TODOS.md).
 
-## Before writing any code (the assignment)
-
-1. Confirm whether **AlgoSec / Tufin / FireMon** already exists in the estate — decides
-   build-vs-borrow for the risk classifier.
-2. Name the **lowest-blast-radius pilot firewall + device group** for the walking skeleton.
-3. Decide its **form factor** (VM-Series in which cloud / CN-Series / hardware) — sets the
-   bootstrap/ZTP mechanics.
+The three questions this project opened with are answered: no commercial firewall-analysis
+tool is owned (classifier built in-house), the pilot is a greenfield SCM folder, and the form
+factor is VM-Series on AWS.
 
 ## Layout
 
@@ -102,4 +107,10 @@ module, pipeline, and provisioning are next (see `docs/DESIGN.md`).
 ## Open questions
 
 See the [Open Questions](docs/DESIGN.md#open-questions) section of the design doc. The
-highest-leverage one: do we already own a commercial firewall-analysis tool?
+build-vs-borrow question is settled: no commercial firewall-analysis tool is owned, so the
+risk classifier is built in-house.
+
+The open ones now are scoping questions, tracked with their reasoning in
+[`TODOS.md`](TODOS.md): how much of the device model belongs in Git-tracked YAML, whether
+zones can ever join the tag-based drift model (`scm_zone` has no `tag` attribute), and
+whether `InterfaceRequest` or full Day-1 is the next release.

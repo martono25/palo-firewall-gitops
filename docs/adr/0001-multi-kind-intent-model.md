@@ -1,7 +1,7 @@
 # ADR-0001 — Multi-kind intent model
 
-- **Status:** Proposed (direction accepted; build in a later phase)
-- **Date:** 2026-07-27
+- **Status:** Accepted — **partially built** (see *Implementation status* below)
+- **Date:** 2026-07-27 (status revised 2026-07-31)
 - **Deciders:** Martono, Claude
 
 ## Context
@@ -31,6 +31,44 @@ kind-agnostic:
 | compile → Terraform | **yes** — `AccessRequest`→`scm_security_rule`, `ZoneRequest`→`scm_zone`, … |
 | risk classify | **yes** — a zone add ≠ an any-any allow risk-wise |
 | gate · apply · push · evidence · drift | **no** — generic (operate on compiled objects + `gitops:` tags) |
+
+> **The last row was wrong, and it mattered.** It is kept above as originally
+> written because it is what the design claimed; see *Implementation status* for
+> what the code does. Drift in particular cannot be made generic the way this
+> row assumes — see *Correction: drift is not kind-agnostic*.
+
+## Implementation status (2026-07-31)
+
+Built (PRs #18–#20): the intent-loader registry (`_KIND_LOADERS` in
+`intent.py`), `ZoneRequest` as kind #2, and the cross-kind zone-consistency
+check. `AccessRequest` remains the only kind proven end-to-end on hardware.
+
+**Not built — the registry is a registry in name only.** Only the intent loader
+is genuinely registered. Everything downstream branches on Python type:
+`compile_any` uses an `isinstance` chain, `cli.py` filters with `isinstance`,
+and `classify` / `evidence` / `drift` are hard-typed to security rules
+(`build_bundle` takes an `AccessRequest`; `drift` works on `ActualRule`).
+Adding a kind means touching ~8 places and remembering all of them.
+
+That is not hypothetical. `ZoneRequest` was wired into the three stages someone
+remembered (loader, compiler, CLI) and silently omitted from the four nobody did
+(Terraform, classify, evidence, drift). Because Terraform ignores an undeclared
+auto-tfvars variable with exit 0, the result compiled, planned and applied green
+for an entire release without ever reaching a firewall. See ADR-0004.
+
+### Correction: drift is not kind-agnostic
+
+`drift.py` detects drift entirely from `gitops:` tags (`is_managed`,
+`parse_managed_meta`), and the module carries a whole `scm_tag` resource because
+SCM validates tags as references. **`scm_zone` has no `tag` attribute** — verified
+against provider v1.0.11. So zones cannot participate in the tag-based drift
+model at all: a hand-added zone is invisible, and there is no `gitops:req`
+provenance for a zone.
+
+Before promising drift coverage for any future kind, check whether its SCM
+resource supports tags. A `KindHandler` protocol with optional members for
+stages a kind cannot support is an interface with holes, which is why the
+registry refactor is deferred rather than rushed.
 
 - `AccessRequest` is kind #1 (built + proven). `ZoneRequest` is kind #2. Grow as
   we mature: `InterfaceRequest`, `RouteRequest`, `NatRequest`, group kinds.
