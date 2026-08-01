@@ -93,7 +93,36 @@ jobs:
             echo "::group::plan $folder"
             ./terraform/make-backend.sh "$folder"
             terraform -chdir="$dir" init -input=false -backend-config=backend.hcl
-            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode | tee "plan-$folder.txt" || true
+
+            # `|| true` used to swallow EVERY plan failure, and the pipe made
+            # -detailed-exitcode meaningless (the exit code was tee's). A broken
+            # plan passed CI silently. Capture the PLAN's status instead.
+            #
+            # -detailed-exitcode: 0 = no changes, 2 = changes present (NORMAL for
+            # a PR — do not treat as failure), anything else = a real error.
+            rc=0
+            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode \
+              2>&1 | tee "plan-$folder.txt" || rc=$?
+            case "$rc" in
+              0|2) ;;
+              *)
+                echo "::error::terraform plan FAILED for $folder (exit $rc)"
+                exit 1
+                ;;
+            esac
+
+            # FAIL-CLOSED CONTRACT GUARD.
+            # Terraform treats an auto-loaded *.auto.tfvars.json that sets an
+            # UNDECLARED variable as a warning and exits 0. That is how a compiled
+            # zones.auto.tfvars.json shipped for a full release while plan, apply
+            # and 327 tests all stayed green and the config never reached the
+            # firewall. A warning here means the compiler emitted data no module
+            # consumes, so it must fail the PR.
+            if grep -q "Value for undeclared variable" "plan-$folder.txt"; then
+              echo "::error::$folder: compiled tfvars set a variable the Terraform module does not declare — the config would be SILENTLY IGNORED. Declare it in terraform/$folder/variables.tf and pass it to the module block."
+              grep -n "Value for undeclared variable" "plan-$folder.txt" || true
+              exit 1
+            fi
             echo "::endgroup::"
           done
 

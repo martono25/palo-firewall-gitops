@@ -287,3 +287,74 @@ def test_change_order_does_not_affect_output():
     doc2["metadata"]["id"] = "REQ-2026-0500"
     c1, c2 = compiled(), compiled(doc2)
     assert dumps_tfvars([c1, c2]) == dumps_tfvars([c2, c1])
+
+
+# ── baseline_zones: the env map must be able to name every zone on the device ──
+def _env_map_with_baseline() -> EnvMap:
+    return EnvMap.from_dict({
+        "prod": {
+            "folder": "prod-edge",
+            "from_zone": "trust",
+            "to_zone": "app",
+            "baseline_zones": ["proxy", "zone-internal"],
+        }
+    })
+
+
+def test_baseline_zones_join_the_declared_set():
+    """Regression: the live tenant has SEVEN zones per folder but the map named two,
+    so a rule referencing a REAL zone like `proxy` was rejected as undeclared."""
+    assert _env_map_with_baseline().baseline_zones_by_folder()["prod-edge"] == {
+        "trust", "app", "proxy", "zone-internal",
+    }
+
+
+def test_rule_using_a_declared_baseline_zone_is_accepted():
+    from fwgitops.compiler import check_zone_consistency
+    rule = _rule_using_dmz()  # a rule whose zones are not the default pair
+    assert check_zone_consistency([rule], [], env_map()) != []  # undeclared -> rejected
+    em = EnvMap.from_dict({
+        "prod": {
+            "folder": "prod-edge", "from_zone": "trust", "to_zone": "app",
+            "baseline_zones": ["dmz"],
+        }
+    })
+    assert check_zone_consistency([rule], [], em) == []  # declared as baseline -> fine
+
+
+def test_baseline_zones_omitted_keeps_old_behaviour():
+    assert env_map().baseline_zones_by_folder()["prod-edge"] == {"trust", "app"}
+
+
+@pytest.mark.parametrize("bad", ["proxy", [""], [3], {"a": 1}])
+def test_baseline_zones_bad_shape_is_rejected(bad):
+    with pytest.raises(ResolveError, match="baseline_zones"):
+        EnvMap.from_dict({
+            "prod": {
+                "folder": "prod-edge", "from_zone": "trust", "to_zone": "app",
+                "baseline_zones": bad,
+            }
+        })
+
+
+# ── collision guard: a ZoneRequest must not clobber an existing device zone ────
+def test_zone_request_naming_a_baseline_zone_is_rejected():
+    """check_zone_consistency UNIONS baseline+declared, so it cannot see this."""
+    from fwgitops.compiler import CompiledZone, check_zone_collisions, check_zone_consistency
+    zones = [CompiledZone(folder="prod-edge", name="proxy", zone_type="layer3", interfaces=[])]
+    em = _env_map_with_baseline()
+    assert check_zone_consistency([], zones, em) == []  # invisible to the union check
+    v = check_zone_collisions(zones, em)
+    assert len(v) == 1 and "proxy" in v[0] and "already" in v[0]
+
+
+def test_zone_request_for_a_novel_zone_has_no_collision():
+    from fwgitops.compiler import CompiledZone, check_zone_collisions
+    zones = [CompiledZone(folder="prod-edge", name="dmz", zone_type="layer3", interfaces=[])]
+    assert check_zone_collisions(zones, _env_map_with_baseline()) == []
+
+
+def test_zone_collision_is_scoped_per_folder():
+    from fwgitops.compiler import CompiledZone, check_zone_collisions
+    zones = [CompiledZone(folder="other-folder", name="proxy", zone_type="layer3", interfaces=[])]
+    assert check_zone_collisions(zones, _env_map_with_baseline()) == []

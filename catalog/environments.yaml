@@ -7,3 +7,18 @@ prod:
   folder: prod-edge
   from_zone: local      # SCM/NGFW default zone (exists on the device)
   to_zone: internet     # SCM/NGFW default zone (exists on the device)
+
+  # Other zones that ALREADY EXIST in this folder and may be referenced by a
+  # rule without a ZoneRequest. Verified against the live tenant 2026-07-31 via
+  # GET /config/network/v1/zones?folder=prod-edge — the folder carries seven
+  # zones, but only the default pair above was declared, so a rule referencing
+  # e.g. `proxy` was rejected at compile time as undeclared.
+  #
+  # List ONLY zones that genuinely exist in SCM. A zone that does not exist
+  # still requires a ZoneRequest — that is what the cross-kind check is for.
+  baseline_zones:
+    - zone-internal
+    - zone-to-hub
+    - zone-to-branch
+    - zone-to-pa-hub
+    - proxy

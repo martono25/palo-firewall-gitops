@@ -355,3 +355,28 @@ def check_zone_consistency(
                 f"are not declared — add a ZoneRequest (or fix the app/env). Declared: {have}"
             )
     return violations
+
+
+def check_zone_collisions(zones: List[CompiledZone], env_map: EnvMap) -> List[str]:
+    """Reject a ZoneRequest naming a zone that ALREADY EXISTS on the device.
+
+    `check_zone_consistency` UNIONS baseline and declared zones, so a ZoneRequest
+    for an existing zone such as `internet` or `proxy` looks maximally valid
+    there. But Terraform would then try to CREATE an object that already exists,
+    and once zones carry security fields that create clobbers a live baseline
+    zone's protection profile and logging.
+
+    Baseline zones are not Terraform-managed. Adopting one is an import, not a
+    create, and is a deliberate act — so this fails closed and says so.
+    """
+    baseline = env_map.baseline_zones_by_folder()
+    violations: List[str] = []
+    for z in sorted(zones, key=lambda z: (z.folder, z.name)):
+        if z.name in baseline.get(z.folder, set()):
+            violations.append(
+                f"ZoneRequest {z.name!r} in folder {z.folder!r} names a zone that already "
+                f"exists on the device (declared as a baseline zone). Creating it would "
+                f"clobber the live zone's settings — remove the ZoneRequest and reference "
+                f"the zone directly, or rename the new zone."
+            )
+    return violations

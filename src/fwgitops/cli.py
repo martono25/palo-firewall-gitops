@@ -26,16 +26,21 @@ from typing import Dict, List, Optional, Tuple
 from fwgitops.compiler import (
     CompiledChange,
     CompiledZone,
+    check_zone_collisions,
     check_zone_consistency,
     compile_any,
     dumps_tfvars,
     dumps_zone_tfvars,
+    to_tfvars,
+    zone_tfvars,
 )
 from fwgitops.intent import IntentError, load_intent
 from fwgitops.io import discover_intents, read_yaml
 from fwgitops.resolve import EnvMap, ResolveError
+from fwgitops.tfcontract import check_contract, is_terraform_root
 
 OUTPUT_FILENAME = "rules.auto.tfvars.json"
+ZONES_FILENAME = "zones.auto.tfvars.json"
 
 
 def run_compile(
@@ -106,7 +111,10 @@ def run_compile(
 
     # Cross-kind check (ADR-0001): a rule may only use a zone declared by the env
     # map or a ZoneRequest — caught here, not at the firewall's device commit.
+    # The collision check runs alongside: consistency UNIONS baseline + declared,
+    # so it cannot see a ZoneRequest that would clobber an existing device zone.
     zone_violations = check_zone_consistency(changes, zones, env_map)
+    zone_violations += check_zone_collisions(zones, env_map)
     if zone_violations:
         print(f"REJECTED — {len(zone_violations)} zone-consistency problem(s); nothing written:",
               file=err)
@@ -114,23 +122,55 @@ def run_compile(
             print(f"  - {v}", file=err)
         return 2
 
-    written: List[Path] = []
-    # AccessRequest -> rules.auto.tfvars.json per folder.
-    for folder, folder_changes in sorted(_group_by_folder(changes).items()):
-        target = out_root / folder / OUTPUT_FILENAME
-        if write:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(dumps_tfvars(folder_changes), encoding="utf-8")
-        written.append(target)
-    # ZoneRequest -> zones.auto.tfvars.json per folder (terraform auto-loads both).
+    # Plan every file BEFORE writing any, so the contract check below can reject
+    # the whole compile without leaving a half-written terraform/ directory.
     zones_by_folder: Dict[str, List[CompiledZone]] = {}
     for z in zones:
         zones_by_folder.setdefault(z.folder, []).append(z)
+
+    planned: List[Tuple[Path, str, List[str]]] = []  # (target, payload, tfvars keys)
+    for folder, folder_changes in sorted(_group_by_folder(changes).items()):
+        planned.append((
+            out_root / folder / OUTPUT_FILENAME,
+            dumps_tfvars(folder_changes),
+            sorted(to_tfvars(folder_changes)),
+        ))
+    # ZoneRequest -> zones.auto.tfvars.json per folder (terraform auto-loads both).
     for folder, folder_zones in sorted(zones_by_folder.items()):
-        target = out_root / folder / "zones.auto.tfvars.json"
+        planned.append((
+            out_root / folder / ZONES_FILENAME,
+            dumps_zone_tfvars(folder_zones),
+            sorted(zone_tfvars(folder_zones)),
+        ))
+
+    # FAIL-CLOSED: refuse to emit data no Terraform module consumes.
+    #
+    # Terraform ignores an auto-tfvars key with no matching variable (warning,
+    # exit 0), and ignores a declared-but-unwired variable with no message at
+    # all. Either way the config never reaches the firewall while every check
+    # stays green — that is exactly how ZoneRequest shipped as a dead end.
+    # Checked only where a Terraform root actually exists, so compiling into a
+    # scratch/scaffold directory stays usable.
+    contract_problems: List[str] = []
+    for target, _payload, keys in planned:
+        module_dir = target.parent
+        if is_terraform_root(module_dir):
+            contract_problems.extend(check_contract(module_dir, keys))
+    if contract_problems:
+        print(
+            f"REJECTED — {len(contract_problems)} Terraform contract problem(s); "
+            f"nothing written:",
+            file=err,
+        )
+        for p in contract_problems:
+            print(f"  - {p}", file=err)
+        return 2
+
+    written: List[Path] = []
+    for target, payload, _keys in planned:
         if write:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(dumps_zone_tfvars(folder_zones), encoding="utf-8")
+            target.write_text(payload, encoding="utf-8")
         written.append(target)
 
     verb = "wrote" if write else "would write"
