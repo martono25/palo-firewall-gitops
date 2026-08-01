@@ -2,16 +2,19 @@
 
     fwgitops compile [intent_root] --env-map catalog/environments.yaml --out terraform
 
-Reads intent YAML, validates + compiles each request, and writes one
-`rules.auto.tfvars.json` per SCM folder for the static Terraform module. This is
-the entry point the GitHub Actions pipeline calls on a PR.
+Reads intent YAML, validates + compiles each request, and writes per SCM folder
+`rules.auto.tfvars.json` (AccessRequest) and `zones.auto.tfvars.json`
+(ZoneRequest) for the static Terraform module. This is the entry point the
+GitHub Actions pipeline calls on a PR.
 
 Fail-closed and all-or-nothing: if ANY intent is invalid or unresolvable, the
 aggregated problem report goes to stderr and nothing is written (exit 2). A run
 either produces a clean, complete desired-state for every touched folder, or it
-produces nothing.
+produces nothing. The same applies to the compiler → Terraform contract: emitting
+data that no Terraform module declares AND wires is a rejection, not a silent
+no-op (see `tfcontract.py` and ADR-0004).
 
-Exit codes:  0 ok · 2 validation/compile error · 1 usage/IO error
+Exit codes:  0 ok · 2 validation/compile/contract error · 1 usage/IO error
 """
 
 from __future__ import annotations
@@ -29,8 +32,7 @@ from fwgitops.compiler import (
     check_zone_collisions,
     check_zone_consistency,
     compile_any,
-    dumps_tfvars,
-    dumps_zone_tfvars,
+    dumps_payload,
     to_tfvars,
     zone_tfvars,
 )
@@ -116,7 +118,10 @@ def run_compile(
     zone_violations = check_zone_consistency(changes, zones, env_map)
     zone_violations += check_zone_collisions(zones, env_map)
     if zone_violations:
-        print(f"REJECTED — {len(zone_violations)} zone-consistency problem(s); nothing written:",
+        # "zone problem(s)", not "zone-consistency": a collision is the OPPOSITE
+        # of a consistency failure (the zone is maximally consistent — it already
+        # exists), so the old label mis-attributed it.
+        print(f"REJECTED — {len(zone_violations)} zone problem(s); nothing written:",
               file=err)
         for v in zone_violations:
             print(f"  - {v}", file=err)
@@ -128,20 +133,19 @@ def run_compile(
     for z in zones:
         zones_by_folder.setdefault(z.folder, []).append(z)
 
+    # Build each payload ONCE. `to_tfvars` / `zone_tfvars` are not pure lookups —
+    # they raise on duplicate keys — so calling them twice per folder would run
+    # that check (and any future side effect) twice.
     planned: List[Tuple[Path, str, List[str]]] = []  # (target, payload, tfvars keys)
     for folder, folder_changes in sorted(_group_by_folder(changes).items()):
-        planned.append((
-            out_root / folder / OUTPUT_FILENAME,
-            dumps_tfvars(folder_changes),
-            sorted(to_tfvars(folder_changes)),
-        ))
+        payload = to_tfvars(folder_changes)
+        target = out_root / folder / OUTPUT_FILENAME
+        planned.append((target, dumps_payload(payload), sorted(payload)))
     # ZoneRequest -> zones.auto.tfvars.json per folder (terraform auto-loads both).
     for folder, folder_zones in sorted(zones_by_folder.items()):
-        planned.append((
-            out_root / folder / ZONES_FILENAME,
-            dumps_zone_tfvars(folder_zones),
-            sorted(zone_tfvars(folder_zones)),
-        ))
+        payload = zone_tfvars(folder_zones)
+        target = out_root / folder / ZONES_FILENAME
+        planned.append((target, dumps_payload(payload), sorted(payload)))
 
     # FAIL-CLOSED: refuse to emit data no Terraform module consumes.
     #

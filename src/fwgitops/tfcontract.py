@@ -8,7 +8,7 @@ consume it. Nothing enforced that, and there are TWO ways it silently fails:
                     HOLE 1: variables.tf declares no such variable
                             -> Terraform WARNS and exits 0. Ignored.
                               |
-                    HOLE 2: variable declared but never passed to the module
+                    HOLE 2: variable declared but never referenced
                             -> NO diagnostic at all. Ignored.
                               |
                          module -> resource -> SCM -> device
@@ -21,17 +21,32 @@ Both are cheap to check without a Terraform binary or cloud credentials, so they
 are checked here: at compile time (fail-closed, see `cli.py`) and in the test
 suite (`tests/test_tfcontract.py`).
 
-Deliberately a small regex/brace parser rather than a full HCL parser: the inputs
-are this repo's own hand-written root modules, and adding an HCL dependency to
-catch a malformed file we would notice anyway is not worth it. Comments are
-stripped first so a commented-out `variable "x"` never counts as declared.
+Deliberately a small regex parser rather than a full HCL parser: the inputs are
+this repo's own hand-written root modules, and adding an HCL dependency to catch
+a malformed file we would notice anyway is not worth it. Two things make that
+safe:
+
+  * String literals are MASKED before anything else. Without this, a `}` inside
+    a string collapsed the brace depth (so nested keys looked like top-level
+    module arguments, defeating HOLE 2), and a `//` inside a URL was treated as
+    a comment (eating the rest of the line, including a closing brace, and
+    falsely rejecting a correctly wired module). Both were real, both are now
+    regression-tested.
+  * The HOLE 2 check asks "is `var.<key>` referenced anywhere in this root?"
+    rather than "is there a module argument with this exact name?". That is the
+    property we actually care about — the value reaching something — and it
+    holds regardless of argument naming or whether the root uses a module block
+    or a bare resource.
+
+Known limitation: heredocs (`<<EOT ... EOT`) are not parsed. None of this repo's
+root modules use them; a root that did could mis-count braces.
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, Iterable, List, Set
+from typing import Iterable, List, Set
 
 #: `variable "name" {`
 _VARIABLE_RE = re.compile(r'^\s*variable\s+"([^"]+)"\s*\{', re.MULTILINE)
@@ -39,28 +54,77 @@ _VARIABLE_RE = re.compile(r'^\s*variable\s+"([^"]+)"\s*\{', re.MULTILINE)
 _MODULE_RE = re.compile(r'^\s*module\s+"([^"]+)"\s*\{', re.MULTILINE)
 #: `name = ...` at the start of a line (a module-block argument)
 _ARG_RE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=', re.MULTILINE)
+#: `var.name` anywhere
+_VAR_REF_RE = re.compile(r'\bvar\.([A-Za-z_][A-Za-z0-9_]*)')
 
 
-def _strip_comments(text: str) -> str:
-    """Remove `#` and `//` line comments so commented-out HCL never counts.
+def _mask_strings(text: str) -> str:
+    """Blank out the CONTENTS of double-quoted strings, preserving length.
 
-    Good enough for this repo's modules: no `#` appears inside a string literal
-    in any of them. Block comments (/* */) are not used either.
+    Quotes and newlines survive; every other character inside a string becomes
+    `x`. So `"unbalanced } here"` stops affecting brace depth and
+    `"https://x//y"` stops looking like a comment, while offsets and line
+    numbers stay exactly as they were.
+
+    An unterminated quote is closed at end-of-line rather than swallowing the
+    rest of the file — a malformed .tf should not silently disable the checks.
     """
     out: List[str] = []
-    for line in text.splitlines():
+    in_string = False
+    escaped = False
+    for ch in text:
+        if not in_string:
+            out.append(ch)
+            if ch == '"':
+                in_string = True
+            continue
+        if escaped:
+            out.append("x")
+            escaped = False
+        elif ch == "\\":
+            out.append("\\")
+            escaped = True
+        elif ch == '"':
+            out.append('"')
+            in_string = False
+        elif ch == "\n":
+            out.append("\n")
+            in_string = False
+        else:
+            out.append("x")
+    return "".join(out)
+
+
+def _strip_comments(original: str, masked: str) -> str:
+    """Cut `#` / `//` comments from `original`, locating them in `masked`.
+
+    Comment markers are found in the masked view so a `//` inside a URL is not
+    mistaken for a comment, but the text returned is the ORIGINAL — masking
+    blanks the inside of quotes, which is exactly where `variable "name"` keeps
+    its name. `_mask_strings` preserves length and newlines, so the indices line
+    up one-for-one.
+    """
+    out: List[str] = []
+    for orig_line, masked_line in zip(original.splitlines(), masked.splitlines()):
+        cut = len(orig_line)
         for marker in ("#", "//"):
-            idx = line.find(marker)
+            idx = masked_line.find(marker)
             if idx != -1:
-                line = line[:idx]
-        out.append(line)
+                cut = min(cut, idx)
+        out.append(orig_line[:cut])
     return "\n".join(out)
 
 
 def _read_tf(module_dir: Path) -> str:
-    """Concatenate every .tf file in a root module directory (comments stripped)."""
+    """Root module source with comments cut. String contents INTACT (names live there)."""
     parts = [p.read_text(encoding="utf-8") for p in sorted(module_dir.glob("*.tf"))]
-    return _strip_comments("\n".join(parts))
+    joined = "\n".join(parts)
+    return _strip_comments(joined, _mask_strings(joined))
+
+
+def _read_tf_masked(module_dir: Path) -> str:
+    """Same text, but with string CONTENTS blanked — safe for brace counting."""
+    return _mask_strings(_read_tf(module_dir))
 
 
 def is_terraform_root(module_dir: Path) -> bool:
@@ -73,13 +137,28 @@ def declared_variables(module_dir: Path) -> Set[str]:
     return set(_VARIABLE_RE.findall(_read_tf(module_dir)))
 
 
-def module_arguments(module_dir: Path) -> Set[str]:
-    """Argument names passed to any `module "..."` block (HOLE 2 input).
+def wired_variables(module_dir: Path) -> Set[str]:
+    """Variable names actually REFERENCED as `var.<name>` (HOLE 2 input).
 
-    Brace-matched so only top-level arguments of the module block count, not
-    keys nested inside an object value passed to one.
+    Deliberately broader than "is a module argument called this": a root may
+    pass the value under a different argument name (`zone_data = var.zones`) or
+    consume it directly in a resource (`for_each = var.zones`). Both genuinely
+    use the value. What we are detecting is a variable nothing reads at all.
+
+    Reads the masked view so a `var.x` mentioned inside a string literal does
+    not count as a real reference.
     """
-    text = _read_tf(module_dir)
+    return set(_VAR_REF_RE.findall(_read_tf_masked(module_dir)))
+
+
+def module_arguments(module_dir: Path) -> Set[str]:
+    """Argument names passed to any `module "..."` block.
+
+    Not used by `check_contract` (see `wired_variables`), but kept for
+    diagnostics and tests. Brace-matched so only top-level arguments of the
+    module block count, not keys nested inside an object value.
+    """
+    text = _read_tf_masked(module_dir)
     args: Set[str] = set()
     for match in _MODULE_RE.finditer(text):
         depth, i, n = 0, match.end() - 1, len(text)
@@ -106,10 +185,10 @@ def module_arguments(module_dir: Path) -> Set[str]:
 
 
 def check_contract(module_dir: Path, emitted_keys: Iterable[str]) -> List[str]:
-    """Verify emitted tfvars keys are both DECLARED and WIRED. Fail-closed.
+    """Verify emitted tfvars keys are both DECLARED and REFERENCED. Fail-closed.
 
-    Returns actionable violation messages; an empty list means the contract holds.
-    Checking only the declaration would still let HOLE 2 through.
+    Returns actionable violation messages; an empty list means the contract
+    holds. Checking only the declaration would still let HOLE 2 through.
     """
     keys = sorted(set(emitted_keys))
     if not keys:
@@ -121,7 +200,7 @@ def check_contract(module_dir: Path, emitted_keys: Iterable[str]) -> List[str]:
         ]
 
     declared = declared_variables(module_dir)
-    wired = module_arguments(module_dir)
+    wired = wired_variables(module_dir)
 
     violations: List[str] = []
     for key in keys:
@@ -133,13 +212,8 @@ def check_contract(module_dir: Path, emitted_keys: Iterable[str]) -> List[str]:
             )
         elif key not in wired:
             violations.append(
-                f"{module_dir}: `variable \"{key}\"` is declared but never passed to a "
-                f"module block — Terraform gives NO diagnostic and the data is silently "
+                f"{module_dir}: `variable \"{key}\"` is declared but `var.{key}` is never "
+                f"referenced — Terraform gives NO diagnostic and the data is silently "
                 f"ignored. Add `{key} = var.{key}` to the module block."
             )
     return violations
-
-
-def emitted_keys_by_folder(files: Dict[str, Dict[str, object]]) -> Dict[str, Set[str]]:
-    """Collapse {folder: tfvars-payload} into {folder: top-level key names}."""
-    return {folder: set(payload.keys()) for folder, payload in files.items()}

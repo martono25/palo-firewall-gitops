@@ -370,3 +370,24 @@ def test_cli_rules_has_present(capsys):
 def test_cli_rules_has_absent(capsys):
     rc = run_rules("prod-edge", contains="REQ-Z", session=_rules_session(["REQ-A"]))
     assert rc == 3 and "NOT FOUND" in capsys.readouterr().out
+
+
+def test_compile_rejects_a_zone_request_colliding_with_a_baseline_zone(tmp_path, capsys):
+    """End-to-end guard for check_zone_collisions: without this, removing the
+    call site from run_compile leaves the whole suite green."""
+    root = tmp_path / "intent" / "prod"
+    root.mkdir(parents=True)
+    (root / "ZONE.yaml").write_text(
+        "apiVersion: fw-intent/v1\n"
+        "kind: ZoneRequest\n"
+        "metadata: {id: ZONE-1, requester: m@corp, ticket: J-1, justification: dup,"
+        " requested: 2026-07-27}\n"
+        "spec: {environment: prod, zone: proxy, type: layer3, interfaces: []}\n"
+    )
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP + "  baseline_zones: [proxy]\n")
+    out = tmp_path / "terraform"
+    rc = run_compile(tmp_path / "intent", env_map, out)
+    assert rc == 2
+    assert "already" in capsys.readouterr().err
+    assert not (out / "prod-edge" / "zones.auto.tfvars.json").exists()

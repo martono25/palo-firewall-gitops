@@ -358,3 +358,12 @@ def test_zone_collision_is_scoped_per_folder():
     from fwgitops.compiler import CompiledZone, check_zone_collisions
     zones = [CompiledZone(folder="other-folder", name="proxy", zone_type="layer3", interfaces=[])]
     assert check_zone_collisions(zones, _env_map_with_baseline()) == []
+
+
+def test_zone_request_naming_the_default_pair_is_rejected():
+    """The collision that exists for EVERY env map, even with no baseline_zones:
+    a ZoneRequest named after from_zone/to_zone would clobber a live zone."""
+    from fwgitops.compiler import CompiledZone, check_zone_collisions
+    zones = [CompiledZone(folder="prod-edge", name="app", zone_type="layer3", interfaces=[])]
+    v = check_zone_collisions(zones, env_map())  # env map WITHOUT baseline_zones
+    assert len(v) == 1 and "app" in v[0]

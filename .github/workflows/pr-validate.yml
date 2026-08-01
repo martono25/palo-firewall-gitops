@@ -111,7 +111,14 @@ jobs:
                 ;;
             esac
 
-            # FAIL-CLOSED CONTRACT GUARD.
+            # FAIL-CLOSED CONTRACT GUARD (defence in depth — NOT the primary check).
+            #
+            # The authoritative check is tfcontract.check_contract, enforced at
+            # compile time in cli.py: it covers BOTH holes, including the
+            # declared-but-unwired case that Terraform never warns about. This
+            # grep is the backstop for the paths that check cannot see — stale
+            # tfvars committed by hand, or terraform/ edited without recompiling.
+            #
             # Terraform treats an auto-loaded *.auto.tfvars.json that sets an
             # UNDECLARED variable as a warning and exits 0. That is how a compiled
             # zones.auto.tfvars.json shipped for a full release while plan, apply
@@ -126,10 +133,15 @@ jobs:
             echo "::endgroup::"
           done
 
+      # always(): the plan step can now FAIL (it used to swallow everything with
+      # `|| true`). A failing plan is exactly when the reviewer needs the output,
+      # so the artifact must upload even though the previous step went red.
       - name: Upload plans
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: pr-previews
+          if-no-files-found: ignore
           path: |
             plan-*.txt
             enrich-*.txt

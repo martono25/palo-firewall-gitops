@@ -1,9 +1,15 @@
 """Phase-1 environment resolution (env → SCM folder + zone-pair).
 
 A deliberately minimal, hand-maintained map used before the Phase-2 catalog
-exists. Each environment resolves to one SCM folder and a default zone-pair:
+exists. Each environment resolves to one SCM folder, a default zone-pair, and
+optionally the other zones that already exist on that folder's device:
 
-    environment: prod  ─▶  {folder: prod-edge, from_zone: trust, to_zone: app}
+    environment: prod  ─▶  {folder: prod-edge, from_zone: trust, to_zone: app,
+                            baseline_zones: [proxy, zone-internal]}
+
+`baseline_zones` is optional. It names zones that EXIST on the device but are
+not the default pair, so a rule may reference them without a ZoneRequest. A zone
+that does not exist still needs a ZoneRequest — see `baseline_zones_by_folder`.
 
 Per-IP zone inference and the real folder/zone catalog arrive in Phase 2 (see
 docs/DESIGN.md). This keeps the walking skeleton minimal while still producing

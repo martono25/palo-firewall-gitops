@@ -292,13 +292,19 @@ def _rule_dict(r: SecurityRule) -> Dict[str, Any]:
     }
 
 
-def dumps_tfvars(changes: List[CompiledChange]) -> str:
-    """Byte-stable JSON for `rules.auto.tfvars.json`.
+def dumps_payload(payload: Dict[str, Any]) -> str:
+    """Byte-stable JSON for any `*.auto.tfvars.json`.
 
     sort_keys makes output deterministic across runs so re-compiles never churn
-    the file and PR diffs reflect only real changes.
+    the file and PR diffs reflect only real changes. One serializer for every
+    kind, so a new kind cannot accidentally pick a different byte format.
     """
-    return json.dumps(to_tfvars(changes), sort_keys=True, indent=2) + "\n"
+    return json.dumps(payload, sort_keys=True, indent=2) + "\n"
+
+
+def dumps_tfvars(changes: List[CompiledChange]) -> str:
+    """Byte-stable JSON for `rules.auto.tfvars.json`."""
+    return dumps_payload(to_tfvars(changes))
 
 
 # ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────
@@ -326,7 +332,7 @@ def zone_tfvars(zones: List[CompiledZone]) -> Dict[str, Any]:
 
 def dumps_zone_tfvars(zones: List[CompiledZone]) -> str:
     """Byte-stable JSON for `zones.auto.tfvars.json` (terraform auto-loads it)."""
-    return json.dumps(zone_tfvars(zones), sort_keys=True, indent=2) + "\n"
+    return dumps_payload(zone_tfvars(zones))
 
 
 def check_zone_consistency(

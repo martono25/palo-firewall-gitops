@@ -27,6 +27,7 @@ from fwgitops.tfcontract import (  # noqa: E402
     declared_variables,
     is_terraform_root,
     module_arguments,
+    wired_variables,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -118,7 +119,7 @@ def test_hole_1_undeclared_variable_is_a_violation(tmp_path):
 def test_hole_2_declared_but_unwired_variable_is_a_violation(tmp_path):
     problems = check_contract(_root(tmp_path, UNWIRED_MODULE), ["zones"])
     assert len(problems) == 1
-    assert "never passed to a module block" in problems[0]
+    assert "is never referenced" in problems[0]
 
 
 def test_emitting_into_a_non_terraform_directory_is_a_violation(tmp_path):
@@ -146,7 +147,7 @@ ZONE_INTENT = (
 
 @pytest.mark.parametrize(
     "module_body,expected",
-    [(UNDECLARED_MODULE, "no `variable"), (UNWIRED_MODULE, "never passed to a module block")],
+    [(UNDECLARED_MODULE, "no `variable"), (UNWIRED_MODULE, "is never referenced")],
 )
 def test_compile_refuses_to_write_orphan_tfvars(tmp_path, capsys, module_body, expected):
     """THE REGRESSION TEST for the v1.0 bug.
@@ -219,8 +220,106 @@ def test_this_repos_terraform_roots_satisfy_the_contract():
     assert roots, "expected at least one Terraform root module"
 
     for root in roots:
-        unwired = sorted(declared_variables(root) - module_arguments(root))
+        unwired = sorted(declared_variables(root) - wired_variables(root))
         assert not unwired, (
             f"{root.name}: variable(s) {unwired} declared but never passed to a module "
             f"block — Terraform gives no diagnostic and the value is silently ignored"
         )
+
+
+# ── parser regressions (both bugs were real; verified by running them) ─────
+def test_closing_brace_inside_a_string_does_not_fake_a_module_argument(tmp_path):
+    """REGRESSION: a `}` inside a string collapsed the brace depth, so a key
+    nested inside an object VALUE was counted as a top-level module argument.
+    check_contract then PASSED a variable nothing wires — defeating HOLE 2,
+    which is the entire reason this module exists."""
+    d = _root(tmp_path, '''
+variable "zones" { type = any }
+module "m" {
+  source = "../x"
+  settings = {
+    note  = "unbalanced } inside a string"
+    zones = "nested, NOT a module argument"
+  }
+}
+''')
+    assert "zones" not in module_arguments(d)
+    problems = check_contract(d, ["zones"])
+    assert problems, "guard must not pass a variable nothing references"
+    assert "is never referenced" in problems[0]
+
+
+def test_double_slash_inside_a_url_does_not_eat_the_line(tmp_path):
+    """REGRESSION: `//` in a URL was treated as a comment, truncating the line
+    and deleting a closing brace with it. Depth stayed elevated, later arguments
+    were skipped, and a CORRECTLY wired module was falsely rejected (exit 2)."""
+    d = _root(tmp_path, '''
+variable "zones" { type = any }
+module "m" {
+  source = "git::https://github.com/org/repo//modules/x?ref=v1"
+  tags   = { url = "https://example.com" }
+  zones  = var.zones
+}
+''')
+    assert check_contract(d, ["zones"]) == []
+
+
+def test_hash_inside_a_string_is_not_a_comment(tmp_path):
+    d = _root(tmp_path, '''
+variable "zones" { type = any }
+module "m" {
+  source = "../x"
+  note   = "fragment#anchor"
+  zones  = var.zones
+}
+''')
+    assert check_contract(d, ["zones"]) == []
+
+
+def test_var_reference_mentioned_only_inside_a_string_does_not_count(tmp_path):
+    """A variable named in prose must not satisfy the wiring check."""
+    d = _root(tmp_path, '''
+variable "zones" { type = any }
+module "m" {
+  source = "../x"
+  note   = "remember to pass var.zones one day"
+}
+''')
+    assert check_contract(d, ["zones"]) != []
+
+
+# ── wiring is about the VALUE reaching something, not argument naming ──────
+def test_differently_named_module_argument_is_still_wired(tmp_path):
+    d = _root(tmp_path, '''
+variable "zones" { type = any }
+module "m" {
+  source    = "../x"
+  zone_data = var.zones
+}
+''')
+    assert check_contract(d, ["zones"]) == []
+
+
+def test_variable_consumed_by_a_resource_not_a_module_is_wired(tmp_path):
+    """A root need not use a module block at all to consume the value."""
+    d = _root(tmp_path, '''
+variable "zones" { type = any }
+resource "scm_zone" "z" {
+  for_each = var.zones
+  name     = each.value.name
+}
+''')
+    assert check_contract(d, ["zones"]) == []
+
+
+# ── the shipped catalog must parse (symmetric with the repo-tree TF guard) ──
+def test_the_shipped_env_map_parses_and_declares_its_baseline_zones():
+    import yaml
+
+    from fwgitops.resolve import EnvMap
+
+    data = yaml.safe_load((REPO_ROOT / "catalog" / "environments.yaml").read_text())
+    env_map = EnvMap.from_dict(data)
+    baseline = env_map.baseline_zones_by_folder()["prod-edge"]
+    # Verified live 2026-07-31: the folder carries seven zones.
+    assert {"local", "internet", "proxy", "zone-internal"} <= baseline
