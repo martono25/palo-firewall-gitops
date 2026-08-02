@@ -25,11 +25,15 @@ class FakeClient:
         self.statuses = list(statuses or [JobState(PushStatus.SUCCESS)])
         self.job_id = job_id
         self.nothing_to_push = nothing_to_push
-        self.pushes: list = []  # (folder, admins) recorded per push call
+        self.pushes: list = []  # (scope, admins) recorded per push call
+        self.scopes: list = []  # (kind, value) — folder vs device
         self.status_calls = 0
 
-    def push(self, folder, *, admins):
-        self.pushes.append((folder, None if admins is None else list(admins)))
+    def push(self, folder=None, *, device=None, admins):
+        # Records the SCOPE actually pushed. A firewall must be pushed as a
+        # device, not via its folder — see push_folder.
+        self.pushes.append((device or folder, None if admins is None else list(admins)))
+        self.scopes.append(("device", device) if device else ("folder", folder))
         return None if self.nothing_to_push else self.job_id
 
     def job_status(self, job_id):
@@ -103,3 +107,40 @@ def test_job_timeout_raises():
     c = FakeClient(statuses=[JobState(PushStatus.RUNNING)])  # never terminal
     with pytest.raises(PushTimeout, match="did not finish after 5"):
         run(c)
+
+
+# ── device scope ──────────────────────────────────────────────────────────
+def test_a_firewall_is_pushed_as_a_device_not_via_its_folder():
+    """A device-scope override belongs to the firewall. Pushing its folder is
+    the wrong instrument — it would commit whatever else is staged there rather
+    than the one change intended. pan.dev documents `devices` on the push body:
+    "The target devices for the configuration push"."""
+    c = FakeClient()
+    r = push_folder(c, device="007955000894453", admins=[US])
+    assert r.status == "success"
+    assert c.scopes == [("device", "007955000894453")]
+    assert c.pushes == [("007955000894453", [US])]
+
+
+def test_push_needs_exactly_one_scope():
+    for kwargs in ({}, {"folder": "prod-edge", "device": "007955000894453"}):
+        with pytest.raises(ValueError, match="exactly one"):
+            push_folder(FakeClient(), admins=[US], **kwargs)
+
+
+def test_the_device_push_body_uses_the_documented_key():
+    """The folder key is `folders` because the LIVE API contradicts the SDK; the
+    device key is `devices` per pan.dev. Asserting the wire shape here means a
+    wrong key fails in a test rather than as a silent no-op push."""
+    sent = {}
+
+    class Session:
+        def request(self, method, path, body=None, **kw):
+            sent.update({"method": method, "path": path, "body": body})
+            return {"job_id": "job-9"}
+
+    from fwgitops.clients import ScmPushClient
+    ScmPushClient(Session()).push(device="007955000894453", admins=[US])
+    assert sent["body"]["devices"] == ["007955000894453"]
+    assert "folders" not in sent["body"]
+    assert sent["body"]["admin"] == [US]

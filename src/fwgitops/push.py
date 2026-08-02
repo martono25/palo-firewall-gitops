@@ -104,8 +104,9 @@ class PushResult:
 
 def push_folder(
     client: PushClient,
-    folder: str,
+    folder: Optional[str] = None,
     *,
+    device: Optional[str] = None,
     admins: Sequence[str],
     poll: PollConfig = PollConfig(),
     sleep: Callable[[float], None] = time.sleep,
@@ -121,13 +122,22 @@ def push_folder(
     `all_admins=True` is the break-glass: commit the WHOLE candidate regardless
     of who staged it (baseline absorption / an approved manual run). It maps to
     an unscoped push (no `admin` field).
-    """
-    scope: Optional[Sequence[str]] = None if all_admins else list(admins)
 
-    job_id = client.push(folder, admins=scope)
+    `device=<serial>` pushes a FIREWALL instead of a folder. A device-scope
+    override belongs to the firewall, so pushing its folder would be the wrong
+    instrument — committing whatever else is staged there rather than the one
+    change intended. Exactly one of folder/device.
+    """
+    if bool(folder) == bool(device):
+        raise ValueError("push needs exactly one of folder / device")
+    scope: Optional[Sequence[str]] = None if all_admins else list(admins)
+    label = f"device {device!r}" if device else f"folder {folder!r}"
+
+    job_id = client.push(folder, device=device, admins=scope)
     if job_id is None:
         # Nothing staged for this scope — a steady-state no-op, not a failure.
-        return PushResult(folder=folder, status="noop", job_id=None, admins=tuple(scope or ()))
+        return PushResult(folder=device or folder, status="noop", job_id=None,
+                          admins=tuple(scope or ()))
 
     state = bounded_poll(
         lambda: (lambda s: s if s.status in TERMINAL else None)(client.job_status(job_id)),
@@ -136,12 +146,12 @@ def push_folder(
     )
     if state is None:
         raise PushTimeout(
-            f"push job {job_id!r} for folder {folder!r} did not finish after "
+            f"push job {job_id!r} for {label} did not finish after "
             f"{poll.max_attempts} attempts"
         )
     if state.status is PushStatus.FAILED:
-        raise PushFailed(f"push job {job_id!r} for folder {folder!r} failed: {state.message}")
+        raise PushFailed(f"push job {job_id!r} for {label} failed: {state.message}")
 
     return PushResult(
-        folder=folder, status="success", job_id=job_id, admins=tuple(scope or ())
+        folder=device or folder, status="success", job_id=job_id, admins=tuple(scope or ())
     )

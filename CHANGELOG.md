@@ -3,6 +3,41 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] — 2026-08-03
+
+`fwgitops push --device <serial>` — and the **first GitOps-managed data-plane
+change applied and pushed to live hardware**.
+
+### Pushing a firewall
+pan.dev documents `devices` on the push body ("The target devices for the
+configuration push") alongside `folder`. A device-scope override belongs to the
+firewall, so pushing its folder would be the wrong instrument — it would commit
+whatever else is staged there rather than the one change intended. Exactly one
+of `<folder>` / `--device`, and the wire shape is asserted in a test because a
+wrong key would fail as a silent no-op push.
+
+### First hardware change
+`intent/prod/edge-fw-4453/REQ-2026-0801.yaml` — `ethernet1/4` on
+fw-prod-edge-4453 addressed `10.20.0.1/24`, targeted with `device:`, classified
+**HIGH `interface_becomes_addressed`**, applied and pushed (job 126,
+`CommitAndPush` FIN/OK, "Configuration committed successfully").
+
+Isolation held exactly as `spike/device-override-probe` predicted: the firewall
+got a new override object, while the other firewall and `ngfw-shared` were
+byte-identical to a baseline captured before the apply. `terraform plan` reports
+converged.
+
+The existing inherited zone `local` already references `$eth-local`, so no
+`ZoneRequest` was needed — the Day-1 gap on this tenant is addressing and routes,
+not zones.
+
+### Known gap found doing it
+Pushing a device with nothing staged returns a normal success job rather than the
+no-op SCM reports elsewhere, so `status="noop"` is unreachable on this path and
+repeat pushes mint empty commit jobs. Tracked in `TODOS.md` (P2).
+
+557 tests.
+
 ## [1.12.1] — 2026-08-03
 
 **Fixes a fail-open the v1.12.0 Scope change introduced.** Found while preparing
