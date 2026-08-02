@@ -84,3 +84,4 @@ Thumbs.db
 backend.hcl
 tfplan
 tfplan-*
+.gstack/

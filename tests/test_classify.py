@@ -377,20 +377,36 @@ def test_the_shipped_folder_hierarchy_parses_and_matches_the_tenant():
 
     from fwgitops.catalog import FolderHierarchy
     h = FolderHierarchy.from_dict(yaml.safe_load(open("catalog/folders.yaml")))
-    # Verified live 2026-08-02:
+    # Verified live 2026-08-02, CONTAINERS only:
     #   All -> ngfw-shared -> {prod-edge, GitOps}
-    #   prod-edge -> {007955000893662, 007955000894453}   <- one folder PER DEVICE
     assert h.has_children("ngfw-shared")
     assert h.children_of("ngfw-shared") == frozenset({"prod-edge", "GitOps"})
-
-    # This assertion used to read `not h.has_children("prod-edge")`, encoding a
-    # stale catalog. SCM parents a folder under prod-edge for EACH onboarded
-    # device, so a change to the production folder reaches both firewalls — and
-    # the classifier was scoring it as reaching nothing. Understating blast
-    # radius on the production folder is the worst direction to be wrong in.
-    assert h.has_children("prod-edge")
-    assert h.children_of("prod-edge") == frozenset({"007955000893662", "007955000894453"})
+    assert not h.has_children("prod-edge")
     assert not h.has_children("GitOps")
+
+
+def test_device_entries_are_not_folders_and_are_absent_from_the_catalog():
+    """Regression, and a correction of one.
+
+    v1.11.0 read GET /config/setup/v1/folders, saw two entries parented to
+    `prod-edge` named for device serials, and listed them as child folders —
+    marked targetable. They are not folders. The listing mixes two entry kinds,
+    told apart by `type`: `container` is a real folder, `on-prem` is a DEVICE
+    (it carries `serial_number` and `model`).
+
+    Confirmed three ways: `folder=<serial>` returns 400 "Folder doesn't exist";
+    the same serial works as `device=`; and pan.dev plus the Terraform provider
+    both treat folder / snippet / device as three separate scopes ("exactly one
+    of"). An intent naming one would have compiled clean and failed at apply.
+    """
+    import yaml
+
+    from fwgitops.catalog import FolderHierarchy
+    h = FolderHierarchy.from_dict(yaml.safe_load(open("catalog/folders.yaml")))
+    for serial in ("007955000894453", "007955000893662"):
+        assert not h.known(serial), f"{serial} is a device, not a folder"
+        assert not h.is_targetable(serial)
+    assert h.targetable_folders() == ["GitOps", "prod-edge"]
 
 
 def test_shared_parents_are_not_targetable_but_leaves_are():
@@ -404,7 +420,6 @@ def test_shared_parents_are_not_targetable_but_leaves_are():
     assert not h.is_targetable("ngfw-shared")     # parents prod AND sandbox
     assert h.is_targetable("prod-edge")
     assert h.is_targetable("GitOps")
-    assert h.is_targetable("007955000894453")     # device folder
     # Fail closed: never seen == never targetable.
     assert not h.is_targetable("All")
     assert not h.is_targetable("typo-folder")

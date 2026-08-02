@@ -10,29 +10,46 @@
 #   2. TARGETABILITY. The Day-1 kinds (InterfaceRequest / ZoneRequest /
 #      RouteRequest) name their `folder:` DIRECTLY in the intent rather than
 #      going through `environment:` — their author is a network engineer for whom
-#      the folder IS the intent, and `environment` resolves 1:1 so it cannot
-#      express a device folder at all. `targetable: false` is what stops that
-#      field being a footgun: an intent naming a non-targetable folder is
-#      rejected at COMPILE time, not merely tiered up by the classifier.
-#      AccessRequest is unaffected — app teams keep `environment:` and never name
-#      an SCM folder.
+#      the folder IS the intent. `targetable: false` is what stops that field
+#      being a footgun: an intent naming a non-targetable folder is rejected at
+#      COMPILE time, not merely tiered up by the classifier. AccessRequest is
+#      unaffected — app teams keep `environment:` and never name an SCM folder.
+#
+# ── ONLY CONTAINERS BELONG IN THIS FILE ───────────────────────────────────
+# GET /config/setup/v1/folders returns TWO kinds of entry, told apart by `type`:
+#
+#   {"name": "prod-edge",       "type": "container"}          <- a real folder
+#   {"name": "007955000894453", "type": "on-prem",
+#    "serial_number": "007955000894453", "model": "PA-VM"}    <- a DEVICE
+#
+# A device is NOT a folder, however much the listing looks like one. Verified
+# three ways on 2026-08-02:
+#   * GET /config/network/v1/zones?folder=007955000894453 -> 400 API_I00013
+#     "Folder 007955000894453 doesn't exist"
+#   * the same serial as `device=` works and returns ethernet1/3, ethernet1/4
+#   * pan.dev documents `folder`, `snippet` and `device` as three separate query
+#     params, and the Terraform provider says "exactly one of device, folder,
+#     snippet" on every resource
+#
+# So device entries must never be listed here. v1.11.0 briefly did list them,
+# marked targetable — an intent could have named one, compiled clean, and failed
+# only at apply. See ADR-0006's correction note. Targeting a single device needs
+# a `device:` scope, which this platform does not implement yet.
 #
 # The classifier is PURE (no live SCM reads), so this is declared rather than
 # discovered. Keep it in step with SCM; the drift work would be the natural
-# place to verify it automatically.
+# place to verify it automatically — including the `type` check that would have
+# caught the mistake above.
 #
-# Verified live 2026-08-02 via GET /config/setup/v1/folders:
+# Verified live 2026-08-02 via GET /config/setup/v1/folders (containers only):
 #   All -> ngfw-shared -> {prod-edge, GitOps}
-#   prod-edge -> {007955000893662, 007955000894453}     <- DEVICE folders
-# plus Prisma Access built-ins (Mobile Users, Remote Networks, …) which this
-# platform does not manage.
+# prod-edge additionally has two `on-prem` DEVICES attached (007955000893662,
+# 007955000894453). They are not children in the folder sense and are not listed
+# below; a change to prod-edge reaching both firewalls is that folder's whole
+# purpose, not a hidden fan-out.
 #
-# NOTE — this file previously declared `prod-edge: children: []`, which was
-# wrong: SCM parents a per-device folder under it for EACH device. The
-# classifier therefore scored changes to the production folder as reaching no
-# descendants when they in fact reach both firewalls. Understating blast radius
-# on the production folder is the worst direction to be wrong in; when a device
-# is onboarded or removed, update this file in the same PR.
+# Prisma Access built-ins (Mobile Users, Remote Networks, …) are not managed by
+# this platform and are deliberately absent.
 folders:
   ngfw-shared:
     # Parent of production AND sandbox. Never a target.
@@ -40,28 +57,13 @@ folders:
     targetable: false
 
   prod-edge:
-    # Inherited by both device folders below, so a change here reaches both
-    # firewalls. Targetable, but the classifier tiers it HIGH for that reason.
-    children: ["007955000893662", "007955000894453"]
+    # Production. No child CONTAINERS — its two firewalls are `on-prem` device
+    # entries, not folders.
+    children: []
     targetable: true
 
   GitOps:
     # Sandbox: zero devices, nothing inherits from it. Where the provider
     # fidelity probes run (spike/*-probe).
-    children: []
-    targetable: true
-
-  # ── Device folders ──────────────────────────────────────────────────────
-  # SCM creates one per onboarded device, named for the serial. The tightest
-  # scope that still reaches real hardware: a change here cannot touch the
-  # other firewall and overrides nothing in ngfw-shared.
-  "007955000894453":
-    # hostname ip-10-100-0-51 — CONNECTED as of 2026-08-02.
-    children: []
-    targetable: true
-
-  "007955000893662":
-    # hostname ip-10-100-0-60 — DISCONNECTED as of 2026-08-02. Config can be
-    # staged here, but a push cannot commit to a device that is not connected.
     children: []
     targetable: true

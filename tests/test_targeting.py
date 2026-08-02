@@ -3,8 +3,11 @@
 `AccessRequest` is authored by app teams and targets an `environment:`, which
 the platform maps to a folder — they should never need to know SCM topology.
 The Day-1 kinds are authored by network engineers, for whom the folder IS the
-intent, and `environment` resolves 1:1 so it cannot name a DEVICE folder at all.
-So those kinds take `folder:` directly.
+intent, and `environment` resolves 1:1 so it cannot address a second folder
+without a catalog edit. So those kinds take `folder:` directly.
+
+NOTE: a device is NOT a folder. Targeting one firewall needs a `device:` scope,
+which this platform does not implement — see ADR-0006's correction note.
 
 That field is only safe because of the catalog check: unknown or non-targetable
 is REJECTED at compile time, not tiered up. HIGH is approvable, and a write to a
@@ -28,7 +31,8 @@ from fwgitops.kinds import compile_any  # noqa: E402
 from fwgitops.resolve import EnvMap  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEVICE = "007955000894453"
+SANDBOX = "GitOps"          # a real container folder, targetable
+DEVICE = "007955000894453"  # an `on-prem` DEVICE entry — NOT a folder
 
 
 def _hierarchy():
@@ -44,7 +48,7 @@ def _env():
 def _routers():
     return RouterCatalog.from_dict({"routers": {
         "prod-edge": {"default": {"vrfs": {"default": {"interfaces": ["$eth-local"]}}}},
-        DEVICE: {"default": {"vrfs": {"default": {"interfaces": ["$eth-local"]}}}},
+        SANDBOX: {"default": {"vrfs": {"default": {"interfaces": ["$eth-local"]}}}},
     }})
 
 
@@ -70,11 +74,21 @@ def _load(doc, hierarchy=True, **kw):
 
 
 # ── the folder: form ──────────────────────────────────────────────────────
-def test_a_device_folder_can_be_targeted_directly():
-    """The case `environment:` cannot express at all: one specific firewall."""
-    sp = _load(_iface(folder=DEVICE)).spec
-    assert sp.folder == DEVICE and sp.environment is None
-    assert compile_any(_load(_iface(folder=DEVICE)), env_map=_env()).folder == DEVICE
+def test_a_folder_can_be_targeted_directly():
+    """The case `environment:` cannot express without a platform-config edit:
+    a second folder, named by the engineer authoring the change."""
+    sp = _load(_iface(folder=SANDBOX)).spec
+    assert sp.folder == SANDBOX and sp.environment is None
+    assert compile_any(_load(_iface(folder=SANDBOX)), env_map=_env()).folder == SANDBOX
+
+
+def test_a_device_serial_is_refused_because_a_device_is_not_a_folder():
+    """v1.11.0 listed the two `on-prem` entries from GET /config/setup/v1/folders
+    as targetable child folders. `folder=<serial>` returns 400 "Folder doesn't
+    exist" — the serial is a `device=` scope. Such an intent compiled clean and
+    would have failed only at apply."""
+    with pytest.raises(IntentError, match="not declared in catalog/folders.yaml"):
+        _load(_iface(folder=DEVICE))
 
 
 def test_the_environment_form_still_works():
@@ -85,7 +99,7 @@ def test_the_environment_form_still_works():
 
 def test_exactly_one_target_is_required():
     with pytest.raises(IntentError, match="exactly one target"):
-        _load(_iface(folder=DEVICE, environment="prod"))
+        _load(_iface(folder=SANDBOX, environment="prod"))
     with pytest.raises(IntentError, match="set a target"):
         _load(_iface())
 
@@ -113,7 +127,7 @@ def test_folder_is_unusable_without_the_catalog_rather_than_unchecked():
     """The dangerous failure would be treating a missing catalog as "no check
     needed" and letting any folder through."""
     with pytest.raises(IntentError, match="Refusing to target an unchecked folder"):
-        _load(_iface(folder=DEVICE), hierarchy=False)
+        _load(_iface(folder=SANDBOX), hierarchy=False)
 
 
 def test_the_environment_path_is_unaffected_by_targetability():
@@ -147,7 +161,7 @@ def test_an_access_request_naming_a_folder_is_rejected_not_ignored():
     copied it from a Day-1 example landed in whatever `environment` resolved to
     while its author believed otherwise — a silently wrong target."""
     with pytest.raises(IntentError) as e:
-        _load(_access(folder=DEVICE))
+        _load(_access(folder=SANDBOX))
     assert any("environment" in str(p) for p in e.value.problems)
 
 
@@ -172,10 +186,13 @@ def _route(**spec):
 def test_router_membership_is_looked_up_under_the_targeted_folder():
     """Both addressing forms must reach the same catalog lookup, or a route
     targeted by folder would aggregate without its VRF interface membership."""
-    assert _load(_route(folder=DEVICE)).spec.vrf_interfaces == ("$eth-local",)
+    assert _load(_route(folder=SANDBOX)).spec.vrf_interfaces == ("$eth-local",)
     assert _load(_route(environment="prod")).spec.vrf_interfaces == ("$eth-local",)
 
 
 def test_a_folder_with_no_declared_router_is_rejected():
+    cat = RouterCatalog.from_dict({"routers": {
+        "prod-edge": {"default": {"vrfs": {"default": {"interfaces": ["$eth-local"]}}}}}})
     with pytest.raises(IntentError, match="not declared for folder 'GitOps'"):
-        _load(_route(folder="GitOps"))
+        load_intent(_route(folder="GitOps"), env_map=_env(),
+                    router_catalog=cat, folder_hierarchy=_hierarchy())

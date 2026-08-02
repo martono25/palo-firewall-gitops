@@ -3,6 +3,47 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.1] — 2026-08-02
+
+**Corrects a wrong claim shipped in v1.11.0.** A device is not a folder.
+
+### Device entries removed from `catalog/folders.yaml`
+`GET /config/setup/v1/folders` returns two kinds of entry, told apart by `type`:
+`container` is a real folder, `on-prem` is a **device** (carrying
+`serial_number` and `model`). v1.11.0 read the two `on-prem` entries parented to
+`prod-edge` as per-device folders, listed them as children, and marked them
+`targetable: true`.
+
+They are not folders:
+
+* `folder=007955000894453` → **400 API_I00013, "Folder … doesn't exist"**
+* the same serial works as `device=`, returning `ethernet1/3` / `ethernet1/4`
+* pan.dev documents `folder` / `snippet` / `device` as three separate query
+  params; the Terraform provider says "exactly one of" on every resource
+
+An intent naming a serial **compiled clean and would have failed at apply**. It
+is now rejected at compile time, and a test asserts device serials stay out of
+the catalog.
+
+### v1.11.0's "blast radius fix" was itself the bug
+That release claimed to fix an understated blast radius by giving `prod-edge`
+two child folders. The original `children: []` was correct — `prod-edge` has no
+child containers. Its two firewalls are devices attached to it, and a change
+there reaching both of them is the folder's purpose, not a hidden fan-out. The
+catalog and its test are restored.
+
+### Still unsolved: targeting one firewall
+It needs a `device:` scope. The resources support it (`scm_zone`,
+`scm_ethernet_interface`, `scm_logical_router` all take `folder`/`snippet`/
+`device`); this platform does not implement it. A design decision, not a catalog
+entry.
+
+Everything else in v1.11.0 stands: `folder:` on the Day-1 kinds, `environment:`
+on `AccessRequest`, exactly one of the two, targetability enforced at compile
+time, and the `AccessRequest`-ignores-`folder:` fix.
+
+540 tests.
+
 ## [1.11.0] — 2026-08-02
 
 The Day-1 kinds now name their target folder directly. See ADR-0006.
@@ -29,7 +70,11 @@ from reaching every device at once. Fail closed throughout: unknown folders are
 not targetable, and a **missing** catalog makes `folder:` unusable rather than
 unchecked.
 
-### Fixed: the shipped folder hierarchy understated production blast radius
+### ~~Fixed: the shipped folder hierarchy understated production blast radius~~
+> **RETRACTED in v1.11.1.** This "fix" was itself the bug — the entries taken for
+> per-device folders are `on-prem` DEVICE entries, and `prod-edge: children: []`
+> was correct all along. See v1.11.1 above.
+
 `catalog/folders.yaml` declared `prod-edge: children: []` while SCM has had two
 device folders under it all along. The classifier reads that file, so **changes
 to the production folder scored as reaching no descendants when they in fact
