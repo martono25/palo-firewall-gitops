@@ -58,16 +58,30 @@ _ARG_RE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=', re.MULTILINE)
 _VAR_REF_RE = re.compile(r'\bvar\.([A-Za-z_][A-Za-z0-9_]*)')
 
 
+#: Every character `str.splitlines()` treats as a line break. Masking must never
+#: replace one of these — see `_mask_strings`.
+_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85  ")
+
+
 def _mask_strings(text: str) -> str:
     """Blank out the CONTENTS of double-quoted strings, preserving length.
 
-    Quotes and newlines survive; every other character inside a string becomes
-    `x`. So `"unbalanced } here"` stops affecting brace depth and
+    Quotes and line breaks survive; every other character inside a string
+    becomes `x`. So `"unbalanced } here"` stops affecting brace depth and
     `"https://x//y"` stops looking like a comment, while offsets and line
     numbers stay exactly as they were.
 
-    An unterminated quote is closed at end-of-line rather than swallowing the
-    rest of the file — a malformed .tf should not silently disable the checks.
+    THE LINE-BREAK RULE IS LOad-BEARING. Output is a 1:1 character mapping, so
+    line counts match the input only while every break character is preserved.
+    `_strip_comments` zips this text against the original line by line; drop one
+    break and every later line pairs with the wrong mask. That is not a
+    near-miss — it truncated `module "n" {` to `mo` in testing, and dropped the
+    trailing line entirely, falsely rejecting a correctly wired module.
+
+    Escaped characters are masked EXCEPT breaks: `"abc\\<newline>def"` keeps its
+    newline (and closes the string there). An unterminated quote is likewise
+    closed at the break rather than swallowing the rest of the file — a
+    malformed .tf must not silently disable the checks.
     """
     out: List[str] = []
     in_string = False
@@ -78,7 +92,12 @@ def _mask_strings(text: str) -> str:
             if ch == '"':
                 in_string = True
             continue
-        if escaped:
+        if ch in _LINE_BREAKS:
+            # Never mask a break, even an escaped one — see the docstring.
+            out.append(ch)
+            in_string = False
+            escaped = False
+        elif escaped:
             out.append("x")
             escaped = False
         elif ch == "\\":
@@ -86,9 +105,6 @@ def _mask_strings(text: str) -> str:
             escaped = True
         elif ch == '"':
             out.append('"')
-            in_string = False
-        elif ch == "\n":
-            out.append("\n")
             in_string = False
         else:
             out.append("x")
@@ -104,8 +120,17 @@ def _strip_comments(original: str, masked: str) -> str:
     its name. `_mask_strings` preserves length and newlines, so the indices line
     up one-for-one.
     """
+    orig_lines = original.splitlines()
+    masked_lines = masked.splitlines()
+    if len(orig_lines) != len(masked_lines):
+        # The masker broke its own invariant. zip() would silently pair each
+        # line with the WRONG mask and truncate the tail, corrupting code rather
+        # than just losing comments. Fail safe: keep the original verbatim. A
+        # stray comment may then survive, which at worst over-reports a
+        # declaration — never the silent-pass direction.
+        return original
     out: List[str] = []
-    for orig_line, masked_line in zip(original.splitlines(), masked.splitlines()):
+    for orig_line, masked_line in zip(orig_lines, masked_lines):
         cut = len(orig_line)
         for marker in ("#", "//"):
             idx = masked_line.find(marker)

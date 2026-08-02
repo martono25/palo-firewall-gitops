@@ -58,7 +58,12 @@ class EnvMap:
             missing = [k for k in ("folder", "from_zone", "to_zone") if not spec.get(k)]
             if missing:
                 raise ResolveError(f"environment {env!r}: missing {missing}")
-            extra = spec.get("baseline_zones", [])
+            # `or []` not `.get(k, [])`: YAML parses a valueless key
+            # (`baseline_zones:` with the list commented out) to None, and a
+            # bare None must mean "absent", not a hard error. That edit is the
+            # natural one to make given the commented block in the shipped
+            # catalog, and it used to fail the whole compile.
+            extra = spec.get("baseline_zones") or []
             if not isinstance(extra, list) or not all(
                 isinstance(z, str) and z.strip() for z in extra
             ):

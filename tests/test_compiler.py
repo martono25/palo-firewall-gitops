@@ -367,3 +367,34 @@ def test_zone_request_naming_the_default_pair_is_rejected():
     zones = [CompiledZone(folder="prod-edge", name="app", zone_type="layer3", interfaces=[])]
     v = check_zone_collisions(zones, env_map())  # env map WITHOUT baseline_zones
     assert len(v) == 1 and "app" in v[0]
+
+
+def test_bare_baseline_zones_key_is_treated_as_absent():
+    """REGRESSION: YAML parses a valueless `baseline_zones:` to None, which used
+    to raise ResolveError and fail the whole compile. Commenting out the list
+    items while leaving the key is the natural edit given the comment block in
+    the shipped catalog."""
+    import yaml
+    doc = yaml.safe_load(
+        "prod:\n  folder: prod-edge\n  from_zone: local\n  to_zone: internet\n  baseline_zones:\n"
+    )
+    em = EnvMap.from_dict(doc)
+    assert em.baseline_zones_by_folder()["prod-edge"] == {"local", "internet"}
+
+
+def test_explicit_empty_baseline_zones_list_is_accepted():
+    em = EnvMap.from_dict({
+        "prod": {"folder": "prod-edge", "from_zone": "local", "to_zone": "internet",
+                 "baseline_zones": []}
+    })
+    assert em.baseline_zones_by_folder()["prod-edge"] == {"local", "internet"}
+
+
+def test_two_environments_sharing_a_folder_union_their_baseline_zones():
+    em = EnvMap.from_dict({
+        "prod": {"folder": "shared", "from_zone": "a", "to_zone": "b",
+                 "baseline_zones": ["x"]},
+        "stage": {"folder": "shared", "from_zone": "c", "to_zone": "d",
+                  "baseline_zones": ["y"]},
+    })
+    assert em.baseline_zones_by_folder()["shared"] == {"a", "b", "c", "d", "x", "y"}

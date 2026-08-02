@@ -323,3 +323,119 @@ def test_the_shipped_env_map_parses_and_declares_its_baseline_zones():
     baseline = env_map.baseline_zones_by_folder()["prod-edge"]
     # Verified live 2026-07-31: the folder carries seven zones.
     assert {"local", "internet", "proxy", "zone-internal"} <= baseline
+
+
+# ── masking must never drop a line break (found by the ship coverage audit) ──
+LINE_BREAK_CHARS = ["\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", " ", " "]
+
+
+@pytest.mark.parametrize("brk", LINE_BREAK_CHARS)
+def test_masking_preserves_every_line_break_character(brk):
+    """THE invariant _strip_comments depends on.
+
+    _mask_strings is a 1:1 character mapping, so line counts match only while
+    every break character survives. Drop one and each later line pairs with the
+    WRONG mask: in testing that truncated `module "n" {` to `mo` and discarded
+    the trailing line, falsely rejecting a correctly wired module.
+    """
+    from fwgitops.tfcontract import _mask_strings
+    text = f'module "m" {{\n  note = "a{brk}b"\n}}\n'
+    assert len(_mask_strings(text).splitlines()) == len(text.splitlines())
+
+
+def test_escaped_newline_in_a_string_does_not_drop_the_last_line(tmp_path):
+    """REGRESSION: the escaped-character branch replaced `\\`+newline with "x",
+    losing a line. zip() then truncated, dropping the wiring on the final line
+    and FALSELY REJECTING a correct module."""
+    d = _root(tmp_path, 'variable "zones" {}\nmodule "m" {\n  note = "abc\\\ndef"\n}\n'
+                        'module "n" { zones = var.zones }\n')
+    assert check_contract(d, ["zones"]) == []
+
+
+def test_line_desync_does_not_corrupt_a_later_line(tmp_path):
+    """REGRESSION: misalignment applied one line's comment offset to a DIFFERENT
+    line, truncating `module "n" {` to `mo`. Code corruption, not just lost
+    comments."""
+    from fwgitops.tfcontract import _mask_strings, _strip_comments
+    body = ('variable "zones" {}\nmodule "m" {\n  note = "x\\\ny"\n}\n'
+            'module "n" {\n  # a comment\n  zones = var.zones\n}\n')
+    assert 'module "n" {' in _strip_comments(body, _mask_strings(body)).splitlines()[5]
+    assert check_contract(_root(tmp_path, body), ["zones"]) == []
+
+
+def test_strip_comments_fails_safe_on_a_line_count_mismatch():
+    """Defence in depth: if the masker ever breaks its invariant again, return
+    the original rather than silently pairing lines with the wrong mask."""
+    from fwgitops.tfcontract import _strip_comments
+    original = "line one # cut me\nline two\nline three"
+    assert _strip_comments(original, "short # cut me") == original
+
+
+def test_a_real_double_slash_comment_is_still_cut(tmp_path):
+    """The `//`-in-URL fix must not stop `//` working as an actual comment."""
+    d = _root(tmp_path, '// variable "zones" { type = any }\nvariable "folder" {}\n')
+    assert declared_variables(d) == {"folder"}
+
+
+def test_escaped_quote_keeps_the_string_open(tmp_path):
+    """`\\"` is not a terminator, so a `}` after it is still inside the string."""
+    d = _root(tmp_path, 'variable "zones" {}\nmodule "m" {\n'
+                        '  note = "she said \\"hi\\" and } stayed inside"\n'
+                        '  zones = var.zones\n}\n')
+    assert check_contract(d, ["zones"]) == []
+
+
+def test_check_contract_reports_every_violation_not_just_the_first(tmp_path):
+    d = _root(tmp_path, 'module "m" {\n  source = "../x"\n}\n')
+    problems = check_contract(d, ["zones", "interfaces", "routes"])
+    assert len(problems) == 3
+
+
+def test_duplicate_emitted_keys_are_deduped(tmp_path):
+    d = _root(tmp_path, UNDECLARED_MODULE)
+    assert len(check_contract(d, ["zones", "zones", "zones"])) == 1
+
+
+def test_a_bad_folder_blocks_the_good_folders_write(tmp_path, capsys):
+    """All-or-nothing across folders.
+
+    Correct today only because run_compile plans every file before writing any.
+    A refactor moving the write loop above the contract loop would leave the
+    rest of the suite green while silently writing a half-applied desired state.
+    """
+    for env, folder, zone in (("prod", "good-folder", "dmz"), ("stage", "bad-folder", "dmz2")):
+        d = tmp_path / "intent" / env
+        d.mkdir(parents=True)
+        (d / "ZONE.yaml").write_text(
+            "apiVersion: fw-intent/v1\nkind: ZoneRequest\n"
+            f"metadata: {{id: Z-{env}, requester: m@corp, ticket: J-1,"
+            " justification: x, requested: 2026-07-27}\n"
+            f"spec: {{environment: {env}, zone: {zone}, type: layer3, interfaces: []}}\n",
+            encoding="utf-8",
+        )
+
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(
+        "prod:\n  folder: good-folder\n  from_zone: local\n  to_zone: internet\n"
+        "stage:\n  folder: bad-folder\n  from_zone: local\n  to_zone: internet\n",
+        encoding="utf-8",
+    )
+
+    good = tmp_path / "terraform" / "good-folder"
+    good.mkdir(parents=True)
+    (good / "main.tf").write_text(CLEAN_MODULE, encoding="utf-8")   # consumes zones
+    bad = tmp_path / "terraform" / "bad-folder"
+    bad.mkdir(parents=True)
+    (bad / "main.tf").write_text(UNDECLARED_MODULE, encoding="utf-8")  # does not
+
+    rc = main([
+        "compile", str(tmp_path / "intent"),
+        "--env-map", str(env_map),
+        "--out", str(tmp_path / "terraform"),
+    ])
+
+    assert rc == 2
+    assert "bad-folder" in capsys.readouterr().err
+    assert not (bad / "zones.auto.tfvars.json").exists()
+    assert not (good / "zones.auto.tfvars.json").exists(), \
+        "a violation in ONE folder must block every folder's write"
