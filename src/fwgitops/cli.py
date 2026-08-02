@@ -578,6 +578,56 @@ def run_drift(
     return 0 if (report.is_clean and not drifted) else 3
 
 
+def run_snapshot_zones(
+    folder: str,
+    out_path: Path,
+    *,
+    out=None,
+    err=None,
+) -> int:
+    """Read a folder's live zones from SCM into a drift snapshot. READ-ONLY.
+
+    Records the QUERIED folder as `scope` on every row. SCM returns the folder an
+    object is DEFINED in, which for an inherited object is an ancestor — without
+    `scope`, drift cannot tell "this folder owns it" from "this folder inherits
+    it", and reports every inherited object as unexpected. That was 7 false
+    positives against the live tenant.
+    """
+    import json
+
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    try:
+        session = ScmSession(credentials=ScmCredentials.from_env())
+        payload = session.request(
+            "GET", "/config/network/v1/zones", params={"folder": folder, "limit": 200}
+        )
+    except ScmConfigError as e:
+        print(f"error: SCM credentials not usable: {e}", file=err)
+        return 1
+    except ScmApiError as e:
+        print(f"error: SCM read failed: {e}", file=err)
+        return 1
+
+    rows = []
+    for z in payload.get("data", []):
+        if not isinstance(z, dict) or not z.get("name"):
+            continue
+        row = {k: v for k, v in z.items() if k not in ("id", "tfid")}
+        row.setdefault("folder", folder)
+        row["scope"] = folder
+        rows.append(row)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    inherited = sum(1 for r in rows if r["folder"] != folder)
+    print(f"wrote {len(rows)} zone(s) for folder {folder!r} to {out_path} "
+          f"({inherited} inherited from an ancestor)", file=out)
+    return 0
+
+
 def _read_snapshot_rows(path: Path, err):
     """Read a JSON/YAML snapshot into a list of dicts. Returns (rows, exit_code)."""
     if not path.is_file():
@@ -1019,6 +1069,11 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     dr.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
 
+    sn = sub.add_parser("snapshot-zones",
+                        help="read a folder's live zones from SCM into a drift snapshot")
+    sn.add_argument("folder", help="SCM folder to read")
+    sn.add_argument("--out", required=True, type=Path, help="where to write the snapshot JSON")
+
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
     p.add_argument("folder", help="SCM folder to push")
     p.add_argument("--admin", action="append", dest="admins",
@@ -1089,6 +1144,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             zones_snapshot_path=args.zones_snapshot,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
+    if args.command == "snapshot-zones":
+        return run_snapshot_zones(args.folder, args.out)
     if args.command == "push":
         return run_push(
             args.folder,

@@ -34,6 +34,13 @@ reference names were never validated at all.
 Root and module object types are byte-identical, enforced per-attribute by the
 ADR-0004 contract check, so HOLE 3 cannot recur on zones.
 
+### Zone drift detection — DONE v1.3.0
+
+`fwgitops snapshot-zones` reads a folder's live zones (read-only) and
+`fwgitops drift --zones-snapshot` compares them, wired into
+`.github/workflows/drift-detect.yml`. This is the only check that can see a zone
+added by hand: `terraform plan` cannot see additions, and zones carry no tags.
+
 ### Schema-level contract check (HOLE 3) — DONE PR #32
 
 `declared_object_attributes` parses a variable's `object({...})` type and
@@ -129,27 +136,6 @@ same false-negative rejection `baseline_zones` was added to fix.
 **Depends on:** None.
 
 ## Drift
-
-### Wire the zones snapshot into the scheduled drift workflow
-
-**What:** `fwgitops drift --zones-snapshot` exists and is tested, but nothing
-produces the snapshot in CI. `.github/workflows/drift-detect.yml` currently runs
-`terraform plan` only, and its own comment says the tag-based engine should be
-wired "once the SCM rules-list read lands" — the same is now true for zones.
-
-**Why:** State-based drift is the ONLY thing that can see a zone added by hand,
-and it is not running anywhere. `terraform plan` cannot see additions, and zones
-carry no tags. Until this is wired, the capability exists but detects nothing.
-
-**Context:** The snapshot is one read —
-`GET /config/network/v1/zones?folder=<f>&limit=200` — and MUST record the folder
-that was queried as `scope`, because SCM returns the folder the object is
-DEFINED in. Getting that wrong produced 7 false positives against the live
-tenant (every zone is defined in the shared parent). See `detect_object_drift`.
-
-**Effort:** S
-**Priority:** P1
-**Depends on:** None.
 
 ### State-based drift cannot tell an orphan from a hand-added object
 

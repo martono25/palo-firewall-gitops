@@ -78,3 +78,38 @@ jobs:
             exit 1
           fi
           echo "No drift — SCM matches the declared policy."
+
+      # State-based drift for objects that CANNOT carry gitops: tags. scm_zone
+      # has no `tag` attribute (only 14 of the provider's resources do), so the
+      # tag-based engine cannot see zones at all — and `terraform plan` above
+      # cannot see ADDITIONS, only changes to resources already in its state. A
+      # zone added by hand is therefore invisible to everything except this step.
+      #
+      # Read-only. The snapshot records the QUERIED folder as `scope`: SCM
+      # returns the folder an object is DEFINED in, and without that distinction
+      # every inherited object reads as unexpected (7 false positives against the
+      # live tenant, where all zones are defined in the shared parent).
+      - name: Detect zone drift (state-based)
+        run: |
+          set -euo pipefail
+          drift=0
+          for dir in terraform/*/; do
+            folder=$(basename "$dir")
+            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
+            [ -f "$dir/main.tf" ] || continue
+            echo "::group::zone drift $folder"
+            fwgitops snapshot-zones "$folder" --out "zones-$folder.json"
+            rc=0
+            fwgitops drift --zones-snapshot "zones-$folder.json" || rc=$?
+            echo "::endgroup::"
+            case "$rc" in
+              0) ;;
+              3) echo "::warning::ZONE DRIFT in '$folder'"; drift=1 ;;
+              *) echo "::error::zone drift check failed for '$folder' (rc=$rc)"; exit 1 ;;
+            esac
+          done
+          if [ "$drift" = "1" ]; then
+            echo "::error::Zone drift detected — a zone exists in SCM that Git never declared, or a declared zone has been changed or removed out of band."
+            exit 1
+          fi
+          echo "No zone drift."
