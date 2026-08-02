@@ -3,6 +3,39 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.12.1] — 2026-08-03
+
+**Fixes a fail-open the v1.12.0 Scope change introduced.** Found while preparing
+the first hardware change, before it was applied.
+
+### A device-scoped change was reported LOW with no checks
+`interface_becomes_addressed` (HIGH) distinguishes "puts the interface on a
+network" from "edits an existing address" by looking it up in live state. It
+keyed on `.folder`, which is **None** for a device-scoped object — so the lookup
+always missed, the check never fired, and putting a production firewall's
+interface on a network for the first time classified LOW.
+
+v1.12.0 moved grouping, drift keys and the output path onto `Scope` and left the
+classifier keying on `.folder`. All three now build the same key
+(`_scope_key` == `Scope.key`), asserted by a test, because that is the seam where
+a silent miss is invisible.
+
+### `fwgitops snapshot --device <serial>`
+Without it the classifier had nothing to compare a firewall's objects against, so
+the check could never fire on real hardware regardless of the fix above. Rows are
+stamped `scope: device:<serial>`, matching what drift and the classifier look up
+by. Exactly one of `<folder>` or `--device` is required.
+
+### Folder fan-out is deliberately skipped for a firewall
+Targeting one firewall is the narrowest act available — a device write creates a
+per-device override and reaches nothing else. `_blast_radius` now returns nothing
+for a device scope on purpose, rather than by accident via `folder=None`.
+
+Verified against the live tenant: `classify` reports the first hardware change
+`HIGH interface_becomes_addressed`, where before the fix it read `LOW -`.
+
+554 tests.
+
 ## [1.12.0] — 2026-08-02
 
 `device:` targeting — a Day-1 intent can name **one firewall**. ADR-0006

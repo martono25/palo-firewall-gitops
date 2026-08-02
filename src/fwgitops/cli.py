@@ -684,6 +684,7 @@ def run_snapshot(
     folder: str,
     out_path: Path,
     *,
+    device: Optional[str] = None,
     out=None,
     err=None,
 ) -> int:
@@ -693,7 +694,14 @@ def run_snapshot(
     snapshottable with no code here — the alternative was a hand-written command
     per kind, which is the sprawl ADR-0001's registry exists to prevent.
 
-    Records the QUERIED folder as `scope` on every row. SCM returns the folder an
+    With `device=<serial>`, reads a FIREWALL's scope instead. A firewall is the
+    last level of the SCM hierarchy but is addressed `device=`, never `folder=`
+    (which returns 400) — and its scope key is `device:<serial>`, matching what
+    `drift` and the classifier build. Without this, a device-scoped change could
+    never be compared against live state, so `interface_becomes_addressed` and
+    friends would silently never fire and report LOW.
+
+    Records the QUERIED scope as `scope` on every row. SCM returns the folder an
     object is DEFINED in, which for an inherited object is an ancestor — without
     `scope`, drift cannot tell "this folder owns it" from "this folder inherits
     it", and reports every inherited object as unexpected. That was 7 false
@@ -713,8 +721,9 @@ def run_snapshot(
         return 1
     try:
         session = ScmSession(credentials=ScmCredentials.from_env())
+        scope_param = {"device": device} if device else {"folder": folder}
         payload = session.request(
-            "GET", handler.state_api_path, params={"folder": folder, "limit": 200}
+            "GET", handler.state_api_path, params={**scope_param, "limit": 200}
         )
     except ScmConfigError as e:
         print(f"error: SCM credentials not usable: {e}", file=err)
@@ -728,16 +737,22 @@ def run_snapshot(
         if not isinstance(obj, dict) or not obj.get("name"):
             continue
         row = {k: v for k, v in obj.items() if k not in ("id", "tfid")}
-        row.setdefault("folder", folder)
-        row["scope"] = folder
+        if device:
+            row.setdefault("device", device)
+        else:
+            row.setdefault("folder", folder)
+        # The scope KEY, not the raw name — must match Scope.key, which is what
+        # drift and the classifier look up by.
+        row["scope"] = f"device:{device}" if device else folder
         # Stamp the kind so drift attributes the snapshot without guessing.
         row["kind"] = kind
         rows.append(row)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    inherited = sum(1 for r in rows if r["folder"] != folder)
-    print(f"wrote {len(rows)} {kind} object(s) for folder {folder!r} to {out_path} "
+    label = f"device {device!r}" if device else f"folder {folder!r}"
+    inherited = sum(1 for r in rows if r.get("folder") not in (None, folder))
+    print(f"wrote {len(rows)} {kind} object(s) for {label} to {out_path} "
           f"({inherited} inherited from an ancestor)", file=out)
     return 0
 
@@ -1220,7 +1235,11 @@ def build_parser() -> argparse.ArgumentParser:
     sn = sub.add_parser("snapshot",
                         help="read a folder's live objects of one kind from SCM (read-only)")
     sn.add_argument("kind", help="intent kind, e.g. ZoneRequest / InterfaceRequest")
-    sn.add_argument("folder", help="SCM folder to read")
+    sn.add_argument("folder", nargs="?", default=None, help="SCM folder to read")
+    sn.add_argument("--device", default=None,
+                    help="read a FIREWALL's scope instead of a folder (serial). A firewall "
+                         "is the last level of the hierarchy but is addressed device=, "
+                         "never folder=.")
     sn.add_argument("--out", required=True, type=Path, help="where to write the snapshot JSON")
 
     p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
@@ -1301,7 +1320,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(name)
         return 0
     if args.command == "snapshot":
-        return run_snapshot(args.kind, args.folder, args.out)
+        if bool(args.folder) == bool(args.device):
+            print("error: give exactly one of <folder> or --device <serial> — a firewall "
+                  "is the last level of the hierarchy but is addressed device=, never "
+                  "folder= (which returns 400 'Folder doesn't exist').", file=sys.stderr)
+            return 1
+        return run_snapshot(args.kind, args.folder, args.out, device=args.device)
     if args.command == "push":
         return run_push(
             args.folder,

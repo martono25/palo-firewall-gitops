@@ -200,3 +200,66 @@ def test_a_folder_with_no_declared_router_is_rejected():
     with pytest.raises(IntentError, match="not declared for folder 'GitOps'"):
         load_intent(_route(folder="GitOps"), env_map=_env(),
                     router_catalog=cat, folder_hierarchy=_hierarchy())
+
+
+# ── the classifier must key on SCOPE, not folder ──────────────────────────
+def test_a_device_scoped_change_is_still_risk_checked():
+    """Regression, and a bad one.
+
+    `interface_becomes_addressed` (HIGH) looks the interface up in live state to
+    tell "puts it on a network" from "edits an existing address". It keyed on
+    `.folder`, which is None for a device-scoped object — so the lookup always
+    missed, the check never fired, and putting a production firewall's interface
+    on a network for the first time reported LOW with no checks. Fail-open in
+    the risk direction, introduced by the Scope change.
+    """
+    from fwgitops.classify import classify_interface
+    from fwgitops.compiler import CompiledInterface
+
+    iface = CompiledInterface(device=DEVICE, name="ethernet1/4", ip=["10.20.0.1/24"])
+    # Keyed exactly as `snapshot` stamps it and `drift` builds it.
+    live = {(f"device:{DEVICE}", "ethernet1/4"): {"name": "ethernet1/4", "layer3": {}}}
+
+    v = classify_interface(iface, hierarchy=_hierarchy(), current=live)
+    assert v.tier == "HIGH"
+    assert [c["check"] for c in v.checks_fired] == ["interface_becomes_addressed"]
+
+
+def test_an_already_addressed_device_interface_is_not_the_populating_case():
+    """The other half: editing an existing address is a real change but not the
+    same act, so it must not borrow the populating check's tier."""
+    from fwgitops.classify import classify_interface
+    from fwgitops.compiler import CompiledInterface
+
+    iface = CompiledInterface(device=DEVICE, name="ethernet1/4", ip=["10.20.0.2/24"])
+    live = {(f"device:{DEVICE}", "ethernet1/4"): {
+        "name": "ethernet1/4", "layer3": {"ip": [{"name": "10.20.0.1/24"}]}}}
+    v = classify_interface(iface, hierarchy=_hierarchy(), current=live)
+    assert "interface_becomes_addressed" not in [c["check"] for c in v.checks_fired]
+
+
+def test_folder_fan_out_is_deliberately_skipped_for_a_firewall():
+    """Targeting one firewall is the NARROWEST act — a device write creates a
+    per-device override and reaches nothing else. There is no fan-out to warn
+    about, so the check is not applied on purpose rather than by accident."""
+    from fwgitops.classify import _blast_radius
+    from fwgitops.compiler import CompiledZone
+
+    on_device = CompiledZone(device=DEVICE, name="z", zone_type="layer3", interfaces=[])
+    in_shared = CompiledZone(folder="ngfw-shared", name="z", zone_type="layer3",
+                             interfaces=[])
+    assert _blast_radius(on_device, _hierarchy()) is None
+    fired = _blast_radius(in_shared, _hierarchy())
+    assert fired is not None and fired["tier"] == "HIGH"
+
+
+def test_the_scope_key_matches_across_classify_drift_and_snapshot():
+    """These three build the same key independently. If they drift apart, a
+    lookup silently misses and the check it guards never fires."""
+    from fwgitops.classify import _scope_key
+    from fwgitops.compiler import CompiledZone, scope_of
+
+    on_device = CompiledZone(device=DEVICE, name="z", zone_type="layer3", interfaces=[])
+    in_folder = CompiledZone(folder="prod-edge", name="z", zone_type="layer3", interfaces=[])
+    assert _scope_key(on_device) == scope_of(on_device).key == f"device:{DEVICE}"
+    assert _scope_key(in_folder) == scope_of(in_folder).key == "prod-edge"

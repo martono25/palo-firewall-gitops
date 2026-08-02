@@ -276,7 +276,7 @@ def classify(
     by_name = {a.name: a for a in change.address_objects}
     fired: List[Dict[str, str]] = []
 
-    blast = _folder_blast_radius(rule.folder, hierarchy)
+    blast = _blast_radius(rule, hierarchy)
     if blast is not None:
         fired.append(blast)
 
@@ -392,6 +392,33 @@ def classify(
     )
 
 
+def _scope_key(obj) -> Optional[str]:
+    """The key a compiled object's live state is filed under.
+
+    MUST match what `snapshot` stamps and what `drift` builds, or a `current`
+    lookup silently misses and the check it guards never fires — reporting LOW
+    for a change that was supposed to tier up. A device-scoped object has
+    `folder=None`, so keying on `.folder` alone broke exactly that way.
+    """
+    device = getattr(obj, "device", None)
+    if device:
+        return f"device:{device}"
+    return getattr(obj, "folder", None)
+
+
+def _blast_radius(obj, hierarchy) -> Optional[Dict[str, str]]:
+    """Folder fan-out, skipped for a firewall-scoped change.
+
+    Targeting one firewall is the NARROWEST act this platform can perform: a
+    device-scope write creates a per-device override and reaches nothing else
+    (spike/device-override-probe). There is no fan-out to warn about, so the
+    check is deliberately not applied rather than accidentally not applied.
+    """
+    if getattr(obj, "device", None):
+        return None
+    return _folder_blast_radius(obj.folder, hierarchy)
+
+
 def _folder_blast_radius(folder: str, hierarchy) -> Optional[Dict[str, str]]:
     """HIGH when a change is scoped to a folder that has CHILD folders.
 
@@ -439,7 +466,7 @@ def classify_route(
     """
     fired: List[Dict[str, str]] = []
 
-    blast = _folder_blast_radius(route.folder, hierarchy)
+    blast = _blast_radius(route, hierarchy)
     if blast is not None:
         fired.append(blast)
 
@@ -453,7 +480,7 @@ def classify_route(
         })
 
     if current is not None:
-        actual = current.get((route.folder, route.router))
+        actual = current.get((_scope_key(route), route.router))
         if actual is not None and actual.get("folder") not in (None, route.folder):
             fired.append({
                 "check": "router_becomes_locally_owned",
@@ -512,12 +539,12 @@ def classify_interface(
     """
     fired: List[Dict[str, str]] = []
 
-    blast = _folder_blast_radius(interface.folder, hierarchy)
+    blast = _blast_radius(interface, hierarchy)
     if blast is not None:
         fired.append(blast)
 
     if current is not None and interface.is_addressed:
-        actual = current.get((interface.folder, interface.name))
+        actual = current.get((_scope_key(interface), interface.name))
         if actual is not None and not _addressing_of(actual):
             mode = "DHCP" if interface.dhcp else f"{sorted(interface.ip)}"
             fired.append({
@@ -595,7 +622,7 @@ def classify_zone(
     """
     fired: List[Dict[str, str]] = []
 
-    blast = _folder_blast_radius(zone.folder, hierarchy)
+    blast = _blast_radius(zone, hierarchy)
     if blast is not None:
         fired.append(blast)
 
@@ -604,7 +631,7 @@ def classify_zone(
     # state rather than an edge case — and moving one out of it changes what the
     # firewall actually passes.
     if current is not None and _becomes_populated(
-        list(zone.interfaces), current.get((zone.folder, zone.name))
+        list(zone.interfaces), current.get((_scope_key(zone), zone.name))
     ):
         fired.append({
             "check": "zone_becomes_traffic_bearing",
