@@ -3,6 +3,54 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-08-02
+
+`RouteRequest` (ADR-0001 kind #4) closes ADR-0002's ordered Day-1 chain:
+`InterfaceRequest → ZoneRequest → RouteRequest → AccessRequest` is now
+expressible end to end.
+
+### HOLE 3 was passing VACUOUSLY for every list-of-object attribute
+Found while building this kind, and the more important half of the release.
+`_emitted_paths` recursed into dicts but **not into lists**, so a
+`list(object(...))` attribute contributed only its own path and nothing beneath
+it was ever compared against the declaration. For `routers` the check looked at
+`{name, folder, vrf}` and **never once at a static-route field** — four levels of
+type that Terraform would have discarded silently, which is precisely the hole
+the check exists to close. It also applied to `interfaces` as shipped in v1.8.0.
+
+`declared_object_attributes` collapses the list level (`vrf.name`, not
+`vrf.*.name`), so the emitted side now collapses it too and the two line up.
+Mutation-proven: deleting `admin_dist` four levels deep from the declaration is
+caught. Re-run against the shipped kinds, `zones` and `interfaces` are clean —
+the gap hid no live defect, but it was hiding it by not looking.
+
+### One intent per route; the compiler aggregates
+Unlike every other kind, one intent does **not** map to one object. A static
+route lives at `vrf[].routing_table.ip.static_route[]` inside
+`scm_logical_router`, and that same object also carries the VRF's **interface
+membership**. Terraform manages whole objects, so writing a router without that
+membership would strip the interface list off the object every packet traverses.
+
+`catalog/routers.yaml` declares membership; it is resolved at **load** time into
+`RouteSpec.vrf_interfaces`, so the compiler stays pure (no live reads — the same
+intents always compile to the same output). `route_tfvars` re-asserts it and
+rejects folder-spanning routers, disagreeing membership, and duplicate route ids.
+
+### Risk
+`classify_route` adds `default_route` (HIGH — a `0.0.0.0/0` route decides where
+all unmatched traffic goes) and `router_becomes_locally_owned` (HIGH — the first
+route against an inherited router creates a local override, moving ownership).
+Routes are the first kind whose failure mode is an **outage** rather than a
+no-op.
+
+### Not done
+The live provider-fidelity probe against `scm_logical_router`. The pattern is
+three-for-three at catching what inference would have got wrong (rules drop
+fields; zones and interfaces do not), and this kind is untested against it.
+Tracked in `TODOS.md` as the gate before a real apply.
+
+524 tests.
+
 ## [1.9.0] — 2026-08-02
 
 Closes the gap v1.8.0 shipped with: the registry declared `drift_engine="state"`

@@ -41,15 +41,18 @@ from fwgitops.compiler import (
     CompileError,
     CompiledChange,
     CompiledInterface,
+    CompiledRoute,
     CompiledZone,
     compile_request,
     interface_tfvars,
+    route_tfvars,
     to_tfvars,
     zone_tfvars,
 )
 from fwgitops.compiler import _compile_interface as _compile_interface_impl
+from fwgitops.compiler import _compile_route as _compile_route_impl
 from fwgitops.compiler import _compile_zone as _compile_zone_impl
-from fwgitops.intent import AccessRequest, InterfaceRequest, ZoneRequest
+from fwgitops.intent import AccessRequest, InterfaceRequest, RouteRequest, ZoneRequest
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,13 @@ def _interface_classify(compiled: CompiledInterface, **ctx: Any) -> Any:
                               current=ctx.get("current"))
 
 
+def _route_classify(compiled: CompiledRoute, **ctx: Any) -> Any:
+    from fwgitops.classify import classify_route
+
+    return classify_route(compiled, hierarchy=ctx.get("hierarchy"),
+                          current=ctx.get("current"))
+
+
 def _zone_classify(compiled: CompiledZone, **ctx: Any) -> Any:
     from fwgitops.classify import classify_zone
 
@@ -133,6 +143,23 @@ REGISTRY: Dict[str, KindHandler] = {
         drift_engine="state",
         state_api_path="/config/network/v1/ethernet-interfaces",    # scm_ethernet_interface has no `tag` attribute
         has_evidence=False,      # bundles are rule-shaped today
+    ),
+    "RouteRequest": KindHandler(
+        kind="RouteRequest",
+        request_type=RouteRequest,
+        compiled_type=CompiledRoute,
+        compile=_compile_route_impl,
+        tfvars_filename="routers.auto.tfvars.json",
+        tfvars=route_tfvars,
+        folder_of=lambda c: c.folder,
+        # Routes AGGREGATE — many share one router object — so the report name
+        # is the route's own id, not the router's.
+        name_of=lambda c: c.name,
+        classify=_route_classify,
+        report_prefix="route/",
+        drift_engine="state",    # scm_logical_router has no `tag` attribute
+        state_api_path="/config/network/v1/logical-routers",
+        has_evidence=False,
     ),
     "ZoneRequest": KindHandler(
         kind="ZoneRequest",

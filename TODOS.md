@@ -145,25 +145,36 @@ provider-fidelity question for `scm_ethernet_interface`.
 
 ## Intent kinds
 
-### RouteRequest (kind #4) — the last link in ADR-0002's Day-1 chain
+### `scm_logical_router` fidelity probe — GATE before applying a route
 
-**What:** `InterfaceRequest → ZoneRequest → RouteRequest → AccessRequest`. The
-first two are built; this is what remains before a Day-1 build is expressible
-end to end.
+**What:** run the probe kit against `scm_logical_router` in the `GitOps` folder
+(0 devices, nothing inherits from it) and read back what the provider actually
+wrote.
 
-**Context:** the tenant has one logical router (`default`). `scm_logical_router`
-has **no `tag` attribute**, so it would register `drift_engine="state"` like
-zones and interfaces — which the drift engine now covers generically, so no new
-engine is needed.
+**Why this is a gate, not a nicety.** `RouteRequest` shipped in v1.10.0 **without
+it** — the only kind that did. The pattern is three-for-three at catching what
+inference would have got wrong: `scm_security_rule` silently drops
+`profile_setting`/`log_setting`/ordering (ADR-0003), while `scm_zone` and
+`scm_ethernet_interface` write faithfully. Routes are nested four levels deep
+(`vrf[].routing_table.ip.static_route[]`), which is the shape most likely to be
+partially handled.
 
-Run the fidelity probe against it first. The pattern is three-for-three at
-catching what inference would have got wrong: rules drop fields, zones do not,
-interfaces do not. Kit at `spike/interface-probe/`.
+The failure mode if the provider drops nested routes is bad and quiet: the apply
+succeeds, the router keeps its interface membership, and **no route is written**.
+Terraform then reports converged. Do not apply a RouteRequest to a folder with
+devices until this is answered.
 
-**Effort:** L
+**Effort:** S — kit already exists at `spike/interface-probe/`, adapt it.
 **Priority:** P1
-**Depends on:** nothing — the registry, contract and drift paths all cover a new
-kind automatically.
+
+### RouteRequest (kind #4) — DONE (v1.10.0)
+
+Shipped: one intent per route, compiler aggregates into `scm_logical_router`;
+membership from `catalog/routers.yaml` resolved at load time; `drift_engine=
+"state"`; `default_route` + `router_becomes_locally_owned` risk checks. Closes
+ADR-0002's chain (`Interface → Zone → Route → Access`).
+
+Outstanding: the fidelity probe above.
 
 ### NatRequest — DEFERRED to v2.0
 

@@ -81,8 +81,15 @@ Before promising drift coverage for a future kind, check whether its SCM resourc
 supports tags — `scm_ethernet_interface` does not either, and only 14 of the
 provider's resources do.
 
-- `AccessRequest` is kind #1 (built + proven). `ZoneRequest` is kind #2. Grow as
-  we mature: `InterfaceRequest`, `RouteRequest`, `NatRequest`, group kinds.
+- Built: `AccessRequest` #1 (proven live), `ZoneRequest` #2, `InterfaceRequest`
+  #3, `RouteRequest` #4 — which closes ADR-0002's Day-1 chain. `NatRequest` is
+  deferred to v2.0; group kinds after.
+- **One intent need not mean one object.** `RouteRequest` is the first kind that
+  aggregates: a static route lives inside `scm_logical_router`, which also holds
+  the VRF's interface membership, and Terraform manages whole objects. A kind
+  whose object is a *container* must declare where the rest of that container's
+  contents come from — here `catalog/routers.yaml`, resolved at load time so the
+  compiler stays pure.
 - The one genuinely new mechanism this requires is **cross-kind dependency
   ordering**: infrastructure kinds apply before the policy kinds that reference
   them (a `ZoneRequest: dmz` before any `AccessRequest` that uses `dmz`).

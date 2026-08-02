@@ -16,7 +16,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, List, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 _PROTOCOLS = {"tcp", "udp"}
 _PORT_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
@@ -270,3 +270,59 @@ class FolderHierarchy:
                 )
             out[name.strip()] = frozenset(k.strip() for k in kids)
         return cls(children=out)
+
+
+@dataclass(frozen=True)
+class RouterCatalog:
+    """Logical router / VRF topology, including interface membership.
+
+    `scm_logical_router` holds a VRF's interface list AND its routes in one
+    object, and Terraform manages whole objects. A RouteRequest declares a single
+    route, so the compiler must aggregate — and without membership declared
+    somewhere it would emit a router with routes and NO interfaces, breaking the
+    object all traffic depends on.
+
+    Declared rather than read live, so the compiler stays pure: the same intents
+    always compile to the same output.
+    """
+
+    #: folder -> router -> vrf -> interface names
+    routers: Dict[str, Dict[str, Dict[str, Tuple[str, ...]]]]
+
+    def interfaces_for(self, folder: str, router: str, vrf: str) -> Optional[Tuple[str, ...]]:
+        """Membership, or None when the folder/router/vrf is not declared."""
+        return self.routers.get(folder, {}).get(router, {}).get(vrf)
+
+    def known(self, folder: str) -> List[str]:
+        out = []
+        for router, vrfs in sorted(self.routers.get(folder, {}).items()):
+            out.extend(f"{router}/{v}" for v in sorted(vrfs))
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "RouterCatalog":
+        if not isinstance(data, dict):
+            raise CatalogError("router catalog must be a mapping")
+        folders = data.get("routers", data)
+        if not isinstance(folders, dict):
+            raise CatalogError("router catalog: `routers` must be a mapping")
+        out: Dict[str, Dict[str, Dict[str, Tuple[str, ...]]]] = {}
+        for folder, routers in folders.items():
+            if not isinstance(routers, dict):
+                raise CatalogError(f"router catalog: {folder!r} must be a mapping of routers")
+            for router, spec in routers.items():
+                vrfs = spec.get("vrfs") if isinstance(spec, dict) else None
+                if not isinstance(vrfs, dict) or not vrfs:
+                    raise CatalogError(
+                        f"router catalog: {folder}/{router} needs a non-empty `vrfs` mapping")
+                for vrf, vspec in vrfs.items():
+                    ifaces = vspec.get("interfaces", []) if isinstance(vspec, dict) else None
+                    if not isinstance(ifaces, list) or not all(
+                        isinstance(i, str) and i.strip() for i in ifaces
+                    ):
+                        raise CatalogError(
+                            f"router catalog: {folder}/{router}/{vrf}.interfaces must be a "
+                            f"list of interface names")
+                    out.setdefault(folder, {}).setdefault(router, {})[vrf] = tuple(
+                        i.strip() for i in ifaces)
+        return cls(routers=out)

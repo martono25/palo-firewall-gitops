@@ -32,6 +32,7 @@ from fwgitops.compiler import (
     AddressObject,
     CompiledChange,
     CompiledInterface,
+    CompiledRoute,
     CompiledZone,
     SecurityRule,
 )
@@ -412,6 +413,67 @@ def _folder_blast_radius(folder: str, hierarchy) -> Optional[Dict[str, str]]:
         "reason": (f"scoped to folder {folder!r}, which has child folder(s) {kids} — "
                    f"this change reaches every one of them"),
     }
+
+
+def classify_route(
+    route: CompiledRoute,
+    *,
+    hierarchy=None,
+    current: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
+) -> RiskVerdict:
+    """Risk-classify a RouteRequest (ADR-0001 kind #4). Fail-closed.
+
+    Routes are the first kind whose object does not fail safe. A zone with no
+    interfaces carries nothing and an unaddressed interface sits idle, but the
+    logical router is what every packet traverses — so the checks here are about
+    reach and about taking ownership of it.
+
+    * `folder_with_children` (HIGH) — shared with every kind.
+    * `default_route` (HIGH) — a `0.0.0.0/0` route decides where ALL unmatched
+      traffic goes. Changing it can black-hole a site or send it somewhere
+      unintended, and it is not comparable to adding a specific prefix.
+    * `router_becomes_locally_owned` (HIGH) — the first route against a router
+      currently INHERITED from a parent folder creates a local override, moving
+      ownership of the object all traffic depends on. Editing an override the
+      folder already owns is a smaller act.
+    """
+    fired: List[Dict[str, str]] = []
+
+    blast = _folder_blast_radius(route.folder, hierarchy)
+    if blast is not None:
+        fired.append(blast)
+
+    if route.destination in ("0.0.0.0/0", "::/0"):
+        target = route.nexthop or route.nexthop_interface
+        fired.append({
+            "check": "default_route",
+            "tier": "HIGH",
+            "reason": (f"route {route.name!r} is a DEFAULT route ({route.destination}) via "
+                       f"{target!r} — it decides where all unmatched traffic goes"),
+        })
+
+    if current is not None:
+        actual = current.get((route.folder, route.router))
+        if actual is not None and actual.get("folder") not in (None, route.folder):
+            fired.append({
+                "check": "router_becomes_locally_owned",
+                "tier": "HIGH",
+                "reason": (f"router {route.router!r} is currently inherited from "
+                           f"{actual.get('folder')!r}; this creates a local override in "
+                           f"{route.folder!r}, taking ownership of the object all traffic "
+                           f"traverses"),
+            })
+
+    tier = "LOW"
+    for f in fired:
+        tier = _worst(tier, f["tier"])
+
+    return RiskVerdict(
+        tier=tier,
+        classifier_version=CLASSIFIER_VERSION,
+        thresholds_version=DEFAULT_THRESHOLDS.version,
+        checks_fired=tuple(fired),
+    )
 
 
 def _addressing_of(fields: Dict[str, Any]) -> List[Any]:

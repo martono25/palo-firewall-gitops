@@ -58,7 +58,7 @@ pip install -e '.[dev]'
 fwgitops compile intent --env-map catalog/environments.yaml --out terraform
 fwgitops compile intent --check      # validate only, write nothing
 
-pytest -q                            # 441 tests
+pytest -q                            # 524 tests
 ```
 
 Fail-closed and all-or-nothing: if any intent is invalid, the compiler prints an
@@ -81,9 +81,10 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   tool in the estate), auto-apply at LOW, NIST-mapped evidence bundles, drift detect-and-alert.
 - **Phase 3 — Scale + self-service — NEXT.** Multi-folder, Panorama backend, self-service
   intake, break-glass with automated evidence.
-- **Day-1 as GitOps (ADR-0002) — IN DESIGN.** The bootstrap half is built; the data-plane half
-  (`InterfaceRequest` → `ZoneRequest` → `RouteRequest`) is not. `InterfaceRequest` is the
-  prerequisite — a zone cannot carry traffic without it. See [`TODOS.md`](TODOS.md).
+- **Day-1 as GitOps (ADR-0002) — DATA PLANE COMPLETE.** The bootstrap half was already built;
+  the ordered data-plane chain (`InterfaceRequest` → `ZoneRequest` → `RouteRequest` →
+  `AccessRequest`) is now expressible end to end. `RouteRequest` still wants a live provider
+  fidelity probe before it is applied in anger — see [`TODOS.md`](TODOS.md).
 
 The three questions this project opened with are answered: no commercial firewall-analysis
 tool is owned (classifier built in-house), the pilot is a greenfield SCM folder, and the form
@@ -112,5 +113,5 @@ risk classifier is built in-house.
 
 The open ones now are scoping questions, tracked with their reasoning in
 [`TODOS.md`](TODOS.md): how much of the device model belongs in Git-tracked YAML, whether
-zones can ever join the tag-based drift model (`scm_zone` has no `tag` attribute), and
-whether `InterfaceRequest` or full Day-1 is the next release.
+zones can ever join the tag-based drift model (`scm_zone` has no `tag` attribute), and what
+v2.0 covers now that the Day-1 chain is closed (`NatRequest` is deferred there).
