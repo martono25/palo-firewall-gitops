@@ -471,11 +471,13 @@ def test_drift_reports_a_locally_defined_undeclared_zone(tmp_path, capsys):
     snap = tmp_path / "zones.json"
     snap.write_text(json.dumps([
         # inherited from the parent folder -> not this folder's drift
-        {"name": "internet", "folder": "ngfw-shared", "scope": "prod-edge"},
+        {"kind": "ZoneRequest", "name": "internet", "folder": "ngfw-shared",
+         "scope": "prod-edge"},
         # defined locally, declared nowhere -> unexpected
-        {"name": "rogue", "folder": "prod-edge", "scope": "prod-edge"},
+        {"kind": "ZoneRequest", "name": "rogue", "folder": "prod-edge",
+         "scope": "prod-edge"},
     ]))
-    rc = run_drift(tmp_path / "intent", env_map, zones_snapshot_path=snap)
+    rc = run_drift(tmp_path / "intent", env_map, state_snapshot_paths=[snap])
     out = capsys.readouterr().out
     assert rc == 3
     assert "unexpected" in out and "rogue" in out
@@ -505,3 +507,48 @@ def test_classify_uses_the_zone_snapshot_scope_not_the_defining_folder(tmp_path,
     out = capsys.readouterr().out
     assert "zone_becomes_traffic_bearing" in out
     assert rc == 3, "a zone starting to carry traffic must not auto-apply at LOW"
+
+
+def test_drift_rejects_a_snapshot_with_no_kind_stamp(tmp_path, capsys):
+    """Drift must not GUESS which kind a snapshot holds — mis-attributing it
+    would compare against the wrong declared set entirely."""
+    import json
+    root = tmp_path / "intent" / "prod"; root.mkdir(parents=True)
+    env_map = tmp_path / "environments.yaml"; env_map.write_text(ENV_MAP)
+    snap = tmp_path / "s.json"
+    snap.write_text(json.dumps([{"name": "x", "folder": "prod-edge"}]))
+    assert run_drift(tmp_path / "intent", env_map, state_snapshot_paths=[snap]) == 1
+    assert "no `kind` field" in capsys.readouterr().err
+
+
+def test_drift_covers_interfaces_not_just_zones(tmp_path, capsys):
+    """THE GAP THIS CLOSES. The registry declared drift_engine="state" for
+    InterfaceRequest while the drift engine only knew about zones, so an
+    interface added by hand was invisible to everything."""
+    import json
+    root = tmp_path / "intent" / "prod"; root.mkdir(parents=True)
+    env_map = tmp_path / "environments.yaml"; env_map.write_text(ENV_MAP)
+    snap = tmp_path / "ifaces.json"
+    snap.write_text(json.dumps([
+        {"kind": "InterfaceRequest", "name": "$eth-rogue", "folder": "prod-edge",
+         "scope": "prod-edge", "layer3": {}},
+    ]))
+    rc = run_drift(tmp_path / "intent", env_map, state_snapshot_paths=[snap])
+    out = capsys.readouterr().out
+    assert rc == 3
+    assert "InterfaceRequest" in out and "unexpected" in out and "$eth-rogue" in out
+
+
+def test_drift_handles_several_kinds_in_one_run(tmp_path, capsys):
+    import json
+    root = tmp_path / "intent" / "prod"; root.mkdir(parents=True)
+    env_map = tmp_path / "environments.yaml"; env_map.write_text(ENV_MAP)
+    z = tmp_path / "z.json"; i = tmp_path / "i.json"
+    z.write_text(json.dumps([{"kind": "ZoneRequest", "name": "rogue-zone",
+                              "folder": "prod-edge", "scope": "prod-edge"}]))
+    i.write_text(json.dumps([{"kind": "InterfaceRequest", "name": "$eth-rogue",
+                              "folder": "prod-edge", "scope": "prod-edge"}]))
+    rc = run_drift(tmp_path / "intent", env_map, state_snapshot_paths=[z, i])
+    out = capsys.readouterr().out
+    assert rc == 3
+    assert "rogue-zone" in out and "$eth-rogue" in out

@@ -37,6 +37,7 @@ from fwgitops.compiler import (
 from fwgitops.intent import IntentError, load_intent
 from fwgitops.kinds import (
     REGISTRY,
+    kinds_with_drift_engine,
     kinds_with_state_api,
     compile_any,
     group_by_kind_and_folder,
@@ -527,13 +528,13 @@ def run_drift(
     env_map_path: Path,
     snapshot_path: Optional[Path] = None,
     *,
-    zones_snapshot_path: Optional[Path] = None,
+    state_snapshot_paths: Optional[List[Path]] = None,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
     err=None,
 ) -> int:
-    """Detect drift: declared intents vs a snapshot of SCM's actual rules.
+    """Detect drift: declared intents vs a snapshot of SCM's actual config.
 
     The snapshot is a JSON/YAML list of {folder, name, tags} (what a folder rule
     read returns). Reports UNMANAGED (added outside GitOps), ORPHANED (managed but
@@ -543,7 +544,7 @@ def run_drift(
     from fwgitops.drift import (
         ActualObject,
         ActualRule,
-        declared_zone_state,
+        declared_state,
         detect_drift,
         detect_object_drift,
     )
@@ -557,38 +558,55 @@ def run_drift(
     if items is None:
         return code
 
-    if snapshot_path is None and zones_snapshot_path is None:
-        print("error: pass --snapshot (rules) and/or --zones-snapshot (zones)", file=err)
+    if snapshot_path is None and not state_snapshot_paths:
+        print("error: pass --snapshot (tag-based) and/or --state-snapshot (state-based)",
+              file=err)
         return 1
 
     drifted = False
 
-    # ── State-based drift for zones (they carry no tags) ──────────────────
-    if zones_snapshot_path is not None:
-        rows, code = _read_snapshot_rows(zones_snapshot_path, err)
-        if rows is None:
-            return code
-        zones_actual = []
-        for i, x in enumerate(rows):
-            if not isinstance(x, dict) or "folder" not in x or "name" not in x:
-                print(f"error: zones snapshot[{i}] must have 'folder' and 'name'", file=err)
-                return 1
-            fields = {k: v for k, v in x.items() if k not in ("id", "tfid", "scope")}
-            zones_actual.append(ActualObject(
-                kind="zone", folder=str(x["folder"]), name=str(x["name"]),
-                fields=fields,
-                # SCM returns the DEFINING folder; `scope` records which folder
-                # was queried. They differ for an inherited object.
-                scope=str(x["scope"]) if x.get("scope") else None,
-            ))
+    # ── State-based drift, for every kind that cannot carry tags ──────────
+    # One loop over the registry: a kind declaring drift_engine="state" is
+    # covered the moment it registers. This used to be hardcoded to zones, so
+    # InterfaceRequest declared state-based drift while nothing wired it.
+    if state_snapshot_paths:
         env_map = EnvMap.from_dict(read_yaml(env_map_path))
-        report = detect_object_drift(
-            declared_zone_state(of_kind([z for _, _, z in items], "ZoneRequest")),
-            zones_actual,
-            baseline=env_map.baseline_zones_by_folder(),
-        )
-        print(report.summary(), file=out)
-        drifted = drifted or not report.is_clean
+        compiled_all = [c for _, _, c in items]
+        actual_by_kind: Dict[str, List[ActualObject]] = {}
+        for path in state_snapshot_paths:
+            rows, code = _read_snapshot_rows(path, err)
+            if rows is None:
+                return code
+            kind = _kind_of_snapshot(rows, path, err)
+            if kind is None:
+                return 1
+            for i, x in enumerate(rows):
+                if not isinstance(x, dict) or "folder" not in x or "name" not in x:
+                    print(f"error: {path} [{i}] must have 'folder' and 'name'", file=err)
+                    return 1
+                fields = {k: v for k, v in x.items() if k not in ("id", "tfid", "scope")}
+                actual_by_kind.setdefault(kind, []).append(ActualObject(
+                    kind=kind, folder=str(x["folder"]), name=str(x["name"]),
+                    fields=fields,
+                    # SCM returns the DEFINING folder; `scope` records which was
+                    # queried. They differ for an inherited object.
+                    scope=str(x["scope"]) if x.get("scope") else None,
+                ))
+
+        for kind, actual in sorted(actual_by_kind.items()):
+            handler = REGISTRY[kind]
+            # `baseline_zones` names objects that legitimately pre-date GitOps.
+            # It is zone vocabulary, so only zones get an allowlist; for other
+            # kinds an undeclared local object is unaccounted for by definition.
+            baseline = (env_map.baseline_zones_by_folder()
+                        if kind == "ZoneRequest" else None)
+            report = detect_object_drift(
+                declared_state(handler, of_kind(compiled_all, kind)),
+                actual,
+                baseline=baseline,
+            )
+            print(f"{kind}: {report.summary()}", file=out)
+            drifted = drifted or not report.is_clean
 
     if snapshot_path is None:
         return 3 if drifted else 0
@@ -671,6 +689,8 @@ def run_snapshot(
         row = {k: v for k, v in obj.items() if k not in ("id", "tfid")}
         row.setdefault("folder", folder)
         row["scope"] = folder
+        # Stamp the kind so drift attributes the snapshot without guessing.
+        row["kind"] = kind
         rows.append(row)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -679,6 +699,28 @@ def run_snapshot(
     print(f"wrote {len(rows)} {kind} object(s) for folder {folder!r} to {out_path} "
           f"({inherited} inherited from an ancestor)", file=out)
     return 0
+
+
+def _kind_of_snapshot(rows: List[Any], path: Path, err) -> Optional[str]:
+    """Which registered kind a snapshot holds, from its `kind` field.
+
+    `fwgitops snapshot` stamps it. Guessing from the object shape instead would
+    silently mis-attribute a snapshot to the wrong kind, and drift would then
+    compare it against the wrong declared set.
+    """
+    kinds = {x.get("kind") for x in rows if isinstance(x, dict) and x.get("kind")}
+    if len(kinds) == 1:
+        kind = kinds.pop()
+        if kind in REGISTRY:
+            return kind
+        print(f"error: {path}: unknown kind {kind!r}; known: {sorted(REGISTRY)}", file=err)
+        return None
+    if not kinds:
+        print(f"error: {path}: no `kind` field — regenerate with `fwgitops snapshot`",
+              file=err)
+        return None
+    print(f"error: {path}: mixed kinds {sorted(kinds)}; one snapshot per kind", file=err)
+    return None
 
 
 def _read_snapshot_rows(path: Path, err):
@@ -1124,11 +1166,15 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--snapshot", type=Path,
                     help="JSON/YAML list of the folder's actual rules {folder, name, tags} "
                          "(tag-based drift)")
-    dr.add_argument("--zones-snapshot", type=Path,
-                    help="JSON/YAML list of the folder's actual zones as SCM returns them "
-                         "(state-based drift — zones carry no tags)")
+    dr.add_argument("--state-snapshot", type=Path, action="append", dest="state_snapshots",
+                    help="snapshot from `fwgitops snapshot <kind> <folder>`; repeatable. "
+                         "State-based drift, for kinds that cannot carry gitops: tags.")
     dr.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     dr.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+
+    kd = sub.add_parser("kinds", help="list registered intent kinds (for scripting CI)")
+    kd.add_argument("--state-drift", action="store_true",
+                    help="only kinds using state-based drift (they cannot carry tags)")
 
     sn = sub.add_parser("snapshot",
                         help="read a folder's live objects of one kind from SCM (read-only)")
@@ -1204,9 +1250,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "drift":
         return run_drift(
             args.intent_root, args.env_map, args.snapshot,
-            zones_snapshot_path=args.zones_snapshot,
+            state_snapshot_paths=args.state_snapshots,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
+    if args.command == "kinds":
+        names = ([h.kind for h in kinds_with_drift_engine("state")]
+                 if args.state_drift else list(REGISTRY))
+        for name in sorted(names):
+            print(name)
+        return 0
     if args.command == "snapshot":
         return run_snapshot(args.kind, args.folder, args.out)
     if args.command == "push":
