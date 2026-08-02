@@ -152,3 +152,15 @@ resource "scm_ethernet_interface" "this" {
   comment = each.value.comment
   layer3  = each.value.layer3
 }
+
+# ── Logical routers (RouteRequest, ADR-0001 kind #4) ──────────────────────
+# scm_logical_router has no `tag` attribute, so routers use state-based drift
+# like zones and interfaces. Note this resource owns the WHOLE router including
+# VRF interface membership — see the `routers` variable.
+resource "scm_logical_router" "this" {
+  for_each = var.routers
+
+  name   = each.value.name
+  folder = each.value.folder
+  vrf    = each.value.vrf
+}

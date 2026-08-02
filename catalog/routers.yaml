@@ -1,0 +1,32 @@
+# Logical router / VRF topology — platform-maintained.
+#
+# WHY THIS EXISTS. `scm_logical_router` is ONE Terraform resource holding BOTH
+# a VRF's interface membership AND its routes:
+#
+#   logical_router "default"
+#   └── vrf[0] "default"
+#       ├── interface: ["$eth-local", "$eth-internet"]   <- membership
+#       └── routing_table.ip.static_route[]              <- routes
+#
+# Terraform manages whole objects. A RouteRequest declares ONE route, so the
+# compiler aggregates routes into a router object — and if membership were not
+# declared anywhere, that object would be written WITHOUT it, dropping the
+# interface list from the router every packet depends on.
+#
+# Declaring it here keeps the compiler PURE: it never reads live SCM state, so
+# the same intents always compile to the same output. The alternative was
+# restating interfaces in every route intent (error-prone, and two intents could
+# disagree) or a live read at compile time (output depending on tenant state).
+#
+# Keep in step with SCM. Verified live 2026-08-02 via
+# GET /config/network/v1/logical-routers?folder=prod-edge:
+#   router "default" (defined in ngfw-shared), vrf "default",
+#   interfaces [$eth-local, $eth-internet], no routing table.
+routers:
+  prod-edge:
+    default:                       # logical router name
+      vrfs:
+        default:                   # VRF name
+          interfaces:
+            - $eth-local
+            - $eth-internet

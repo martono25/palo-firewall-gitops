@@ -33,4 +33,5 @@ module "security_folder" {
   security_rules  = var.security_rules
   zones           = var.zones
   interfaces      = var.interfaces
+  routers         = var.routers
 }

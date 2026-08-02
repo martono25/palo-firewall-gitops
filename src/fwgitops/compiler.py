@@ -316,6 +316,29 @@ def dumps_tfvars(changes: List[CompiledChange]) -> str:
 
 # ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────
 @dataclass(frozen=True)
+class CompiledRoute:
+    """Compiled output of a RouteRequest (kind #4) — ONE static route.
+
+    Many of these aggregate into ONE `scm_logical_router` (see `route_tfvars`),
+    because a route lives four levels inside a router object that also carries
+    the VRF's interface membership.
+    """
+
+    folder: str
+    router: str
+    vrf: str
+    name: str                                # the request id — stable for_each key
+    destination: str
+    nexthop: Optional[str] = None
+    nexthop_interface: Optional[str] = None
+    metric: Optional[int] = None
+    admin_dist: Optional[int] = None
+    #: Resolved from catalog/routers.yaml at load time. Every route for a VRF
+    #: carries the same list; `route_tfvars` asserts they agree.
+    vrf_interfaces: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CompiledInterface:
     """Compiled output of an InterfaceRequest (kind #3) — one scm_ethernet_interface.
 
@@ -365,6 +388,82 @@ def _compile_interface(ir, env_map: EnvMap) -> CompiledInterface:
         ip=list(sp.ip), dhcp=sp.dhcp, mtu=sp.mtu,
         comment=sp.comment, management_profile=sp.management_profile,
     )
+
+
+def _compile_route(rr, env_map: EnvMap) -> CompiledRoute:
+    res = env_map.resolve(rr.spec.environment)  # raises ResolveError (fail closed)
+    sp = rr.spec
+    return CompiledRoute(
+        folder=res.folder, router=sp.router, vrf=sp.vrf,
+        name=rr.metadata.id, destination=sp.destination,
+        nexthop=sp.nexthop, nexthop_interface=sp.nexthop_interface,
+        metric=sp.metric, admin_dist=sp.admin_dist,
+        vrf_interfaces=tuple(sp.vrf_interfaces),
+    )
+
+
+def route_tfvars(routes: List[CompiledRoute]) -> Dict[str, Any]:
+    """AGGREGATE routes into logical-router objects.
+
+    Unlike every other kind, one intent does NOT map to one object: a route lives
+    at `vrf[].routing_table.ip.static_route[]`, and the same router object also
+    holds the VRF's interface membership. Terraform manages whole objects, so
+    emitting a router without that membership would strip the interface list from
+    the object all traffic depends on — which is why membership is carried on
+    every compiled route and re-asserted here.
+    """
+    by_router: Dict[str, Dict[str, Any]] = {}
+    for r in sorted(routes, key=lambda r: (r.router, r.vrf, r.name)):
+        router = by_router.setdefault(r.router, {
+            "name": r.router, "folder": r.folder, "_vrfs": {},
+        })
+        if router["folder"] != r.folder:
+            raise CompileError(
+                f"router {r.router!r} spans folders {router['folder']!r} and {r.folder!r}"
+            )
+        vrf = router["_vrfs"].setdefault(r.vrf, {
+            "name": r.vrf, "interface": list(r.vrf_interfaces), "_routes": {},
+        })
+        if vrf["interface"] != list(r.vrf_interfaces):
+            raise CompileError(
+                f"routes for {r.router}/{r.vrf} disagree on VRF interface membership "
+                f"({vrf['interface']} vs {list(r.vrf_interfaces)}) — the router catalog "
+                f"is the single source; this should be impossible"
+            )
+        if r.name in vrf["_routes"]:
+            raise CompileError(
+                f"duplicate route key {r.name!r} in {r.router}/{r.vrf} — two RouteRequests "
+                f"share metadata.id"
+            )
+        nexthop: Optional[Dict[str, Any]]
+        if r.nexthop:
+            nexthop = {"ip_address": r.nexthop}
+        elif r.nexthop_interface:
+            nexthop = None            # interface-only next hop: set on the route
+        else:
+            nexthop = None
+        vrf["_routes"][r.name] = {
+            "name": r.name,
+            "destination": r.destination,
+            "nexthop": nexthop,
+            "interface": r.nexthop_interface,
+            "metric": r.metric,
+            "admin_dist": r.admin_dist,
+        }
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for name, router in sorted(by_router.items()):
+        vrfs = []
+        for vname, v in sorted(router.pop("_vrfs").items()):
+            routes_map = v.pop("_routes")
+            routes_list = [routes_map[k] for k in sorted(routes_map)]
+            vrfs.append({
+                "name": vname,
+                "interface": v["interface"],
+                "routing_table": {"ip": {"static_route": routes_list}},
+            })
+        out[name] = {"name": router["name"], "folder": router["folder"], "vrf": vrfs}
+    return {"routers": out}
 
 
 def interface_tfvars(interfaces: List[CompiledInterface]) -> Dict[str, Any]:

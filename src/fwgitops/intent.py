@@ -162,6 +162,43 @@ class ZoneSpec:
 
 
 @dataclass(frozen=True)
+class RouteSpec:
+    """kind: RouteRequest (ADR-0001 kind #4) — ONE static route.
+
+    Routes live four levels inside a logical router
+    (`vrf[].routing_table.ip.static_route[]`), and that same router object also
+    records which interfaces belong to the VRF. Terraform manages whole objects,
+    so the compiler AGGREGATES every route for a router into one resource.
+
+    `vrf_interfaces` is resolved from `catalog/routers.yaml` at load time and
+    carried here, so the compiler stays pure and the aggregated router is never
+    written without its interface membership — which would break the object all
+    traffic depends on.
+    """
+
+    environment: str
+    destination: str                     # CIDR, e.g. "0.0.0.0/0"
+    router: str = "default"
+    vrf: str = "default"
+    #: Next-hop IP. Mutually exclusive with `nexthop_interface`.
+    nexthop: Optional[str] = None
+    #: Next-hop interface (for point-to-point / DHCP-learned links).
+    nexthop_interface: Optional[str] = None
+    metric: Optional[int] = None
+    admin_dist: Optional[int] = None
+    #: Resolved from the router catalog at load time — NOT requester input.
+    vrf_interfaces: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RouteRequest:
+    """kind: RouteRequest — one static route in a folder's logical router."""
+
+    metadata: Metadata
+    spec: RouteSpec
+
+
+@dataclass(frozen=True)
 class InterfaceSpec:
     """kind: InterfaceRequest (ADR-0001 kind #3) — CONFIGURE an existing interface.
 
@@ -216,6 +253,8 @@ class _Collector:
         log_forwarding_catalog: Any = None,
         zone_protection_catalog: Any = None,
         interface_profile_catalog: Any = None,
+        router_catalog: Any = None,
+        env_map: Any = None,
     ) -> None:
         self.problems: List[Problem] = []
         #: Optional ServiceCatalog (Phase 2). Enables the `service: name:` form.
@@ -232,6 +271,10 @@ class _Collector:
         self.zone_protection_catalog = zone_protection_catalog
         #: Interface management profiles (InterfaceRequest).
         self.interface_profile_catalog = interface_profile_catalog
+        #: Router/VRF topology (RouteRequest) + the env map needed to resolve an
+        #: environment to its folder before looking membership up.
+        self.router_catalog = router_catalog
+        self.env_map = env_map
 
     def add(self, path: str, message: str) -> None:
         self.problems.append(Problem(path, message))
@@ -247,6 +290,8 @@ def load_intent(
     log_forwarding_catalog: Any = None,
     zone_protection_catalog: Any = None,
     interface_profile_catalog: Any = None,
+    router_catalog: Any = None,
+    env_map: Any = None,
 ) -> AccessRequest:
     """Parse + validate an intent dict, dispatching on `kind` (ADR-0001).
 
@@ -271,6 +316,7 @@ def load_intent(
         log_forwarding_catalog=log_forwarding_catalog,
         zone_protection_catalog=zone_protection_catalog,
         interface_profile_catalog=interface_profile_catalog,
+        router_catalog=router_catalog, env_map=env_map,
     )
     kind = data.get("kind")
     loader = _KIND_LOADERS.get(kind)
@@ -306,6 +352,7 @@ def _load_access_request(data: dict, **catalogs: Any) -> AccessRequest:
 _ZONE_TYPES = {"layer3", "layer2", "virtual-wire", "tap", "external", "tunnel"}
 ZONE_KIND = "ZoneRequest"
 INTERFACE_KIND = "InterfaceRequest"
+ROUTE_KIND = "RouteRequest"
 
 
 def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
@@ -411,6 +458,83 @@ def _load_interface_spec(sp: Any, c: "_Collector") -> Optional[InterfaceSpec]:
     )
 
 
+def _load_route_spec(sp: Any, c: "_Collector") -> Optional[RouteSpec]:
+    path = "spec"
+    if not isinstance(sp, dict):
+        c.add(path, "required mapping")
+        return None
+    environment = _req_str(sp, "environment", path, c)
+    destination = _req_str(sp, "destination", path, c)
+    if destination is not None and not _CIDR_RE.match(destination):
+        c.add(f"{path}.destination", f"must be CIDR (address/prefix), got {destination!r}")
+        destination = None
+
+    router, ok_r = _opt_str(sp, "router", path, c)
+    vrf, ok_v = _opt_str(sp, "vrf", path, c)
+    router = router or "default"
+    vrf = vrf or "default"
+
+    nexthop, ok_nh = _opt_str(sp, "nexthop", path, c)
+    nexthop_interface, ok_nhi = _opt_str(sp, "nexthop_interface", path, c)
+    if ok_nh and ok_nhi:
+        if nexthop and nexthop_interface:
+            c.add(path, "set exactly one next hop: `nexthop` (IP) OR `nexthop_interface`")
+            return None
+        if not nexthop and not nexthop_interface:
+            c.add(path, "set a next hop: `nexthop: <ip>` or `nexthop_interface: <name>`")
+            return None
+    if nexthop is not None:
+        try:
+            ipaddress.ip_address(nexthop)
+        except ValueError:
+            c.add(f"{path}.nexthop", f"must be an IP address, got {nexthop!r}")
+            return None
+
+    metric, ok_m = _opt_positive_int(sp, "metric", path, c)
+    admin_dist, ok_a = _opt_positive_int(sp, "admin_dist", path, c)
+
+    # VRF membership comes from the platform catalog, never from the requester:
+    # the compiler aggregates routes into one router object, and writing that
+    # object without its interface list would break routing wholesale.
+    interfaces: Tuple[str, ...] = ()
+    if environment is not None and c.router_catalog is not None and c.env_map is not None:
+        try:
+            folder = c.env_map.resolve(environment).folder
+        except Exception:  # noqa: BLE001 - env resolution is reported elsewhere
+            folder = None
+        if folder is not None:
+            found = c.router_catalog.interfaces_for(folder, router, vrf)
+            if found is None:
+                known = ", ".join(c.router_catalog.known(folder)) or "(none declared)"
+                c.add(f"{path}.router",
+                      f"router/vrf {router}/{vrf} is not declared for folder {folder!r} in "
+                      f"catalog/routers.yaml; known: {known}")
+                return None
+            interfaces = found
+
+    if environment is None or destination is None:
+        return None
+    if not all((ok_r, ok_v, ok_nh, ok_nhi, ok_m, ok_a)):
+        return None
+    return RouteSpec(
+        environment=environment, destination=destination, router=router, vrf=vrf,
+        nexthop=nexthop, nexthop_interface=nexthop_interface,
+        metric=metric, admin_dist=admin_dist, vrf_interfaces=interfaces,
+    )
+
+
+def _load_route_request(data: dict, **catalogs: Any) -> RouteRequest:
+    """Loader for `kind: RouteRequest` (kind #4)."""
+    c = _Collector(**catalogs)
+    if data.get("apiVersion") != API_VERSION:
+        c.add("apiVersion", f"must be {API_VERSION!r}, got {data.get('apiVersion')!r}")
+    metadata = _load_metadata(data.get("metadata"), c)
+    spec = _load_route_spec(data.get("spec"), c)
+    if c.problems:
+        raise IntentError(c.problems)
+    return RouteRequest(metadata=metadata, spec=spec)  # type: ignore[arg-type]
+
+
 def _load_interface_request(data: dict, **catalogs: Any) -> InterfaceRequest:
     """Loader for `kind: InterfaceRequest` (kind #3)."""
     c = _Collector(**catalogs)
@@ -449,6 +573,7 @@ _KIND_LOADERS = {
     KIND: _load_access_request,
     ZONE_KIND: _load_zone_request,
     INTERFACE_KIND: _load_interface_request,
+    ROUTE_KIND: _load_route_request,
 }
 
 
@@ -597,6 +722,17 @@ def _opt_bool(obj: dict, key: str, path: str, c: _Collector):
         return None, True
     if not isinstance(val, bool):
         c.add(f"{path}.{key}", f"must be true or false when set, got {val!r}")
+        return None, False
+    return val, True
+
+
+def _opt_positive_int(obj: dict, key: str, path: str, c: _Collector):
+    """An optional positive integer: (value|None, ok)."""
+    val = obj.get(key)
+    if val is None:
+        return None, True
+    if not isinstance(val, int) or isinstance(val, bool) or val <= 0:
+        c.add(f"{path}.{key}", f"must be a positive integer when set, got {val!r}")
         return None, False
     return val, True
 

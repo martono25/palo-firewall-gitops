@@ -98,7 +98,7 @@ def run_compile(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            req = load_intent(doc, **cats)
+            req = load_intent(doc, env_map=env_map, **cats)
             compiled.append(compile_any(req, env_map))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -284,6 +284,19 @@ def _load_name_catalog(
         return None, False
 
 
+def _load_router_catalog(path: Path, err) -> Tuple[Optional[object], bool]:
+    """Load the optional router/VRF topology catalog. Absent is fine until a
+    RouteRequest needs it, at which point the loader reports the missing entry."""
+    if not path.is_file():
+        return None, True
+    from fwgitops.catalog import CatalogError, RouterCatalog
+    try:
+        return RouterCatalog.from_dict(read_yaml(path)), True
+    except (CatalogError, Exception) as e:  # noqa: BLE001
+        print(f"error: invalid router catalog {path}: {e}", file=err)
+        return None, False
+
+
 def _load_catalogs(
     service_catalog_path: Path, app_catalog_path: Path, err
 ) -> Tuple[Optional[Dict[str, object]], bool]:
@@ -314,6 +327,12 @@ def _load_catalogs(
                                   kind="log-forwarding profile", key="profiles", err=err)
     if not ok:
         return None, False
+    # Logical router / VRF topology (RouteRequest). Routes aggregate into one
+    # router object that also holds interface membership, so membership must be
+    # declared rather than inferred — see catalog/routers.yaml.
+    routers, ok = _load_router_catalog(catalog_dir / "routers.yaml", err)
+    if not ok:
+        return None, False
     # Interface management profiles — which admin services answer on an
     # interface (InterfaceRequest).
     ifprof, ok = _load_name_catalog(catalog_dir / "interface-profiles.yaml",
@@ -332,6 +351,7 @@ def _load_catalogs(
         "application_catalog": appid, "log_forwarding_catalog": logf,
         "zone_protection_catalog": zoneprot,
         "interface_profile_catalog": ifprof,
+        "router_catalog": routers,
     }, True
 
 
@@ -424,7 +444,7 @@ def run_classify(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            c = compile_any(load_intent(doc, **cats), env_map)
+            c = compile_any(load_intent(doc, env_map=env_map, **cats), env_map)
             compiled.append(c)
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -505,7 +525,7 @@ def _compile_intents(intent_root, env_map_path, cats, err):
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            ar = load_intent(doc, **cats)
+            ar = load_intent(doc, env_map=env_map, **cats)
             ch = compile_any(ar, env_map)
             if REGISTRY["AccessRequest"].has_evidence and isinstance(
                 ch, REGISTRY["AccessRequest"].compiled_type
@@ -798,7 +818,7 @@ def run_evidence(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            ar = load_intent(doc, **cats)
+            ar = load_intent(doc, env_map=env_map, **cats)
             ch = compile_any(ar, env_map)
             # Evidence bundles are rule-shaped: build_bundle takes a rule's
             # request AND its compiled change. `has_evidence` records which

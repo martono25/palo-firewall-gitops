@@ -336,14 +336,27 @@ def _emitted_paths(value: Any, prefix: str = "") -> Set[str]:
     A `None` value contributes its own path but no children — the compiler emits
     `"user_acl": null` for an unset optional object, which asserts nothing about
     the nested type.
+
+    LISTS OF OBJECTS RECURSE AT THE SAME PREFIX. `declared_object_attributes`
+    collapses the list level (`list(object({name=...}))` under `vrf` declares
+    `vrf.name`, not `vrf.*.name`), so the emitted side must collapse it too or
+    the two never line up. Without this, HOLE 3 passed VACUOUSLY for every
+    list-of-object attribute: `routers` compared only {name, folder, vrf} and
+    never looked at a single static-route field, four levels down. A list of
+    scalars (e.g. layer3.ip) contributes nothing, which is correct — a string
+    asserts no attribute names.
     """
     paths: Set[str] = set()
+    if isinstance(value, list):
+        for item in value:
+            paths |= _emitted_paths(item, prefix)
+        return paths
     if not isinstance(value, dict):
         return paths
     for k, v in value.items():
         path = f"{prefix}.{k}" if prefix else k
         paths.add(path)
-        if isinstance(v, dict):
+        if isinstance(v, (dict, list)):
             paths |= _emitted_paths(v, path)
     return paths
 

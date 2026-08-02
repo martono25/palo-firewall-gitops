@@ -145,25 +145,28 @@ provider-fidelity question for `scm_ethernet_interface`.
 
 ## Intent kinds
 
-### RouteRequest (kind #4) — the last link in ADR-0002's Day-1 chain
+### `scm_logical_router` fidelity probe — DONE, PASSED (2026-08-02)
 
-**What:** `InterfaceRequest → ZoneRequest → RouteRequest → AccessRequest`. The
-first two are built; this is what remains before a Day-1 build is expressible
-end to end.
+Ran against the live tenant in `GitOps`, read back over the SCM API, destroyed.
+**All seven checked paths honored, four levels deep, and a re-plan showed no
+phantom diff.** So `RouteRequest` needs no `enrich` subsystem — it is a compiler
++ tfvars mapping. Gate closed; `RouteRequest` is safe to apply.
 
-**Context:** the tenant has one logical router (`default`). `scm_logical_router`
-has **no `tag` attribute**, so it would register `drift_engine="state"` like
-zones and interfaces — which the drift engine now covers generically, so no new
-engine is needed.
+Kit and full result table: `spike/router-probe/README.md`.
 
-Run the fidelity probe against it first. The pattern is three-for-three at
-catching what inference would have got wrong: rules drop fields, zones do not,
-interfaces do not. Kit at `spike/interface-probe/`.
+Fidelity is per resource type and still must not be extrapolated — the record is
+now four for four at catching what inference would have got wrong or guessed:
+`scm_security_rule` drops fields; `scm_zone`, `scm_ethernet_interface` and
+`scm_logical_router` do not. **Probe before building the next kind.**
 
-**Effort:** L
-**Priority:** P1
-**Depends on:** nothing — the registry, contract and drift paths all cover a new
-kind automatically.
+### RouteRequest (kind #4) — DONE (v1.10.0)
+
+Shipped: one intent per route, compiler aggregates into `scm_logical_router`;
+membership from `catalog/routers.yaml` resolved at load time; `drift_engine=
+"state"`; `default_route` + `router_becomes_locally_owned` risk checks. Closes
+ADR-0002's chain (`Interface → Zone → Route → Access`).
+
+The fidelity probe above has since run and passed — nothing outstanding.
 
 ### NatRequest — DEFERRED to v2.0
 

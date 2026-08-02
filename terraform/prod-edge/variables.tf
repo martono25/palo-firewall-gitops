@@ -140,3 +140,41 @@ variable "interfaces" {
   }))
   default = {}
 }
+
+# ── RouteRequest (ADR-0001 kind #4) ───────────────────────────────────────
+# Byte-identical to the module's. HOLE 3 applies at every level of this type,
+# and it is four deep — the contract check asserts each dotted path.
+# Routes AGGREGATE: many RouteRequests become one logical router, because a
+# static route lives at vrf[].routing_table.ip.static_route[] and that same
+# object carries the VRF's interface membership.
+#
+# `interface` is therefore NOT optional in spirit: Terraform manages whole
+# objects, so writing this router without it would strip the interface list from
+# the object all traffic traverses. The compiler carries membership on every
+# compiled route (from catalog/routers.yaml) and asserts they agree.
+variable "routers" {
+  description = "Map of logical router name -> definition (RouteRequest, ADR-0001)."
+  type = map(object({
+    name   = string
+    folder = string
+    vrf = optional(list(object({
+      name      = string
+      interface = optional(list(string))
+      routing_table = optional(object({
+        ip = optional(object({
+          static_route = optional(list(object({
+            name        = string
+            destination = optional(string)
+            nexthop = optional(object({
+              ip_address = optional(string)
+            }))
+            interface  = optional(string)
+            metric     = optional(number)
+            admin_dist = optional(number)
+          })))
+        }))
+      }))
+    })))
+  }))
+  default = {}
+}
