@@ -1,0 +1,37 @@
+# Day-1 interface addressing for ONE firewall (ADR-0001 kind #3, ADR-0005).
+#
+# Targets `device:` rather than `folder:` — the narrowest scope that reaches
+# hardware. Verified in spike/device-override-probe: a device-scope write to an
+# interface inherited from ngfw-shared creates a PER-DEVICE OVERRIDE with its own
+# id, leaving the shared object, the other firewall (007955000893662) and the
+# parent folders untouched. Deleting it reverts to inheritance.
+#
+# WHY ethernet1/4 AND NOT $eth-local. They are the same object seen at two
+# scopes: `$eth-local` is the folder-scope variable in ngfw-shared, whose
+# per-device `default_value` is ethernet1/4. At DEVICE scope the object is named
+# by its physical name. Confirmed by the probe, which wrote ethernet1/4 at
+# device scope successfully.
+#
+# This interface currently has `layer3: {}` — no addressing anywhere in the
+# tenant — so this adds addressing rather than changing it. Nothing is passing
+# traffic through it today.
+apiVersion: fw-intent/v1
+kind: InterfaceRequest
+
+metadata:
+  id: REQ-2026-0801
+  requester: martono@corp
+  ticket: JIRA-902
+  justification: >-
+    Day-1 build for edge firewall fw-prod-edge-4453: give the internal interface
+    its address so the local zone can carry traffic. First GitOps-managed
+    data-plane change on hardware.
+  requested: "2026-08-02"
+
+spec:
+  device: "007955000894453"     # fw-prod-edge-4453, PA-VM, connected
+  interface: ethernet1/4        # $eth-local at folder scope
+  ip:
+    - 10.20.0.1/24
+  mtu: 1500
+  comment: "Internal — managed by fwgitops"

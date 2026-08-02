@@ -552,3 +552,15 @@ def test_drift_handles_several_kinds_in_one_run(tmp_path, capsys):
     out = capsys.readouterr().out
     assert rc == 3
     assert "rogue-zone" in out and "$eth-rogue" in out
+
+
+def test_snapshot_requires_exactly_one_scope(capsys):
+    """A firewall is the last level of the hierarchy but is addressed `device=`,
+    never `folder=` (400 'Folder doesn't exist'). Accepting both, or neither,
+    would read the wrong scope or none."""
+    from fwgitops.cli import main
+    assert main(["snapshot", "InterfaceRequest", "prod-edge",
+                 "--device", "007955000894453", "--out", "/tmp/x.json"]) == 1
+    assert "exactly one" in capsys.readouterr().err
+    assert main(["snapshot", "InterfaceRequest", "--out", "/tmp/x.json"]) == 1
+    assert "exactly one" in capsys.readouterr().err
