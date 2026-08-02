@@ -324,3 +324,72 @@ def test_zone_verdict_carries_classifier_provenance():
     from fwgitops.classify import classify_zone
     v = classify_zone(_zone())
     assert v.classifier_version and v.thresholds_version
+
+
+# ── folder blast radius (ADR-0005 prerequisite #1) ─────────────────────────
+def _hierarchy(**kw):
+    from fwgitops.catalog import FolderHierarchy
+    return FolderHierarchy.from_dict({"folders": kw})
+
+
+def test_a_change_scoped_to_a_folder_with_children_is_high():
+    """One change at `ngfw-shared` lands on production AND the sandbox. The
+    largest blast radius this platform can produce, so it must not auto-apply."""
+    from fwgitops.classify import classify_zone
+    h = _hierarchy(**{"ngfw-shared": {"children": ["prod-edge", "GitOps"]}})
+    v = classify_zone(_zone(folder="ngfw-shared", protection_profile="p", user_id=True),
+                      hierarchy=h)
+    assert v.tier == "HIGH"
+    fired = [c for c in v.checks_fired if c["check"] == "folder_with_children"]
+    assert fired and "prod-edge" in fired[0]["reason"] and "GitOps" in fired[0]["reason"]
+
+
+def test_a_leaf_folder_is_not_tiered_up():
+    from fwgitops.classify import classify_zone
+    h = _hierarchy(**{"ngfw-shared": {"children": ["prod-edge"]}, "prod-edge": {"children": []}})
+    v = classify_zone(_zone(folder="prod-edge", protection_profile="p", user_id=True), hierarchy=h)
+    assert v.tier == "LOW" and v.checks_fired == ()
+
+
+def test_no_hierarchy_configured_means_no_check_not_a_silent_pass():
+    """Absent hierarchy disables the check; it must not invent a verdict."""
+    from fwgitops.classify import classify_zone
+    v = classify_zone(_zone(folder="ngfw-shared", protection_profile="p", user_id=True))
+    assert [c["check"] for c in v.checks_fired] == []
+
+
+def test_the_blast_radius_check_applies_to_rules_too():
+    """Not zone-specific: an env map pointing at a parent folder puts RULES
+    there, with the same reach."""
+    from fwgitops.classify import classify
+    h = _hierarchy(**{"ngfw-shared": {"children": ["prod-edge", "GitOps"]}})
+    ch = _change(srcs=[("a", "ip-netmask", "10.0.0.1/32")],
+                 dsts=[("b", "ip-netmask", "10.0.1.1/32")],
+                 services=[("https", "tcp", "443")],
+                 folder="ngfw-shared")
+    v = classify(ch, hierarchy=h)
+    assert "folder_with_children" in [c["check"] for c in v.checks_fired]
+    assert v.tier == "HIGH"
+
+
+def test_the_shipped_folder_hierarchy_parses_and_matches_the_tenant():
+    import yaml
+
+    from fwgitops.catalog import FolderHierarchy
+    h = FolderHierarchy.from_dict(yaml.safe_load(open("catalog/folders.yaml")))
+    # Verified live 2026-08-02: All -> ngfw-shared -> {prod-edge, GitOps}
+    assert h.has_children("ngfw-shared")
+    assert h.children_of("ngfw-shared") == frozenset({"prod-edge", "GitOps"})
+    assert not h.has_children("prod-edge")
+
+
+@pytest.mark.parametrize("bad", [
+    {"folders": {"a": {"children": "not-a-list"}}},
+    {"folders": {"a": {"children": [""]}}},
+    {"folders": "nope"},
+    "nope",
+])
+def test_bad_folder_hierarchy_shapes_fail_closed(bad):
+    from fwgitops.catalog import CatalogError, FolderHierarchy
+    with pytest.raises(CatalogError):
+        FolderHierarchy.from_dict(bad)

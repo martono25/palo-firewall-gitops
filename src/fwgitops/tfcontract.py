@@ -277,18 +277,75 @@ def declared_object_attributes(module_dir: Path, variable: str) -> Optional[Set[
         return None
     body = inner[brace + 1: _matching_brace(inner, brace)]
 
-    # Depth-1 lines only: `optional(object({...}))` nests, and those inner
-    # attribute names belong to the nested type, not this one.
-    attrs: Set[str] = set()
-    depth = 0
-    for line in body.splitlines():
-        if depth == 0:
-            found = _ARG_RE.match(line)
-            if found:
-                attrs.add(found.group(1))
-        depth += line.count("{") + line.count("(") + line.count("[")
-        depth -= line.count("}") + line.count(")") + line.count("]")
+    attrs = _object_body_attributes(body)
     return attrs or None
+
+
+def _object_body_attributes(body: str, prefix: str = "") -> Set[str]:
+    """Attribute paths in an `object({...})` body, RECURSING into nested objects.
+
+    Returns dotted paths: `network`, `network.layer3`, `network.log_setting`, …
+
+    Recursion is the point. `layer3` on an interface and `network` on a zone are
+    nested objects, and HOLE 3 lives exactly there: Terraform discards an
+    undeclared attribute at ANY depth, silently. Checking only the top level
+    would pass a root whose nested type is narrower than the module's.
+    """
+    attrs: Set[str] = set()
+    lines = body.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        found = _ARG_RE.match(line)
+        if not found:
+            i += 1
+            continue
+        name = found.group(1)
+        path = f"{prefix}.{name}" if prefix else name
+        attrs.add(path)
+
+        # Does this attribute's TYPE open a nested object({...})? Scan from the
+        # `=` to the matching close, over the remainder of the body.
+        rest = "\n".join(lines[i:])
+        eq = rest.find("=")
+        nested = re.search(r"\bobject\s*\(", rest[eq:]) if eq != -1 else None
+        consumed = 1
+        if nested is not None:
+            # Only treat it as THIS attribute's type if no other attribute
+            # declaration intervenes before the `object(`.
+            between = rest[eq + 1: eq + nested.start()]
+            if not _ARG_RE.search(between):
+                start = eq + nested.end() - 1                 # the `(`
+                close = _matching_brace(rest, start)
+                if close != -1:
+                    inner = rest[nested.end() + eq: close]
+                    brace = inner.find("{")
+                    if brace != -1:
+                        end_brace = _matching_brace(inner, brace)
+                        if end_brace != -1:
+                            attrs |= _object_body_attributes(
+                                inner[brace + 1: end_brace], path)
+                    consumed = rest[:close].count("\n") + 1
+        i += consumed
+    return attrs
+
+
+def _emitted_paths(value: Any, prefix: str = "") -> Set[str]:
+    """Dotted attribute paths in an emitted object, matching the declared form.
+
+    A `None` value contributes its own path but no children — the compiler emits
+    `"user_acl": null` for an unset optional object, which asserts nothing about
+    the nested type.
+    """
+    paths: Set[str] = set()
+    if not isinstance(value, dict):
+        return paths
+    for k, v in value.items():
+        path = f"{prefix}.{k}" if prefix else k
+        paths.add(path)
+        if isinstance(v, dict):
+            paths |= _emitted_paths(v, path)
+    return paths
 
 
 def check_object_attributes(module_dir: Path, key: str, payload: Any) -> List[str]:
@@ -309,7 +366,7 @@ def check_object_attributes(module_dir: Path, key: str, payload: Any) -> List[st
         return []
     emitted: Set[str] = set()
     for v in values:
-        emitted |= set(v)
+        emitted |= _emitted_paths(v)
 
     missing = sorted(emitted - declared)
     if not missing:

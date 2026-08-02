@@ -1,0 +1,24 @@
+# SCM folder hierarchy — platform-maintained, validation-only.
+#
+# A change scoped to a folder WITH CHILDREN reaches every one of them. On this
+# tenant `ngfw-shared` is the parent of both `prod-edge` (production) and
+# `GitOps` (sandbox), so a single change there lands on production and the
+# sandbox together — a materially larger blast radius than any folder-local
+# change, and the reason ADR-0005 makes this a blocking prerequisite for
+# InterfaceRequest.
+#
+# The classifier is PURE (no live SCM reads), so the hierarchy is declared here
+# rather than discovered. Keep it in step with SCM; the drift work would be the
+# natural place to verify it automatically.
+#
+# Verified live 2026-08-02 via GET /config/setup/v1/folders:
+#   All -> ngfw-shared -> {prod-edge, GitOps}
+# plus Prisma Access built-ins (Mobile Users, Remote Networks, …) which this
+# platform does not manage.
+folders:
+  ngfw-shared:
+    children: [prod-edge, GitOps]
+  prod-edge:
+    children: []
+  GitOps:
+    children: []
