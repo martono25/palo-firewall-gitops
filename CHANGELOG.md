@@ -3,6 +3,33 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-08-02
+
+Closes the gap v1.8.0 shipped with: the registry declared `drift_engine="state"`
+for `InterfaceRequest`, but the drift engine only knew about zones. **The
+registry made a claim the code did not keep.**
+
+### State drift is registry-driven
+`declared_zone_state` → `declared_state(handler, objs)`, built from the kind's
+own registered `tfvars` emitter. A kind declaring `drift_engine="state"` is
+covered the moment it registers — no per-kind function, and the drift comparison
+cannot disagree with what Terraform applies about what an object should look
+like.
+
+`fwgitops drift` takes `--state-snapshot` (repeatable) in place of
+`--zones-snapshot`, and reports per kind.
+
+### Snapshots stamp their kind
+`fwgitops snapshot` records `kind` on every row, and drift **refuses** a snapshot
+without it rather than guessing — mis-attributing a snapshot would compare it
+against the wrong declared set entirely.
+
+### `fwgitops kinds`
+Lists registered kinds, `--state-drift` for those that cannot carry tags. Lets
+`drift-detect.yml` enumerate them, so **adding a kind needs no workflow edit**.
+
+**Tests: 491 → 496.**
+
 ## [1.8.0] — 2026-08-02
 
 **`InterfaceRequest` — intent kind #3**, and the first kind added since the

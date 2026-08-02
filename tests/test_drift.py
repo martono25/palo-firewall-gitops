@@ -68,9 +68,10 @@ def test_summary_clean():
 from fwgitops.compiler import CompiledZone  # noqa: E402
 from fwgitops.drift import (  # noqa: E402
     ActualObject,
-    declared_zone_state,
+    declared_state,
     detect_object_drift,
 )
+from fwgitops.kinds import REGISTRY  # noqa: E402
 
 
 def _zone(**kw):
@@ -88,7 +89,7 @@ def _actual(name="dmz", folder="prod-edge", scope=None, **fields):
 
 
 def test_a_declared_zone_matching_scm_is_clean():
-    declared = declared_zone_state([_zone(protection_profile="best-practice")])
+    declared = declared_state(REGISTRY["ZoneRequest"], [_zone(protection_profile="best-practice")])
     actual = [_actual(network={"layer3": [], "zone_protection_profile": "best-practice",
                                "log_setting": None})]
     assert detect_object_drift(declared, actual).is_clean
@@ -97,7 +98,7 @@ def test_a_declared_zone_matching_scm_is_clean():
 def test_a_field_changed_out_of_band_is_modified():
     """Someone turning User-ID off on a managed zone. terraform plan would also
     catch this, but only with intact state — this is independent of that."""
-    declared = declared_zone_state([_zone(user_id=True)])
+    declared = declared_state(REGISTRY["ZoneRequest"], [_zone(user_id=True)])
     r = detect_object_drift(declared, [_actual(enable_user_identification=False)])
     assert len(r.modified) == 1
     d = r.modified[0]
@@ -106,7 +107,7 @@ def test_a_field_changed_out_of_band_is_modified():
 
 
 def test_a_nested_field_is_compared_by_flattened_path():
-    declared = declared_zone_state([_zone(protection_profile="best-practice")])
+    declared = declared_state(REGISTRY["ZoneRequest"], [_zone(protection_profile="best-practice")])
     r = detect_object_drift(declared, [_actual(
         network={"layer3": [], "zone_protection_profile": "something-else", "log_setting": None})])
     assert [d.field_name for d in r.modified] == ["network.zone_protection_profile"]
@@ -115,7 +116,7 @@ def test_a_nested_field_is_compared_by_flattened_path():
 def test_fields_the_declaration_does_not_set_are_not_drift():
     """A None in the declaration means 'we did not ask'. Comparing it would flag
     every provider default as a difference."""
-    declared = declared_zone_state([_zone()])            # nothing asserted
+    declared = declared_state(REGISTRY["ZoneRequest"], [_zone()])            # nothing asserted
     r = detect_object_drift(declared, [_actual(
         enable_user_identification=True,                  # SCM's own value
         network={"layer3": [], "zone_protection_profile": "x", "log_setting": "y"})])
@@ -123,7 +124,7 @@ def test_fields_the_declaration_does_not_set_are_not_drift():
 
 
 def test_a_declared_zone_absent_from_scm_is_missing():
-    declared = declared_zone_state([_zone()])
+    declared = declared_state(REGISTRY["ZoneRequest"], [_zone()])
     r = detect_object_drift(declared, [])
     assert r.missing == (("object", "prod-edge", "dmz"),)
 
@@ -156,7 +157,7 @@ def test_an_inherited_object_is_not_this_folders_drift():
 def test_an_inherited_declared_object_is_not_reported_missing():
     """Declared, and present only via inheritance — absent from the local folder
     but not actually missing."""
-    declared = declared_zone_state([_zone(name="internet")])
+    declared = declared_state(REGISTRY["ZoneRequest"], [_zone(name="internet")])
     r = detect_object_drift(
         declared, [_actual(name="internet", folder="ngfw-shared", scope="prod-edge")])
     assert r.missing == () and r.is_clean
@@ -171,9 +172,29 @@ def test_inheritance_does_not_mask_a_locally_defined_rogue():
     assert len(r.inherited) == 1
 
 
-def test_declared_state_reuses_the_compilers_own_tfvars_shape():
+def test_declared_state_reuses_the_kinds_own_tfvars_emitter():
     """So the drift comparison and what Terraform applies cannot disagree about
-    what a zone is supposed to look like."""
+    what an object is supposed to look like — for ANY kind, not just zones."""
     from fwgitops.compiler import zone_tfvars
     z = _zone(protection_profile="best-practice", user_id=True)
-    assert declared_zone_state([z])[("prod-edge", "dmz")] == zone_tfvars([z])["zones"]["dmz"]
+    got = declared_state(REGISTRY["ZoneRequest"], [z])[("prod-edge", "dmz")]
+    assert got == zone_tfvars([z])["zones"]["dmz"]
+
+
+def test_declared_state_works_for_interfaces_too():
+    """The gap this closes: the registry declared drift_engine="state" for
+    InterfaceRequest while `declared_zone_state` only knew about zones."""
+    from fwgitops.compiler import CompiledInterface, interface_tfvars
+    i = CompiledInterface(folder="prod-edge", name="$eth-local", ip=["10.0.1.1/24"])
+    got = declared_state(REGISTRY["InterfaceRequest"], [i])
+    assert got[("prod-edge", "$eth-local")] == interface_tfvars([i])["interfaces"]["$eth-local"]
+
+
+def test_every_state_drift_kind_can_produce_declared_state():
+    """A kind declaring state-based drift with no working declared_state would
+    be a registry claim the code does not keep — which is exactly what happened
+    to InterfaceRequest."""
+    from fwgitops.kinds import kinds_with_drift_engine
+    for handler in kinds_with_drift_engine("state"):
+        assert callable(handler.tfvars), f"{handler.kind} cannot produce declared state"
+        assert handler.state_api_path, f"{handler.kind} has no snapshot source"

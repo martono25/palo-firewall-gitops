@@ -89,7 +89,7 @@ jobs:
       # returns the folder an object is DEFINED in, and without that distinction
       # every inherited object reads as unexpected (7 false positives against the
       # live tenant, where all zones are defined in the shared parent).
-      - name: Detect zone drift (state-based)
+      - name: Detect state drift (kinds that cannot carry tags)
         run: |
           set -euo pipefail
           drift=0
@@ -97,10 +97,20 @@ jobs:
             folder=$(basename "$dir")
             case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
             [ -f "$dir/main.tf" ] || continue
-            echo "::group::zone drift $folder"
-            fwgitops snapshot ZoneRequest "$folder" --out "zones-$folder.json"
+            echo "::group::state drift $folder"
+            # One snapshot per kind that cannot carry gitops: tags. Driven off
+            # the registry, so a new kind is covered as soon as it registers
+            # drift_engine="state" — no edit needed here.
+            snaps=()
+            for kind in $(fwgitops kinds --state-drift); do
+              out="state-$kind-$folder.json"
+              fwgitops snapshot "$kind" "$folder" --out "$out"
+              snaps+=(--state-snapshot "$out")
+            done
             rc=0
-            fwgitops drift --zones-snapshot "zones-$folder.json" || rc=$?
+            if [ ${#snaps[@]} -gt 0 ]; then
+              fwgitops drift "${snaps[@]}" || rc=$?
+            fi
             echo "::endgroup::"
             case "$rc" in
               0) ;;
@@ -109,7 +119,7 @@ jobs:
             esac
           done
           if [ "$drift" = "1" ]; then
-            echo "::error::Zone drift detected — a zone exists in SCM that Git never declared, or a declared zone has been changed or removed out of band."
+            echo "::error::State drift detected — an object exists in SCM that Git never declared, or a declared one has been changed or removed out of band."
             exit 1
           fi
-          echo "No zone drift."
+          echo "No state drift."

@@ -47,10 +47,19 @@ Built per ADR-0005: folder scope, `$eth-*` names, CONFIGURES an existing
 interface. One registry entry drives compile, tfvars, classify and snapshot.
 All four prerequisites were met first.
 
-Not yet done: generalise `fwgitops drift`'s object engine over the registry the
-way `classify` and `snapshot` now are — `declared_zone_state` is still
-zone-specific, so interfaces have no drift coverage wired even though the
-registry declares `drift_engine="state"` for them.
+Drift is registry-driven too as of v1.9.0, so interfaces are covered.
+
+### Registry-driven state drift — DONE v1.9.0
+
+`declared_zone_state` became `declared_state(handler, objs)`, driven off the
+kind's registered `tfvars` emitter. A kind declaring `drift_engine="state"` is
+covered the moment it registers — previously `InterfaceRequest` declared it
+while nothing wired it, so the registry made a claim the code did not keep.
+
+Snapshots now stamp their `kind`, and drift refuses one without it rather than
+guessing (mis-attributing a snapshot would compare it against the wrong declared
+set entirely). `fwgitops kinds --state-drift` lets CI enumerate them, so
+drift-detect.yml needs no edit when a kind is added.
 
 ### Credential redaction for published CI files — DONE v1.7.0
 

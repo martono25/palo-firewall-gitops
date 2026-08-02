@@ -270,17 +270,24 @@ def detect_object_drift(
     return ObjectDriftReport(tuple(unexpected), missing, tuple(modified), tuple(inherited))
 
 
-def declared_zone_state(zones: Iterable[CompiledZone]) -> Dict[Tuple[str, str], Dict[str, Any]]:
+def declared_state(handler: Any, objs: Iterable[Any]) -> Dict[Tuple[str, str], Dict[str, Any]]:
     """(folder, name) -> desired provider-shaped fields, for `detect_object_drift`.
 
-    Reuses the compiler's own tfvars emitter rather than re-deriving the shape,
-    so the drift comparison and the thing Terraform applies can never disagree
-    about what a zone is supposed to look like.
-    """
-    from fwgitops.compiler import zone_tfvars
+    Driven off the kind's registered `tfvars` emitter rather than a per-kind
+    function, so drift covers a kind the moment it registers `drift_engine`
+    "state" — and so the comparison and the thing Terraform applies can never
+    disagree about what an object is supposed to look like.
 
+    Was `declared_zone_state`, which meant `InterfaceRequest` declared state-based
+    drift in the registry while nothing wired it: the registry made a claim the
+    code did not keep.
+    """
     out: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    for z in zones:
-        payload = zone_tfvars([z])["zones"][z.name]
-        out[(z.folder, z.name)] = payload
+    for obj in objs:
+        folder = handler.folder_of(obj)
+        name = handler.name_of(obj)
+        payload = handler.tfvars([obj])
+        # tfvars is {"<key>": {name: fields}} — take the one object back out.
+        inner = next(iter(payload.values()))
+        out[(folder, name)] = inner[name]
     return out
