@@ -34,6 +34,24 @@ reference names were never validated at all.
 Root and module object types are byte-identical, enforced per-attribute by the
 ADR-0004 contract check, so HOLE 3 cannot recur on zones.
 
+### Schema-level contract check (HOLE 3) — DONE PR #32
+
+`declared_object_attributes` parses a variable's `object({...})` type and
+`check_object_attributes` asserts every attribute the compiler emits for that key
+is declared. Wired into `run_compile`, verified by mutation: stripping the six
+ADR-0003 attributes back out of `terraform/prod-edge/variables.tf` makes the
+compile exit 2 and name all six. A repo-tree test compiles the real intents and
+asserts the same, so root and module types cannot drift apart unnoticed.
+
+Only the TOP level of an object type is inspected — a nested
+`optional(object({...}))` whose inner attributes drift is not covered.
+
+### Reject a ZoneRequest naming a baseline zone — DONE v1.1.0
+
+`check_zone_collisions`. The consistency check *unions* baseline and declared
+zones, so a ZoneRequest named `internet` looked maximally valid while Terraform
+would have created over a live zone — which, now that zones carry a protection
+profile and ACLs, would clobber them.
 
 ### T5 — Probe scm_zone field fidelity — DONE 2026-07-31, RESULT: PROVIDER IS FAITHFUL
 
@@ -82,31 +100,6 @@ this pattern gets reused for `InterfaceRequest`, which faces the same
 provider-fidelity question for `scm_ethernet_interface`.
 
 ## Contract enforcement
-
-### Schema-level tfvars contract check (attributes, not just keys)
-
-**What:** Extend `tfcontract.check_contract` to parse
-`variable "k" { type = map(object({...})) }` and assert every ATTRIBUTE the
-compiler emits for that key is declared — not just that the top-level key exists.
-
-**Why:** This is HOLE 3, and key-name matching structurally cannot see it.
-Terraform's object-to-object conversion silently discards attributes the target
-type does not declare: no warning, no diagnostic, exit 0. It was live in v1.0 —
-`terraform/prod-edge/variables.tf` omitted the six ADR-0003 attributes while the
-module declared them and the compiler emitted them, so App-ID, profile group and
-log setting never reached the module. The instance is fixed (types are now
-identical) but nothing stops them drifting apart again, and the comment claiming
-they were "kept in sync" was already false once.
-
-**Context:** The masking + comment-stripping machinery in `tfcontract.py` already
-does the hard part. The remaining work is extracting attribute names from an
-`object({...})` type expression and comparing against the inner keys of the
-emitted payload. A cheaper interim: a test asserting the root and module
-`variables.tf` object types are byte-identical.
-
-**Effort:** M
-**Priority:** P1
-**Depends on:** None.
 
 ### Reject a malformed Terraform root instead of best-effort parsing
 
@@ -205,26 +198,6 @@ to point at whichever resource this decision lands on. Full write-up in ADR-0002
 **Depends on:** None — this is the gate on the whole Day-1 chain.
 
 ## Compiler / intent model
-
-
-
-### Reject a ZoneRequest naming a baseline zone
-
-**What:** Fail compile when a ZoneRequest's zone name already appears in
-`env_map.baseline_zones_by_folder()`.
-
-**Why:** `check_zone_consistency` (`compiler.py:343-345`) *unions* baseline and
-declared zones, so a ZoneRequest named `internet` looks maximally valid. Terraform
-would attempt a create against an object that already exists on the device, and
-under A3 that create carries `zone_protection_profile`, `log_setting` and
-`user_acl` — clobbering a live baseline zone on the production edge folder.
-
-**Context:** Small, self-contained, and worth doing even if all other zone work
-stays deferred. Tracked as task T7 in the review's task list.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None.
 
 ### Zone deletion path
 
