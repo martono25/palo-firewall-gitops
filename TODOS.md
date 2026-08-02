@@ -196,11 +196,21 @@ allowlist of scratch folders) is a few lines.
 
 ## Provisioning
 
-### Decide what InterfaceRequest manages, BEFORE probing any interface resource
+### Build InterfaceRequest (kind #3) — design settled by ADR-0005
 
-**What:** Settle whether `InterfaceRequest` manages the shared-folder interface
-variable, a folder-local override of it, or nothing at all because bootstrap
-owns interface bring-up. Only then probe that resource's provider fidelity.
+**What:** Build `InterfaceRequest` per ADR-0005: FOLDER scope, addressing
+interfaces by their `$eth-*` variable names, CONFIGURING an existing interface
+(setting `layer3` addressing) rather than creating one.
+
+**Blocking prerequisites from ADR-0005**, all of which are the price of the
+blast radius (`ngfw-shared` feeds both `prod-edge` and `GitOps`):
+1. classifier treats a change scoped to a folder with children as HIGH minimum;
+2. a `novel_addressing` check — assigning an IP where `layer3` was `{}` is not
+   the same act as editing an existing one;
+3. the per-attribute contract check (ADR-0004) covers `layer3`, which is a
+   nested object — exactly where HOLE 3 lives;
+4. run the `scm_ethernet_interface` fidelity probe against a folder-scope
+   interface, which was deliberately deferred until the design was settled.
 
 **Why:** ADR-0002 specifies `InterfaceRequest` as `ethernet1/1 layer3,
 DHCP/static IP` — a folder-local interface carrying addressing. Read-only

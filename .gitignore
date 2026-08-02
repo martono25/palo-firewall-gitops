@@ -15,6 +15,10 @@ override.tf.json
 terraform.rc
 # Commit the provider lock file for reproducible plans:
 !.terraform.lock.hcl
+# ...but NOT inside terraform/modules/ — a lock file is a ROOT-module artifact.
+# One appears there only if someone runs `terraform init` in the module dir (e.g.
+# to `validate` it), and it then goes stale because nothing ever re-inits it.
+terraform/modules/*/.terraform.lock.hcl
 
 # Compiled desired-state is a BUILD ARTIFACT, not source. Intents (intent/**) are
 # the source of truth; CI compiles them fresh for plan/apply, so requesters never
