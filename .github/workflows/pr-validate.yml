@@ -71,6 +71,24 @@ jobs:
       - name: Compile (generate tfvars)
         run: fwgitops compile intent --out terraform
 
+      # Every folder the compiler emitted MUST have a Terraform root. Both loops
+      # below start with `[ -f "$dir/main.tf" ] || continue`, so a folder with
+      # tfvars but no Terraform is SKIPPED, not caught — the plan never runs, the
+      # undeclared-variable grep never runs, and the config silently never reaches
+      # the device. `fwgitops compile` now fails closed on this too; this catches
+      # hand-committed tfvars and terraform/ deletions the compile cannot see.
+      - name: Guard — emitted tfvars must have a Terraform root
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in terraform/*/*.auto.tfvars.json; do
+            d=$(dirname "$f")
+            if [ ! -f "$d/main.tf" ]; then
+              echo "::error::$(basename "$d"): compiled $(basename "$f") but there is no Terraform root in $d — the config would never be applied."
+              exit 1
+            fi
+          done
+
       - uses: hashicorp/setup-terraform@v4
 
       # AWS creds for the S3 state backend (Arch-2), via OIDC — no stored keys.
@@ -93,14 +111,55 @@ jobs:
             echo "::group::plan $folder"
             ./terraform/make-backend.sh "$folder"
             terraform -chdir="$dir" init -input=false -backend-config=backend.hcl
-            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode | tee "plan-$folder.txt" || true
+
+            # `|| true` used to swallow EVERY plan failure, and the pipe made
+            # -detailed-exitcode meaningless (the exit code was tee's). A broken
+            # plan passed CI silently. Capture the PLAN's status instead.
+            #
+            # -detailed-exitcode: 0 = no changes, 2 = changes present (NORMAL for
+            # a PR — do not treat as failure), anything else = a real error.
+            rc=0
+            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode \
+              2>&1 | tee "plan-$folder.txt" || rc=$?
+            case "$rc" in
+              0|2) ;;
+              *)
+                echo "::error::terraform plan FAILED for $folder (exit $rc)"
+                exit 1
+                ;;
+            esac
+
+            # FAIL-CLOSED CONTRACT GUARD (defence in depth — NOT the primary check).
+            #
+            # The authoritative check is tfcontract.check_contract, enforced at
+            # compile time in cli.py: it covers BOTH holes, including the
+            # declared-but-unwired case that Terraform never warns about. This
+            # grep is the backstop for the paths that check cannot see — stale
+            # tfvars committed by hand, or terraform/ edited without recompiling.
+            #
+            # Terraform treats an auto-loaded *.auto.tfvars.json that sets an
+            # UNDECLARED variable as a warning and exits 0. That is how a compiled
+            # zones.auto.tfvars.json shipped for a full release while plan, apply
+            # and 327 tests all stayed green and the config never reached the
+            # firewall. A warning here means the compiler emitted data no module
+            # consumes, so it must fail the PR.
+            if grep -q "Value for undeclared variable" "plan-$folder.txt"; then
+              echo "::error::$folder: compiled tfvars set a variable the Terraform module does not declare — the config would be SILENTLY IGNORED. Declare it in terraform/$folder/variables.tf and pass it to the module block."
+              grep -n "Value for undeclared variable" "plan-$folder.txt" || true
+              exit 1
+            fi
             echo "::endgroup::"
           done
 
+      # always(): the plan step can now FAIL (it used to swallow everything with
+      # `|| true`). A failing plan is exactly when the reviewer needs the output,
+      # so the artifact must upload even though the previous step went red.
       - name: Upload plans
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: pr-previews
+          if-no-files-found: ignore
           path: |
             plan-*.txt
             enrich-*.txt

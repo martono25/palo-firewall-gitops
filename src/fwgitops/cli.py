@@ -2,16 +2,19 @@
 
     fwgitops compile [intent_root] --env-map catalog/environments.yaml --out terraform
 
-Reads intent YAML, validates + compiles each request, and writes one
-`rules.auto.tfvars.json` per SCM folder for the static Terraform module. This is
-the entry point the GitHub Actions pipeline calls on a PR.
+Reads intent YAML, validates + compiles each request, and writes per SCM folder
+`rules.auto.tfvars.json` (AccessRequest) and `zones.auto.tfvars.json`
+(ZoneRequest) for the static Terraform module. This is the entry point the
+GitHub Actions pipeline calls on a PR.
 
 Fail-closed and all-or-nothing: if ANY intent is invalid or unresolvable, the
 aggregated problem report goes to stderr and nothing is written (exit 2). A run
 either produces a clean, complete desired-state for every touched folder, or it
-produces nothing.
+produces nothing. The same applies to the compiler → Terraform contract: emitting
+data that no Terraform module declares AND wires is a rejection, not a silent
+no-op (see `tfcontract.py` and ADR-0004).
 
-Exit codes:  0 ok · 2 validation/compile error · 1 usage/IO error
+Exit codes:  0 ok · 2 validation/compile/contract error · 1 usage/IO error
 """
 
 from __future__ import annotations
@@ -24,18 +27,23 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from fwgitops.compiler import (
+    CompileError,
     CompiledChange,
     CompiledZone,
+    check_zone_collisions,
     check_zone_consistency,
     compile_any,
-    dumps_tfvars,
-    dumps_zone_tfvars,
+    dumps_payload,
+    to_tfvars,
+    zone_tfvars,
 )
 from fwgitops.intent import IntentError, load_intent
 from fwgitops.io import discover_intents, read_yaml
 from fwgitops.resolve import EnvMap, ResolveError
+from fwgitops.tfcontract import check_contract, is_terraform_root
 
 OUTPUT_FILENAME = "rules.auto.tfvars.json"
+ZONES_FILENAME = "zones.auto.tfvars.json"
 
 
 def run_compile(
@@ -44,6 +52,7 @@ def run_compile(
     out_root: Path,
     *,
     write: bool = True,
+    require_terraform_root: bool = True,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
@@ -106,31 +115,81 @@ def run_compile(
 
     # Cross-kind check (ADR-0001): a rule may only use a zone declared by the env
     # map or a ZoneRequest — caught here, not at the firewall's device commit.
+    # The collision check runs alongside: consistency UNIONS baseline + declared,
+    # so it cannot see a ZoneRequest that would clobber an existing device zone.
     zone_violations = check_zone_consistency(changes, zones, env_map)
+    zone_violations += check_zone_collisions(zones, env_map)
     if zone_violations:
-        print(f"REJECTED — {len(zone_violations)} zone-consistency problem(s); nothing written:",
+        # "zone problem(s)", not "zone-consistency": a collision is the OPPOSITE
+        # of a consistency failure (the zone is maximally consistent — it already
+        # exists), so the old label mis-attributed it.
+        print(f"REJECTED — {len(zone_violations)} zone problem(s); nothing written:",
               file=err)
         for v in zone_violations:
             print(f"  - {v}", file=err)
         return 2
 
-    written: List[Path] = []
-    # AccessRequest -> rules.auto.tfvars.json per folder.
-    for folder, folder_changes in sorted(_group_by_folder(changes).items()):
-        target = out_root / folder / OUTPUT_FILENAME
-        if write:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(dumps_tfvars(folder_changes), encoding="utf-8")
-        written.append(target)
-    # ZoneRequest -> zones.auto.tfvars.json per folder (terraform auto-loads both).
+    # Plan every file BEFORE writing any, so the contract check below can reject
+    # the whole compile without leaving a half-written terraform/ directory.
     zones_by_folder: Dict[str, List[CompiledZone]] = {}
     for z in zones:
         zones_by_folder.setdefault(z.folder, []).append(z)
-    for folder, folder_zones in sorted(zones_by_folder.items()):
-        target = out_root / folder / "zones.auto.tfvars.json"
+
+    # Build each payload ONCE. `to_tfvars` / `zone_tfvars` are not pure lookups —
+    # they raise on duplicate keys — so calling them twice per folder would run
+    # that check (and any future side effect) twice.
+    planned: List[Tuple[Path, str, List[str]]] = []  # (target, payload, tfvars keys)
+    try:
+        for folder, folder_changes in sorted(_group_by_folder(changes).items()):
+            payload = to_tfvars(folder_changes)
+            target = out_root / folder / OUTPUT_FILENAME
+            planned.append((target, dumps_payload(payload), sorted(payload)))
+        # ZoneRequest -> zones.auto.tfvars.json per folder (terraform auto-loads both).
+        for folder, folder_zones in sorted(zones_by_folder.items()):
+            payload = zone_tfvars(folder_zones)
+            target = out_root / folder / ZONES_FILENAME
+            planned.append((target, dumps_payload(payload), sorted(payload)))
+    except CompileError as e:
+        # Duplicate zone key / object-name collision. These already fail closed
+        # (nothing is written), but escaped as a raw traceback and exit 1 —
+        # every other compile-stage rejection reports and returns 2.
+        print(f"REJECTED — {e}; nothing written:", file=err)
+        return 2
+
+    # FAIL-CLOSED: refuse to emit data no Terraform module consumes.
+    #
+    # Terraform ignores an auto-tfvars key with no matching variable (warning,
+    # exit 0), and ignores a declared-but-unwired variable with no message at
+    # all. Either way the config never reaches the firewall while every check
+    # stays green — that is exactly how ZoneRequest shipped as a dead end.
+    # A MISSING Terraform root is itself a violation by default. Gating the
+    # check on "does a Terraform root exist" made the check that catches missing
+    # Terraform skip exactly when Terraform was missing: add an environment
+    # whose terraform/<folder>/ does not exist yet and compile passed, then both
+    # CI loops skipped the folder (`[ -f "$dir/main.tf" ] || continue`), so the
+    # plan and its undeclared-variable grep never ran either. Green all the way
+    # down, config never reaching the device. Callers that genuinely target a
+    # scratch directory opt out explicitly via require_terraform_root=False.
+    contract_problems: List[str] = []
+    for target, _payload, keys in planned:
+        module_dir = target.parent
+        if require_terraform_root or is_terraform_root(module_dir):
+            contract_problems.extend(check_contract(module_dir, keys))
+    if contract_problems:
+        print(
+            f"REJECTED — {len(contract_problems)} Terraform contract problem(s); "
+            f"nothing written:",
+            file=err,
+        )
+        for p in contract_problems:
+            print(f"  - {p}", file=err)
+        return 2
+
+    written: List[Path] = []
+    for target, payload, _keys in planned:
         if write:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(dumps_zone_tfvars(folder_zones), encoding="utf-8")
+            target.write_text(payload, encoding="utf-8")
         written.append(target)
 
     verb = "wrote" if write else "would write"
@@ -824,6 +883,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="output root; writes <out>/<folder>/rules.auto.tfvars.json")
     c.add_argument("--check", action="store_true",
                    help="validate and report without writing files")
+    c.add_argument("--allow-missing-root", action="store_true",
+                   help="permit emitting into a folder with no Terraform root "
+                        "(scratch/scaffold use only — normally a hard error)")
     c.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
                    help="service name catalog (Phase 2); absent = explicit protocol+port only")
     c.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path,
@@ -912,6 +974,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "compile":
         return run_compile(
             args.intent_root, args.env_map, args.out, write=not args.check,
+            require_terraform_root=not args.allow_missing_root,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "classify":

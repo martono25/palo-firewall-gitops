@@ -292,13 +292,19 @@ def _rule_dict(r: SecurityRule) -> Dict[str, Any]:
     }
 
 
-def dumps_tfvars(changes: List[CompiledChange]) -> str:
-    """Byte-stable JSON for `rules.auto.tfvars.json`.
+def dumps_payload(payload: Dict[str, Any]) -> str:
+    """Byte-stable JSON for any `*.auto.tfvars.json`.
 
     sort_keys makes output deterministic across runs so re-compiles never churn
-    the file and PR diffs reflect only real changes.
+    the file and PR diffs reflect only real changes. One serializer for every
+    kind, so a new kind cannot accidentally pick a different byte format.
     """
-    return json.dumps(to_tfvars(changes), sort_keys=True, indent=2) + "\n"
+    return json.dumps(payload, sort_keys=True, indent=2) + "\n"
+
+
+def dumps_tfvars(changes: List[CompiledChange]) -> str:
+    """Byte-stable JSON for `rules.auto.tfvars.json`."""
+    return dumps_payload(to_tfvars(changes))
 
 
 # ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────
@@ -326,7 +332,7 @@ def zone_tfvars(zones: List[CompiledZone]) -> Dict[str, Any]:
 
 def dumps_zone_tfvars(zones: List[CompiledZone]) -> str:
     """Byte-stable JSON for `zones.auto.tfvars.json` (terraform auto-loads it)."""
-    return json.dumps(zone_tfvars(zones), sort_keys=True, indent=2) + "\n"
+    return dumps_payload(zone_tfvars(zones))
 
 
 def check_zone_consistency(
@@ -353,5 +359,30 @@ def check_zone_consistency(
             violations.append(
                 f"{ch.rule.name}: zone(s) {sorted(undeclared)} in folder {ch.rule.folder!r} "
                 f"are not declared — add a ZoneRequest (or fix the app/env). Declared: {have}"
+            )
+    return violations
+
+
+def check_zone_collisions(zones: List[CompiledZone], env_map: EnvMap) -> List[str]:
+    """Reject a ZoneRequest naming a zone that ALREADY EXISTS on the device.
+
+    `check_zone_consistency` UNIONS baseline and declared zones, so a ZoneRequest
+    for an existing zone such as `internet` or `proxy` looks maximally valid
+    there. But Terraform would then try to CREATE an object that already exists,
+    and once zones carry security fields that create clobbers a live baseline
+    zone's protection profile and logging.
+
+    Baseline zones are not Terraform-managed. Adopting one is an import, not a
+    create, and is a deliberate act — so this fails closed and says so.
+    """
+    baseline = env_map.baseline_zones_by_folder()
+    violations: List[str] = []
+    for z in sorted(zones, key=lambda z: (z.folder, z.name)):
+        if z.name in baseline.get(z.folder, set()):
+            violations.append(
+                f"ZoneRequest {z.name!r} in folder {z.folder!r} names a zone that already "
+                f"exists on the device (declared as a baseline zone). Creating it would "
+                f"clobber the live zone's settings — remove the ZoneRequest and reference "
+                f"the zone directly, or rename the new zone."
             )
     return violations

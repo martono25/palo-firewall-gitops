@@ -62,7 +62,9 @@ class ScmConfigError(Exception):
 @dataclass
 class ScmCredentials:
     client_id: str
-    client_secret: str
+    #: repr=False so a traceback, debug print or logged locals cannot render the
+    #: live tenant secret in cleartext.
+    client_secret: str = field(repr=False)
     scope: str
     auth_url: str = DEFAULT_AUTH_URL
     host: str = DEFAULT_HOST
@@ -114,7 +116,7 @@ def _urllib_transport(
 class ScmSession:
     """Authenticated SCM API session with a cached bearer token."""
 
-    credentials: ScmCredentials
+    credentials: ScmCredentials = field(repr=False)  # carries client_secret
     transport: Transport = _urllib_transport
     now: Callable[[], float] = time.time
     _token: Optional[str] = field(default=None, init=False, repr=False)
