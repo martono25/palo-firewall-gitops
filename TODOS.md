@@ -208,9 +208,10 @@ interfaces by their `$eth-*` variable names, CONFIGURING an existing interface
 1. ~~classifier treats a change scoped to a folder with children as HIGH~~
    **DONE v1.4.0** — `folder_with_children`, driven by `catalog/folders.yaml`.
    Applies to every kind, not just interfaces.
-2. a `novel_addressing` check — assigning an IP where `layer3` was `{}` is not
-   the same act as editing an existing one. **OPEN**, and it needs the current
-   `layer3` state, so it depends on a live read or the drift snapshot.
+2. ~~a `novel_addressing` check~~ **DONE v1.5.0** — generalised as
+   `_becomes_populated` and shipped exercised on zones
+   (`zone_becomes_traffic_bearing`). Current state comes from the drift
+   snapshot via `classify --zones-snapshot`.
 3. ~~per-attribute contract check covers `layer3`, a nested object~~
    **DONE v1.4.0** — the HOLE 3 check now recurses, comparing dotted paths.
 4. run the `scm_ethernet_interface` fidelity probe against a folder-scope
@@ -230,7 +231,8 @@ ready to point at `scm_ethernet_interface` when prerequisite 4 is taken.
 
 **Effort:** L
 **Priority:** P1
-**Depends on:** prerequisites 2 and 4 above.
+**Depends on:** prerequisite 4 above — the fidelity probe, which needs a
+write to `ngfw-shared`.
 
 ## Compiler / intent model
 

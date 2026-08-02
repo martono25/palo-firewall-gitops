@@ -480,3 +480,28 @@ def test_drift_reports_a_locally_defined_undeclared_zone(tmp_path, capsys):
     assert rc == 3
     assert "unexpected" in out and "rogue" in out
     assert "inherited" in out and "rogue" not in out.split("inherited")[1]
+
+
+def test_classify_uses_the_zone_snapshot_scope_not_the_defining_folder(tmp_path, capsys):
+    """Subtle and load-bearing: SCM returns the folder an object is DEFINED in.
+    The classifier must key on the QUERIED folder, or an inherited zone never
+    matches its declaration and the state-aware checks silently never fire."""
+    import json
+    root = tmp_path / "intent" / "prod"; root.mkdir(parents=True)
+    (root / "Z.yaml").write_text(
+        "apiVersion: fw-intent/v1\nkind: ZoneRequest\n"
+        "metadata: {id: Z1, requester: m@corp, ticket: J-1, justification: x,"
+        " requested: 2026-08-02}\n"
+        "spec:\n  environment: prod\n  zone: zone-internal\n  type: layer3\n"
+        "  interfaces: ['$eth-local']\n  protection_profile: best-practice\n  user_id: true\n"
+    )
+    env_map = tmp_path / "environments.yaml"; env_map.write_text(ENV_MAP)
+    snap = tmp_path / "zones.json"
+    # defined in the parent, queried at prod-edge — exactly the live shape
+    snap.write_text(json.dumps([{"name": "zone-internal", "folder": "ngfw-shared",
+                                 "scope": "prod-edge", "network": {"layer3": []}}]))
+
+    rc = run_classify(tmp_path / "intent", env_map, zones_snapshot_path=snap, gate="LOW")
+    out = capsys.readouterr().out
+    assert "zone_becomes_traffic_bearing" in out
+    assert rc == 3, "a zone starting to carry traffic must not auto-apply at LOW"
