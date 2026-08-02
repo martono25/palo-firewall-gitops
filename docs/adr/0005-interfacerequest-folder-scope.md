@@ -89,10 +89,22 @@ exist rather than by weakening the abstraction:
    `scm_ethernet_interface.layer3` is a nested object and HOLE 3 lives exactly
    there.
 
-Writing to `ngfw-shared` was also why the `scm_ethernet_interface` fidelity probe
-was **deliberately not run** — unlike zones there is no clean scratch target, and
-fidelity of a resource whose design was unsettled is not the blocker. Run it
-against a folder-scope interface once this design is being built.
+4. **DONE 2026-08-02 — the provider writes `scm_ethernet_interface`
+   faithfully**, so `InterfaceRequest` is a compiler + tfvars mapping with **no
+   `enrich`-style subsystem**. Verified by round-tripping `comment` (top-level
+   scalar), `layer3.mtu` (nested scalar) and `layer3.ip` (nested
+   list-of-objects — the hardest shape, and exactly what addressing needs).
+
+   **This ADR was too pessimistic about the blast radius.** It claimed there was
+   no clean scratch target because the real interfaces live in `ngfw-shared`.
+   There is one: `GitOps` has **zero devices** and nothing inherits *from* it, and
+   a **new name** is not an override of `$eth-local` / `$eth-internet`. The
+   fidelity question does not care which folder it is asked in. Kit and result:
+   `spike/interface-probe/`, whose `folder` variable refuses `prod-edge`,
+   `ngfw-shared` and `All` outright.
+
+   The blast-radius concern still stands for `InterfaceRequest` ITSELF, which
+   must write where the real interfaces are. Prerequisites 1-3 exist for that.
 
 ## Consequences
 
