@@ -76,7 +76,14 @@ exist rather than by weakening the abstraction:
    folders as **HIGH** at minimum, so the tier gate refuses to auto-apply it.
 2. An interface change carries a `novel_addressing` style check — assigning an
    IP where `layer3` was previously `{}` is a materially different act from
-   editing an existing address.
+   editing an existing address. **DONE v1.5.0**, and generalised: the underlying
+   rule is "populating a previously-empty security-relevant field is not the
+   same act as editing a populated one". It ships exercised on zones
+   (`zone_becomes_traffic_bearing`), because four of the seven live zones sit at
+   `layer3: []` and moving one out of that state changes what the firewall
+   passes. `_becomes_populated` is the shared helper; interface addressing
+   plugs into it. Requires current state, supplied by the drift snapshot —
+   absent snapshot disables the check rather than guessing.
 3. The same fail-closed contract checking that covers rules and zones applies
    (ADR-0004), including the per-attribute check, since
    `scm_ethernet_interface.layer3` is a nested object and HOLE 3 lives exactly

@@ -408,7 +408,41 @@ def _folder_blast_radius(folder: str, hierarchy) -> Optional[Dict[str, str]]:
     }
 
 
-def classify_zone(zone: CompiledZone, *, hierarchy=None) -> RiskVerdict:
+def _interfaces_of(fields: Dict[str, Any]) -> List[str]:
+    """Every interface named in an object's `network` block, any layer type."""
+    network = fields.get("network") or {}
+    if not isinstance(network, dict):
+        return []
+    out: List[str] = []
+    for value in network.values():
+        if isinstance(value, list):
+            out.extend(str(v) for v in value)
+    return out
+
+
+def _becomes_populated(declared: List[str], actual: Optional[Dict[str, Any]]) -> bool:
+    """True when a declaration FILLS a field that is currently empty.
+
+    The generalisation behind ADR-0005's `novel_addressing`: populating a
+    previously-empty security-relevant field is a materially different act from
+    editing an existing value. Assigning an IP to an unaddressed interface puts
+    it on a network; binding an interface to an empty zone starts carrying
+    traffic through it. Editing either changes something already live.
+
+    `actual is None` means the object does not exist yet — creation is already
+    covered elsewhere. This check is about a CHANGE to something present.
+    """
+    if not declared or actual is None:
+        return False
+    return not _interfaces_of(actual)
+
+
+def classify_zone(
+    zone: CompiledZone,
+    *,
+    hierarchy=None,
+    current: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
+) -> RiskVerdict:
     """Risk-classify a ZoneRequest (ADR-0001 kind #2). Fail-closed.
 
     Deliberately a separate entry point rather than a branch inside `classify`:
@@ -433,6 +467,20 @@ def classify_zone(zone: CompiledZone, *, hierarchy=None) -> RiskVerdict:
     blast = _folder_blast_radius(zone.folder, hierarchy)
     if blast is not None:
         fired.append(blast)
+
+    # A zone that gains its FIRST interface starts carrying traffic. Four of the
+    # seven zones on the pilot tenant sit at `layer3: []`, so this is the normal
+    # state rather than an edge case — and moving one out of it changes what the
+    # firewall actually passes.
+    if current is not None and _becomes_populated(
+        list(zone.interfaces), current.get((zone.folder, zone.name))
+    ):
+        fired.append({
+            "check": "zone_becomes_traffic_bearing",
+            "tier": "HIGH",
+            "reason": (f"zone {zone.name!r} currently has no interfaces and this change binds "
+                       f"{sorted(zone.interfaces)} — it starts carrying traffic"),
+        })
 
     if not zone.has_protection:
         fired.append({

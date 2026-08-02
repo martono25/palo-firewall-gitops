@@ -330,6 +330,7 @@ def run_classify(
     env_map_path: Path,
     *,
     gate: Optional[str] = None,
+    zones_snapshot_path: Optional[Path] = None,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
@@ -351,6 +352,21 @@ def run_classify(
     # reaches every one of them — the largest blast radius this platform can
     # produce, so the classifier tiers it up (ADR-0005). The classifier stays
     # pure: the hierarchy is declared config, not a live SCM read.
+    # Current SCM state (optional). Without it the classifier cannot tell
+    # "this zone gains its first interface" from "this zone's interfaces
+    # change" — the same distinction ADR-0005 wants for interface addressing.
+    # Absent snapshot disables those checks rather than guessing.
+    current = None
+    if zones_snapshot_path is not None:
+        rows, code = _read_snapshot_rows(zones_snapshot_path, err)
+        if rows is None:
+            return code
+        current = {}
+        for x in rows:
+            if isinstance(x, dict) and x.get("name"):
+                scope = str(x.get("scope") or x.get("folder"))
+                current[(scope, str(x["name"]))] = x
+
     hierarchy = None
     hierarchy_path = env_map_path.parent / "folders.yaml"
     if hierarchy_path.is_file():
@@ -421,7 +437,7 @@ def run_classify(
     # profile has no flood/recon protection, and User-ID off silently breaks any
     # rule matching on source_user — both are findings, not defaults.
     for z in sorted(zones, key=lambda z: (z.folder, z.name)):
-        v = classify_zone(z, hierarchy=hierarchy)
+        v = classify_zone(z, hierarchy=hierarchy, current=current)
         tiers[v.tier] = tiers.get(v.tier, 0) + 1
         checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
         print(f"  zone/{z.name:11} {v.tier:9} {checks}", file=out)
@@ -1051,6 +1067,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="directory of intent YAML (default: intent)")
     cl.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path,
                     help="environment resolution map (default: catalog/environments.yaml)")
+    cl.add_argument("--zones-snapshot", type=Path,
+                    help="live zone snapshot (from `snapshot-zones`); enables state-aware "
+                         "checks such as a zone gaining its first interface")
     cl.add_argument("--gate", choices=("LOW", "HIGH", "CRITICAL"),
                     help="fail (exit 3) if any change's tier exceeds this max-auto tier")
     cl.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
@@ -1144,6 +1163,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "classify":
         return run_classify(
             args.intent_root, args.env_map, gate=args.gate,
+            zones_snapshot_path=args.zones_snapshot,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "evidence":

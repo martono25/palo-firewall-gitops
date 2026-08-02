@@ -3,6 +3,35 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — 2026-08-02
+
+ADR-0005's prerequisite 2, generalised beyond interfaces and shipped exercised
+on a kind that exists today.
+
+### New check — `zone_becomes_traffic_bearing` (HIGH)
+Populating a previously-empty security-relevant field is **not the same act** as
+editing a populated one. Assigning an IP to an unaddressed interface puts it on a
+network; binding an interface to an empty zone starts carrying traffic through
+it. Editing either changes something already live.
+
+This is not hypothetical: **four of the seven zones on the pilot tenant sit at
+`layer3: []`** — the normal state, not an edge case. A change moving one out of
+it alters what the firewall passes, and now will not auto-apply at a LOW gate.
+
+`_becomes_populated` is the shared helper; interface addressing plugs into it
+when `InterfaceRequest` lands.
+
+### `fwgitops classify --zones-snapshot`
+State-aware checks need current state, so `classify` accepts the snapshot
+produced by `snapshot-zones`. Absent snapshot **disables** those checks rather
+than guessing — the classifier says what it can prove.
+
+Keys on the snapshot's `scope` (the folder QUERIED), not the folder SCM reports
+an object as defined in. Getting that backwards would mean an inherited zone
+never matches its declaration and the check silently never fires.
+
+**Tests: 434 → 441.**
+
 ## [1.4.0] — 2026-08-02
 
 Two of ADR-0005's four blocking prerequisites for `InterfaceRequest`. Both close

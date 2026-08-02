@@ -393,3 +393,55 @@ def test_bad_folder_hierarchy_shapes_fail_closed(bad):
     from fwgitops.catalog import CatalogError, FolderHierarchy
     with pytest.raises(CatalogError):
         FolderHierarchy.from_dict(bad)
+
+
+# ── novel population (ADR-0005 prerequisite #2) ────────────────────────────
+def _cur(name="dmz", folder="prod-edge", ifaces=()):
+    return {(folder, name): {"name": name, "network": {"layer3": list(ifaces)}}}
+
+
+def test_a_zone_gaining_its_first_interface_is_high():
+    """Populating a previously-empty field is a different act from editing one.
+    Four of the seven zones on the pilot tenant sit at `layer3: []`, so this is
+    the normal state — moving out of it changes what the firewall passes."""
+    from fwgitops.classify import classify_zone
+    z = _zone(interfaces=["$eth-local"], protection_profile="p", user_id=True)
+    v = classify_zone(z, current=_cur(ifaces=[]))
+    assert v.tier == "HIGH"
+    fired = [c for c in v.checks_fired if c["check"] == "zone_becomes_traffic_bearing"]
+    assert fired and "$eth-local" in fired[0]["reason"]
+
+
+def test_changing_the_interfaces_of_a_live_zone_is_not_the_same_act():
+    from fwgitops.classify import classify_zone
+    z = _zone(interfaces=["$eth-local"], protection_profile="p", user_id=True)
+    v = classify_zone(z, current=_cur(ifaces=["$eth-other"]))
+    assert v.tier == "LOW" and v.checks_fired == ()
+
+
+def test_a_zone_that_does_not_exist_yet_is_not_flagged_by_this_check():
+    """Creation is covered elsewhere; this check is about CHANGING something
+    already present."""
+    from fwgitops.classify import classify_zone
+    z = _zone(interfaces=["$eth-local"], protection_profile="p", user_id=True)
+    assert classify_zone(z, current={}).checks_fired == ()
+
+
+def test_without_a_snapshot_the_check_is_skipped_not_guessed():
+    from fwgitops.classify import classify_zone
+    z = _zone(interfaces=["$eth-local"], protection_profile="p", user_id=True)
+    assert classify_zone(z).checks_fired == ()
+
+
+def test_declaring_no_interfaces_never_triggers_it():
+    from fwgitops.classify import classify_zone
+    z = _zone(interfaces=[], protection_profile="p", user_id=True)
+    assert classify_zone(z, current=_cur(ifaces=[])).checks_fired == ()
+
+
+def test_interfaces_are_counted_across_every_layer_type():
+    """A zone is traffic-bearing whether its interfaces are layer3, layer2, tap…"""
+    from fwgitops.classify import classify_zone
+    z = _zone(interfaces=["$eth-local"], protection_profile="p", user_id=True)
+    cur = {("prod-edge", "dmz"): {"network": {"layer2": ["$eth-x"], "layer3": []}}}
+    assert classify_zone(z, current=cur).checks_fired == ()
