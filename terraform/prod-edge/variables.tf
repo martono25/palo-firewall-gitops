@@ -45,6 +45,23 @@ variable "security_rules" {
     log_end      = bool
     disabled     = optional(bool, false)
     tags         = list(string)
+    # ── ADR-0003 rule components ──────────────────────────────────────────
+    # HOLE 3. These were missing here while the module declared them and the
+    # compiler emitted them (`_rule_dict`). Terraform's object-to-object
+    # conversion SILENTLY DISCARDS attributes the target type does not declare
+    # — no warning, no diagnostic, exit 0 — so the module fell back to its own
+    # `optional(...)` defaults and the intent's App-ID / profile / log setting
+    # never arrived. tfcontract compares top-level KEY names, so it saw
+    # `security_rules` declared and wired and reported green.
+    #
+    # Keep this block byte-identical to terraform/modules/security_folder/
+    # variables.tf. A schema-level contract check is tracked in TODOS.md.
+    application       = optional(list(string), ["any"])
+    profile_group     = optional(string)           # null -> no security profile
+    log_setting       = optional(string)           # null -> local logs only
+    rulebase          = optional(string, "pre")
+    relative_position = optional(string, "bottom") # top|bottom|before|after
+    target_rule       = optional(string)           # anchor for before/after
   }))
   default = {}
 }

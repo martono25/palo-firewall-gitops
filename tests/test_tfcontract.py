@@ -364,11 +364,15 @@ def test_line_desync_does_not_corrupt_a_later_line(tmp_path):
 
 
 def test_strip_comments_fails_safe_on_a_line_count_mismatch():
-    """Defence in depth: if the masker ever breaks its invariant again, return
-    the original rather than silently pairing lines with the wrong mask."""
+    """If the masker ever breaks its invariant again, return NOTHING.
+
+    Returning the original looks conservative but is not: wired_variables reads
+    the same text, so a surviving `# zones = var.zones` would count as a real
+    reference and let HOLE 2 pass. Empty text makes every emitted key a HOLE 1
+    violation instead — the compile is rejected rather than quietly weakened.
+    """
     from fwgitops.tfcontract import _strip_comments
-    original = "line one # cut me\nline two\nline three"
-    assert _strip_comments(original, "short # cut me") == original
+    assert _strip_comments("line one # cut me\nline two\nline three", "short") == ""
 
 
 def test_a_real_double_slash_comment_is_still_cut(tmp_path):
@@ -439,3 +443,49 @@ def test_a_bad_folder_blocks_the_good_folders_write(tmp_path, capsys):
     assert not (bad / "zones.auto.tfvars.json").exists()
     assert not (good / "zones.auto.tfvars.json").exists(), \
         "a violation in ONE folder must block every folder's write"
+
+
+# ── a MISSING Terraform root is itself a violation (red-team finding) ──────
+def test_compile_rejects_a_folder_with_no_terraform_root(tmp_path, capsys):
+    """REGRESSION: the fail-closed contract used to be fail-OPEN here.
+
+    Gating the check on "does a Terraform root exist" made the check that
+    catches missing Terraform skip precisely when Terraform was missing. Add an
+    environment whose terraform/<folder>/ does not exist yet and compile passed;
+    both CI loops then skipped the folder (`[ -f "$dir/main.tf" ] || continue`),
+    so the plan and its undeclared-variable grep never ran either. Green PR,
+    green apply, config never reaching the device.
+    """
+    intent_dir = tmp_path / "intent" / "prod"
+    intent_dir.mkdir(parents=True)
+    (intent_dir / "ZONE.yaml").write_text(ZONE_INTENT, encoding="utf-8")
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP, encoding="utf-8")
+
+    out = tmp_path / "terraform"          # note: no prod-edge/ and no .tf anywhere
+    rc = main([
+        "compile", str(tmp_path / "intent"),
+        "--env-map", str(env_map), "--out", str(out),
+    ])
+
+    assert rc == 2, "a missing Terraform root must fail closed"
+    assert "no Terraform root module" in capsys.readouterr().err
+    assert not (out / "prod-edge" / "zones.auto.tfvars.json").exists()
+
+
+def test_allow_missing_root_opts_out_explicitly(tmp_path):
+    """Scratch/scaffold use stays possible, but only when asked for by name."""
+    intent_dir = tmp_path / "intent" / "prod"
+    intent_dir.mkdir(parents=True)
+    (intent_dir / "ZONE.yaml").write_text(ZONE_INTENT, encoding="utf-8")
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP, encoding="utf-8")
+
+    out = tmp_path / "terraform"
+    rc = main([
+        "compile", str(tmp_path / "intent"),
+        "--env-map", str(env_map), "--out", str(out), "--allow-missing-root",
+    ])
+
+    assert rc == 0
+    assert (out / "prod-edge" / "zones.auto.tfvars.json").exists()

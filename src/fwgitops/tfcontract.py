@@ -125,10 +125,16 @@ def _strip_comments(original: str, masked: str) -> str:
     if len(orig_lines) != len(masked_lines):
         # The masker broke its own invariant. zip() would silently pair each
         # line with the WRONG mask and truncate the tail, corrupting code rather
-        # than just losing comments. Fail safe: keep the original verbatim. A
-        # stray comment may then survive, which at worst over-reports a
-        # declaration — never the silent-pass direction.
-        return original
+        # than just losing comments.
+        #
+        # Return NOTHING rather than the original. Returning the original looks
+        # conservative but is not: both `declared_variables` and
+        # `wired_variables` read this text, so a surviving `# zones = var.zones`
+        # would count as a real reference and let HOLE 2 pass — the hole
+        # Terraform gives no diagnostic for. Empty text means nothing is
+        # declared, so every emitted key becomes a HOLE 1 violation and the
+        # compile is rejected. Loud and wrong beats quiet and wrong.
+        return ""
     out: List[str] = []
     for orig_line, masked_line in zip(orig_lines, masked_lines):
         cut = len(orig_line)

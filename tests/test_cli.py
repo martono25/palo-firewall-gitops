@@ -47,7 +47,7 @@ def _setup(tmp_path: Path, intent_body: str = VALID_INTENT, name: str = "REQ.yam
 
 def test_compile_writes_tfvars(tmp_path, capsys):
     intent_root, env_map, out = _setup(tmp_path)
-    rc = run_compile(intent_root, env_map, out)
+    rc = run_compile(intent_root, env_map, out, require_terraform_root=False)
     assert rc == 0
     target = out / "prod-edge" / "rules.auto.tfvars.json"
     assert target.is_file()
@@ -58,7 +58,7 @@ def test_compile_writes_tfvars(tmp_path, capsys):
 
 def test_check_mode_writes_nothing(tmp_path):
     intent_root, env_map, out = _setup(tmp_path)
-    rc = run_compile(intent_root, env_map, out, write=False)
+    rc = run_compile(intent_root, env_map, out, write=False, require_terraform_root=False)
     assert rc == 0
     assert not (out / "prod-edge" / "rules.auto.tfvars.json").exists()
 
@@ -66,7 +66,7 @@ def test_check_mode_writes_nothing(tmp_path):
 def test_invalid_intent_exits_2_and_writes_nothing(tmp_path, capsys):
     bad = VALID_INTENT.replace("action: allow", "action: permit")
     intent_root, env_map, out = _setup(tmp_path, intent_body=bad)
-    rc = run_compile(intent_root, env_map, out)
+    rc = run_compile(intent_root, env_map, out, require_terraform_root=False)
     assert rc == 2
     assert not out.exists()  # all-or-nothing: nothing written on failure
     err = capsys.readouterr().err
@@ -76,7 +76,7 @@ def test_invalid_intent_exits_2_and_writes_nothing(tmp_path, capsys):
 def test_unknown_environment_exits_2(tmp_path, capsys):
     bad = VALID_INTENT.replace("environment: prod", "environment: staging")
     intent_root, env_map, out = _setup(tmp_path, intent_body=bad)
-    rc = run_compile(intent_root, env_map, out)
+    rc = run_compile(intent_root, env_map, out, require_terraform_root=False)
     assert rc == 2
     assert "staging" in capsys.readouterr().err
 
@@ -89,7 +89,7 @@ def test_one_bad_file_blocks_the_whole_run(tmp_path):
             "port: 443", "port: 70000"
         )
     )
-    rc = run_compile(intent_root, env_map, out)
+    rc = run_compile(intent_root, env_map, out, require_terraform_root=False)
     assert rc == 2
     assert not out.exists()
 
@@ -98,7 +98,7 @@ def test_example_files_are_skipped(tmp_path):
     intent_root, env_map, out = _setup(tmp_path)
     # An .example. file that is intentionally not valid Phase-1 intent.
     (intent_root / "prod" / "REQ.example.yaml").write_text("apiVersion: nope\n")
-    rc = run_compile(intent_root, env_map, out)
+    rc = run_compile(intent_root, env_map, out, require_terraform_root=False)
     assert rc == 0  # example ignored, valid intent still compiles
 
 
@@ -124,7 +124,7 @@ def test_compile_rejects_undeclared_zone(tmp_path, capsys):
         "apps:\n  dmz-app: {environment: prod, folder: prod-edge, zone: dmz, addresses: [10.20.1.0/24]}\n"
     )
     out = tmp_path / "tf"
-    rc = run_compile(tmp_path / "intent", env_map, out, app_catalog_path=apps)
+    rc = run_compile(tmp_path / "intent", env_map, out, app_catalog_path=apps, require_terraform_root=False)
     assert rc == 2
     err = capsys.readouterr().err
     assert "dmz" in err and "ZoneRequest" in err
@@ -143,7 +143,7 @@ def test_compile_zone_request_writes_zones_tfvars(tmp_path, capsys):
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP)
     out = tmp_path / "terraform"
-    rc = run_compile(tmp_path / "intent", env_map, out)
+    rc = run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False)
     assert rc == 0
     zf = json.loads((out / "prod-edge" / "zones.auto.tfvars.json").read_text())
     assert zf["zones"]["dmz"]["network"] == {"layer3": ["ethernet1/2"]}
@@ -156,14 +156,14 @@ def test_no_intents_is_ok(tmp_path, capsys):
     (tmp_path / "intent").mkdir()
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP)
-    rc = run_compile(tmp_path / "intent", env_map, tmp_path / "terraform")
+    rc = run_compile(tmp_path / "intent", env_map, tmp_path / "terraform", require_terraform_root=False)
     assert rc == 0
     assert "no intent files" in capsys.readouterr().out
 
 
 def test_missing_env_map_exits_1(tmp_path, capsys):
     (tmp_path / "intent").mkdir()
-    rc = run_compile(tmp_path / "intent", tmp_path / "nope.yaml", tmp_path / "terraform")
+    rc = run_compile(tmp_path / "intent", tmp_path / "nope.yaml", tmp_path / "terraform", require_terraform_root=False)
     assert rc == 1
     assert "env map not found" in capsys.readouterr().err
 
@@ -387,7 +387,28 @@ def test_compile_rejects_a_zone_request_colliding_with_a_baseline_zone(tmp_path,
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP + "  baseline_zones: [proxy]\n")
     out = tmp_path / "terraform"
-    rc = run_compile(tmp_path / "intent", env_map, out)
+    rc = run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False)
     assert rc == 2
     assert "already" in capsys.readouterr().err
     assert not (out / "prod-edge" / "zones.auto.tfvars.json").exists()
+
+
+def test_duplicate_zone_key_reports_and_exits_2_not_a_traceback(tmp_path, capsys):
+    """CompileError from the planning loop used to escape as a raw traceback and
+    exit 1. Every other compile-stage rejection reports and returns 2."""
+    root = tmp_path / "intent" / "prod"
+    root.mkdir(parents=True)
+    for n in (1, 2):
+        (root / f"Z{n}.yaml").write_text(
+            "apiVersion: fw-intent/v1\nkind: ZoneRequest\n"
+            f"metadata: {{id: ZONE-{n}, requester: m@corp, ticket: J-{n},"
+            " justification: dup, requested: 2026-07-27}\n"
+            "spec: {environment: prod, zone: dmz, type: layer3, interfaces: []}\n"
+        )
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP)
+    rc = run_compile(tmp_path / "intent", env_map, tmp_path / "terraform",
+                     require_terraform_root=False)
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "REJECTED" in err and "duplicate zone key" in err

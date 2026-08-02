@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "src")  # repo root on sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from fwgitops.scmapi import (  # noqa: E402
     ScmApiError,

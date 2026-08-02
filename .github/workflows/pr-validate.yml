@@ -71,6 +71,24 @@ jobs:
       - name: Compile (generate tfvars)
         run: fwgitops compile intent --out terraform
 
+      # Every folder the compiler emitted MUST have a Terraform root. Both loops
+      # below start with `[ -f "$dir/main.tf" ] || continue`, so a folder with
+      # tfvars but no Terraform is SKIPPED, not caught — the plan never runs, the
+      # undeclared-variable grep never runs, and the config silently never reaches
+      # the device. `fwgitops compile` now fails closed on this too; this catches
+      # hand-committed tfvars and terraform/ deletions the compile cannot see.
+      - name: Guard — emitted tfvars must have a Terraform root
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in terraform/*/*.auto.tfvars.json; do
+            d=$(dirname "$f")
+            if [ ! -f "$d/main.tf" ]; then
+              echo "::error::$(basename "$d"): compiled $(basename "$f") but there is no Terraform root in $d — the config would never be applied."
+              exit 1
+            fi
+          done
+
       - uses: hashicorp/setup-terraform@v4
 
       # AWS creds for the S3 state backend (Arch-2), via OIDC — no stored keys.

@@ -79,6 +79,24 @@ jobs:
       - name: Compile intents
         run: fwgitops compile
 
+      # Every folder the compiler emitted MUST have a Terraform root. Both loops
+      # below start with `[ -f "$dir/main.tf" ] || continue`, so a folder with
+      # tfvars but no Terraform is SKIPPED, not caught — the plan never runs, the
+      # undeclared-variable grep never runs, and the config silently never reaches
+      # the device. `fwgitops compile` now fails closed on this too; this catches
+      # hand-committed tfvars and terraform/ deletions the compile cannot see.
+      - name: Guard — emitted tfvars must have a Terraform root
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in terraform/*/*.auto.tfvars.json; do
+            d=$(dirname "$f")
+            if [ ! -f "$d/main.tf" ]; then
+              echo "::error::$(basename "$d"): compiled $(basename "$f") but there is no Terraform root in $d — the config would never be applied."
+              exit 1
+            fi
+          done
+
       # Fail-closed RISK GATE (Phase 2): block the apply if any change exceeds the
       # max-auto tier. On a push (merge) the input is unset, so it defaults to LOW
       # — only LOW-risk changes auto-apply; HIGH/CRITICAL require an explicit,
@@ -114,6 +132,22 @@ jobs:
             echo "::group::apply+push $folder"
             ./terraform/make-backend.sh "$folder"
             terraform -chdir="$dir" init -input=false -backend-config=backend.hcl
+
+            # FAIL-CLOSED CONTRACT GUARD — must run on the APPLY path too.
+            # pr-validate has the same grep, but a guard that only protects the
+            # preview protects nothing on any route that reaches main without a
+            # green pr-validate: direct push, admin merge, workflow_dispatch, a
+            # merge queue that skipped it, or terraform/ edited while the PR gate
+            # was red. Terraform exits 0 on an undeclared auto-tfvars variable, so
+            # without this the apply silently drops the config and reports success.
+            # Authoritative check is tfcontract.check_contract at compile time;
+            # this backstops hand-edited tfvars and terraform/ changes.
+            terraform -chdir="$dir" plan -input=false -no-color 2>&1 | tee "plan-$folder.txt"
+            if grep -q "Value for undeclared variable" "plan-$folder.txt"; then
+              echo "::error::$folder: compiled tfvars set a variable the Terraform module does not declare — the config would be SILENTLY IGNORED. Refusing to apply."
+              exit 1
+            fi
+
             # -parallelism=1 REQUIRED: the scm provider cannot handle concurrent
             # token acquisition (spike 2026-07-19) — serial apply only.
             terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1
