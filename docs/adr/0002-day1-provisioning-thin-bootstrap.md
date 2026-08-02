@@ -84,6 +84,59 @@ Finishing `ZoneRequest` alone therefore does not produce a usable Day-1 build;
 `InterfaceRequest` is the real prerequisite. This was missed once already when
 scoping v2.0 around zones.
 
+## The tenant contradicts this ADR's interface design (2026-08-02)
+
+Read-only discovery against the live SCM tenant, before writing any code for
+`InterfaceRequest`. **This ADR's interface model does not match reality**, so do
+not build to the chain above without reworking this first.
+
+This ADR describes `InterfaceRequest` as `ethernet1/1 layer3, DHCP/static IP` —
+a folder-local interface carrying its own addressing. What the tenant has:
+
+```
+All ──▶ ngfw-shared ──┬──▶ prod-edge
+                      └──▶ GitOps
+
+$eth-internet   default_value = ethernet1/3   defined in ngfw-shared   layer3 = {}
+$eth-local      default_value = ethernet1/4   defined in ngfw-shared   layer3 = {}
+```
+
+Three mismatches, each one load-bearing:
+
+1. **Interfaces are named variables, not literal names.** Zones reference
+   `$eth-local` / `$eth-internet`, not `ethernet1/1`. Each is an object with a
+   per-device `default_value`, which is what lets one folder config serve
+   devices whose physical interfaces differ.
+2. **They live in the SHARED PARENT folder and are inherited.** They are defined
+   once in `ngfw-shared` and appear in both `prod-edge` and `GitOps`. An
+   `InterfaceRequest` therefore either writes to a folder that feeds production
+   *and* the sandbox, or creates a local override of an inherited object. Both
+   are materially different from the folder-local create this ADR assumes, and
+   the first has far more blast radius than any Day-2 change to date.
+3. **SCM stores no addressing for them** — `layer3` is `{}` on both. Whatever
+   assigns IPs is not in the SCM folder config, so "declare the interface's IP
+   through the pipeline" has no target here as written.
+
+Consequences for the wider design:
+
+- **ADR-0001's device-inventory idea validates the wrong vocabulary.** Checking
+  a zone's interface names against a device's *physical* interfaces is the wrong
+  predicate; the real vocabulary is the inherited `$eth-*` variable set, and any
+  catalog has to understand folder inheritance to resolve it.
+- **Four of the seven live zones carry no interfaces at all** (`layer3: []`), and
+  `proxy` has no `network` block. The "zone that carries no traffic" state is not
+  hypothetical — it is most of the tenant.
+- **`scm_ethernet_interface` has no `tag` attribute**, like `scm_zone`. Only 14
+  of the provider's resources are taggable, so `drift.py`'s tag-based model
+  structurally covers a minority of object types. That is a general limit, not a
+  zone-specific quirk.
+
+**Do this before scoping `InterfaceRequest`:** decide what it manages (the
+shared-folder variable, a local override, or nothing because bootstrap owns it),
+and only then probe that resource's provider fidelity. Probing
+`scm_ethernet_interface` first was deliberately skipped — fidelity of a resource
+the design may not use is not the blocker.
+
 ## Related
 - ADR-0001 (multi-kind intent model) — the enabling mechanism.
 - ADR-0004 — the silent-dead-end bug and the fail-closed contract that now

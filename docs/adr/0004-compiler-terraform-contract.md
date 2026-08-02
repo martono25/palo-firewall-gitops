@@ -148,9 +148,12 @@ Discovery against the live tenant, before any write:
 
 - **This tenant does not name interfaces literally.** The zones `local` and
   `internet` reference `$eth-local` / `$eth-internet` — SCM **variables**, each
-  an object with a `default_value` (e.g. `ethernet1/3`) defined in the parent
-  folder `ngfw-shared` and inherited down. So `ZoneSpec.interfaces` values like
-  `ethernet1/2` (used in our fixtures) are the wrong shape here.
+  an object with a `default_value` (`ethernet1/4` and `ethernet1/3`) defined in
+  the parent folder `ngfw-shared` and inherited by both `prod-edge` and
+  `GitOps`. Folder hierarchy is `All -> ngfw-shared -> {prod-edge, GitOps}`, and
+  `layer3` is `{}` on both interfaces — SCM stores no addressing for them. So
+  `ZoneSpec.interfaces` values like `ethernet1/2` (used in our fixtures) are the
+  wrong shape here. Full consequences are recorded in ADR-0002.
 - **This changes A4's premise.** Validating interface names against a device's
   *physical* interfaces validates the wrong vocabulary; the real one is the
   inherited `$eth-*` variable set, which lives in an ancestor folder. Any
