@@ -3,6 +3,54 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-08-02
+
+**Drift detection now covers objects that cannot carry tags.**
+
+The existing engine keys entirely off `gitops:` tags. That works for security
+rules and covers nothing else: `scm_zone` and `scm_ethernet_interface` have no
+`tag` attribute, and only **14** of the provider's resources do. Zones — shipped
+in v1.2.0 — were invisible to drift detection, in a product whose deliverable is
+NIST-mapped compliance evidence.
+
+### New — state-based drift
+Without a provenance marker you cannot ask "did *we* create this?". You can still
+ask what matters:
+
+| Class | Meaning |
+|---|---|
+| `UNEXPECTED` | Present in SCM, neither declared nor a known baseline object |
+| `MISSING` | Declared in Git, absent from SCM |
+| `MODIFIED` | Declared and present, but a field differs |
+
+The `baseline_zones` allowlist (v1.1.0) is what makes `UNEXPECTED` meaningful
+rather than noise — it names the objects that legitimately pre-date GitOps.
+
+Only fields the declaration actually **sets** are compared: a `null` means "we
+did not ask for this", so SCM's value is not drift. Desired state is built from
+the compiler's own tfvars emitter, so drift and what Terraform applies cannot
+disagree about what a zone should look like.
+
+### New — `fwgitops snapshot-zones`
+Read-only SCM read producing the snapshot, wired into `drift-detect.yml`. This is
+the only check that can see a zone **added by hand**: `terraform plan` sees only
+changes to resources already in its state, and zones carry no tags.
+
+### Inheritance
+SCM returns the folder an object is **defined in**, not the folder queried. Every
+zone on the pilot tenant is defined in the shared parent, so keying on the
+returned folder reported all seven as unexpected. Inherited objects are platform
+config the child folder does not own — they are counted and reported as context,
+never as drift. Found by running against the live tenant, not by reasoning.
+
+### Known limit
+`UNEXPECTED` cannot distinguish an orphan ("we made it, the intent was deleted")
+from an unmanaged object ("someone made it by hand"). The tag-based engine can,
+because a rule carries its own provenance. Here there is nothing to read, so both
+collapse into one class and the report does not claim to know the cause.
+
+**Tests: 408 → 421.**
+
 ## [1.2.0] — 2026-08-02
 
 **`ZoneRequest` reaches the firewall.** Kind #2 has existed since #18 but never

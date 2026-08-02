@@ -455,3 +455,28 @@ def test_a_fully_configured_zone_passes_a_low_gate(tmp_path):
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ZONE_SEC_ENV)
     assert run_classify(tmp_path / "intent", env_map, gate="LOW") == 0
+
+
+def test_drift_requires_at_least_one_snapshot(tmp_path, capsys):
+    root = tmp_path / "intent" / "prod"; root.mkdir(parents=True)
+    env_map = tmp_path / "environments.yaml"; env_map.write_text(ENV_MAP)
+    assert run_drift(tmp_path / "intent", env_map) == 1
+    assert "--snapshot" in capsys.readouterr().err
+
+
+def test_drift_reports_a_locally_defined_undeclared_zone(tmp_path, capsys):
+    import json
+    root = tmp_path / "intent" / "prod"; root.mkdir(parents=True)
+    env_map = tmp_path / "environments.yaml"; env_map.write_text(ENV_MAP)
+    snap = tmp_path / "zones.json"
+    snap.write_text(json.dumps([
+        # inherited from the parent folder -> not this folder's drift
+        {"name": "internet", "folder": "ngfw-shared", "scope": "prod-edge"},
+        # defined locally, declared nowhere -> unexpected
+        {"name": "rogue", "folder": "prod-edge", "scope": "prod-edge"},
+    ]))
+    rc = run_drift(tmp_path / "intent", env_map, zones_snapshot_path=snap)
+    out = capsys.readouterr().out
+    assert rc == 3
+    assert "unexpected" in out and "rogue" in out
+    assert "inherited" in out and "rogue" not in out.split("inherited")[1]
