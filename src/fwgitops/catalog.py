@@ -237,15 +237,42 @@ class FolderHierarchy:
 
     Absent hierarchy means no check, never a silent pass to LOW: the caller
     decides whether to require one.
+
+    Also records TARGETABILITY. The Day-1 kinds name `folder:` directly in the
+    intent (their author is a network engineer; `environment:` resolves 1:1 and
+    cannot express a device folder), so something has to stop that field naming
+    `ngfw-shared` and reaching every device at once. `targetable` is that stop,
+    and it rejects at compile time rather than merely tiering the change up —
+    HIGH is approvable, and a shared-parent write should not be one rubber-stamp
+    away.
     """
 
     children: Dict[str, FrozenSet[str]]
+    #: Folders explicitly marked targetable. A folder absent from this set is
+    #: NOT targetable — see `is_targetable`.
+    targetable: FrozenSet[str] = frozenset()
 
     def has_children(self, folder: str) -> bool:
         return bool(self.children.get(folder))
 
     def children_of(self, folder: str) -> FrozenSet[str]:
         return self.children.get(folder, frozenset())
+
+    def known(self, folder: str) -> bool:
+        return folder in self.children
+
+    def is_targetable(self, folder: str) -> bool:
+        """Fail closed: unknown folders and undeclared ones are NOT targetable.
+
+        An unknown folder is the dangerous case — a typo'd or newly created
+        folder must not inherit permission by default. Declaring
+        `targetable: true` is the only way in.
+        """
+        return folder in self.targetable
+
+    def targetable_folders(self) -> List[str]:
+        """For error messages — tells the requester what they may actually name."""
+        return sorted(self.targetable)
 
     @classmethod
     def from_dict(cls, data: Any) -> "FolderHierarchy":
@@ -256,7 +283,20 @@ class FolderHierarchy:
         if not isinstance(folders, dict):
             raise CatalogError("folder hierarchy: `folders` must be a mapping")
         out: Dict[str, FrozenSet[str]] = {}
+        targetable: set = set()
         for name, spec in folders.items():
+            # A device folder is named for the serial. Unquoted, YAML reads a
+            # serial with NO leading zero (123456789012345) as an int — the
+            # tenant's current two happen to start with `00`, which YAML rejects
+            # as octal and falls back to str, so they survive by luck rather than
+            # design. Coercing an int back to str here would be worse than
+            # rejecting: `1.23e+14` and friends would never match a real folder.
+            if isinstance(name, int):
+                raise CatalogError(
+                    f"folder hierarchy: folder name {name!r} parsed as a number — quote it "
+                    f'("{name}"). Device folders are named for the serial and leading zeros '
+                    f"are significant."
+                )
             if not isinstance(name, str) or not name.strip():
                 raise CatalogError(f"folder hierarchy: bad folder name {name!r}")
             kids = spec.get("children", []) if isinstance(spec, dict) else spec
@@ -269,7 +309,16 @@ class FolderHierarchy:
                     f"folder hierarchy: {name!r}.children must be a list of folder names"
                 )
             out[name.strip()] = frozenset(k.strip() for k in kids)
-        return cls(children=out)
+
+            flag = spec.get("targetable") if isinstance(spec, dict) else None
+            if flag is not None and not isinstance(flag, bool):
+                raise CatalogError(
+                    f"folder hierarchy: {name!r}.targetable must be true or false, "
+                    f"got {flag!r}"
+                )
+            if flag is True:
+                targetable.add(name.strip())
+        return cls(children=out, targetable=frozenset(targetable))
 
 
 @dataclass(frozen=True)

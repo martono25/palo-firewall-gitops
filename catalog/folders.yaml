@@ -1,24 +1,67 @@
-# SCM folder hierarchy — platform-maintained, validation-only.
+# SCM folder hierarchy — platform-maintained. Two jobs:
 #
-# A change scoped to a folder WITH CHILDREN reaches every one of them. On this
-# tenant `ngfw-shared` is the parent of both `prod-edge` (production) and
-# `GitOps` (sandbox), so a single change there lands on production and the
-# sandbox together — a materially larger blast radius than any folder-local
-# change, and the reason ADR-0005 makes this a blocking prerequisite for
-# InterfaceRequest.
+#   1. BLAST RADIUS (validation-only, no expansion). A change scoped to a folder
+#      WITH CHILDREN reaches every one of them. `ngfw-shared` parents both
+#      `prod-edge` (production) and `GitOps` (sandbox), so a single change there
+#      lands on production and the sandbox together — the largest blast radius
+#      this platform can produce, and the reason ADR-0005 made this a blocking
+#      prerequisite for InterfaceRequest.
 #
-# The classifier is PURE (no live SCM reads), so the hierarchy is declared here
-# rather than discovered. Keep it in step with SCM; the drift work would be the
-# natural place to verify it automatically.
+#   2. TARGETABILITY. The Day-1 kinds (InterfaceRequest / ZoneRequest /
+#      RouteRequest) name their `folder:` DIRECTLY in the intent rather than
+#      going through `environment:` — their author is a network engineer for whom
+#      the folder IS the intent, and `environment` resolves 1:1 so it cannot
+#      express a device folder at all. `targetable: false` is what stops that
+#      field being a footgun: an intent naming a non-targetable folder is
+#      rejected at COMPILE time, not merely tiered up by the classifier.
+#      AccessRequest is unaffected — app teams keep `environment:` and never name
+#      an SCM folder.
+#
+# The classifier is PURE (no live SCM reads), so this is declared rather than
+# discovered. Keep it in step with SCM; the drift work would be the natural
+# place to verify it automatically.
 #
 # Verified live 2026-08-02 via GET /config/setup/v1/folders:
 #   All -> ngfw-shared -> {prod-edge, GitOps}
+#   prod-edge -> {007955000893662, 007955000894453}     <- DEVICE folders
 # plus Prisma Access built-ins (Mobile Users, Remote Networks, …) which this
 # platform does not manage.
+#
+# NOTE — this file previously declared `prod-edge: children: []`, which was
+# wrong: SCM parents a per-device folder under it for EACH device. The
+# classifier therefore scored changes to the production folder as reaching no
+# descendants when they in fact reach both firewalls. Understating blast radius
+# on the production folder is the worst direction to be wrong in; when a device
+# is onboarded or removed, update this file in the same PR.
 folders:
   ngfw-shared:
+    # Parent of production AND sandbox. Never a target.
     children: [prod-edge, GitOps]
+    targetable: false
+
   prod-edge:
-    children: []
+    # Inherited by both device folders below, so a change here reaches both
+    # firewalls. Targetable, but the classifier tiers it HIGH for that reason.
+    children: ["007955000893662", "007955000894453"]
+    targetable: true
+
   GitOps:
+    # Sandbox: zero devices, nothing inherits from it. Where the provider
+    # fidelity probes run (spike/*-probe).
     children: []
+    targetable: true
+
+  # ── Device folders ──────────────────────────────────────────────────────
+  # SCM creates one per onboarded device, named for the serial. The tightest
+  # scope that still reaches real hardware: a change here cannot touch the
+  # other firewall and overrides nothing in ngfw-shared.
+  "007955000894453":
+    # hostname ip-10-100-0-51 — CONNECTED as of 2026-08-02.
+    children: []
+    targetable: true
+
+  "007955000893662":
+    # hostname ip-10-100-0-60 — DISCONNECTED as of 2026-08-02. Config can be
+    # staged here, but a push cannot commit to a device that is not connected.
+    children: []
+    targetable: true
