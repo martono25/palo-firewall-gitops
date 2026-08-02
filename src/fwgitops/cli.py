@@ -896,8 +896,9 @@ def run_evidence(
 
 
 def run_push(
-    folder: str,
+    folder: Optional[str] = None,
     *,
+    device: Optional[str] = None,
     admins: Optional[List[str]] = None,
     all_admins: bool = False,
     session=None,
@@ -930,12 +931,14 @@ def run_push(
     scope = admins or [session.credentials.client_id]
     client = ScmPushClient(session)
     try:
-        result = push_folder(client, folder, admins=scope, all_admins=all_admins)
+        result = push_folder(client, folder, device=device, admins=scope,
+                             all_admins=all_admins)
     except (PushError, ScmApiError) as e:
         print(f"PUSH FAILED: {e}", file=err)
         return 3
 
-    print(f"OK — {result.status} (folder={result.folder} job={result.job_id})", file=out)
+    label = "device" if device else "folder"
+    print(f"OK — {result.status} ({label}={result.folder} job={result.job_id})", file=out)
     print(json.dumps(result.to_evidence(), sort_keys=True), file=out)
     return 0
 
@@ -1242,8 +1245,12 @@ def build_parser() -> argparse.ArgumentParser:
                          "never folder=.")
     sn.add_argument("--out", required=True, type=Path, help="where to write the snapshot JSON")
 
-    p = sub.add_parser("push", help="push a folder's staged config to SCM (T13)")
-    p.add_argument("folder", help="SCM folder to push")
+    p = sub.add_parser("push", help="push a folder's or firewall's staged config to SCM (T13)")
+    p.add_argument("folder", nargs="?", default=None, help="SCM folder to push")
+    p.add_argument("--device", default=None,
+                   help="push a FIREWALL instead (serial). A device-scope override belongs "
+                        "to the firewall; pushing its folder would commit whatever else is "
+                        "staged there.")
     p.add_argument("--admin", action="append", dest="admins",
                    help="identity whose staged changes to commit (repeatable); "
                         "default: SCM_CLIENT_ID. Scopes the commit so out-of-band "
@@ -1327,8 +1334,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 1
         return run_snapshot(args.kind, args.folder, args.out, device=args.device)
     if args.command == "push":
+        if bool(args.folder) == bool(args.device):
+            print("error: give exactly one of <folder> or --device <serial>. A device-scope "
+                  "override belongs to the firewall; pushing its folder would commit "
+                  "whatever else is staged there.", file=sys.stderr)
+            return 1
         return run_push(
             args.folder,
+            device=args.device,
             admins=args.admins,
             all_admins=args.all_admins,
         )

@@ -68,6 +68,9 @@ class ScmPushClient:
     PENDING_PATH = "/config/operations/v1/config-versions/candidate"
     JOB_PATH = "/config/operations/v1/jobs/{job_id}"
     PUSH_PATH = "/config/operations/v1/config-versions/candidate:push"
+    #: Body key for a DEVICE-scoped push. pan.dev documents it plural
+    #: ("devices"), unlike the folder key where the LIVE API contradicts the SDK.
+    PUSH_DEVICE_KEY = "devices"
     #: Live tenant accepts `folders` (plural); the scm-go SDK says `folder`. Live
     #: wins. Injectable so an API-version flip needs no code change.
     PUSH_FOLDER_KEY = "folders"
@@ -80,6 +83,7 @@ class ScmPushClient:
         push_path: Optional[str] = None,
         job_path: Optional[str] = None,
         push_folder_key: Optional[str] = None,
+        push_device_key: Optional[str] = None,
     ):
         self.session = session
         # Injectable so the discovered paths need no code change.
@@ -87,11 +91,20 @@ class ScmPushClient:
         self.PUSH_PATH = push_path or self.PUSH_PATH
         self.JOB_PATH = job_path or self.JOB_PATH
         self.PUSH_FOLDER_KEY = push_folder_key or self.PUSH_FOLDER_KEY
+        self.PUSH_DEVICE_KEY = push_device_key or self.PUSH_DEVICE_KEY
 
     def push(
-        self, folder: str, *, admins: Optional[List[str]] = None, description: str = "fwgitops"
+        self, folder: Optional[str] = None, *, device: Optional[str] = None,
+        admins: Optional[List[str]] = None, description: str = "fwgitops"
     ) -> Optional[str]:
-        """Start a folder-scoped push. Returns the job id, or None if nothing to push.
+        """Start a scoped push. Returns the job id, or None if nothing to push.
+
+        Exactly one of `folder` / `device`. pan.dev documents both on the push
+        body ("The target devices for the configuration push"), and a firewall
+        must be pushed AS a device: a device-scope override belongs to the
+        firewall, and pushing its folder instead would be the wrong instrument —
+        committing whatever else is staged there rather than the one change
+        intended.
 
         ADMIN-SCOPED PARTIAL PUSH is how we fail safe. SCM has a SHARED candidate:
         a push commits EVERY editor's pending changes in the folder, not just ours
@@ -107,7 +120,10 @@ class ScmPushClient:
         baseline absorption). Body key for folders is `folders` (plural) — the LIVE
         API outranks the SDK (which says `folder`); `PUSH_FOLDER_KEY` is injectable.
         """
-        body: Dict[str, Any] = {self.PUSH_FOLDER_KEY: [folder], "description": description}
+        if bool(folder) == bool(device):
+            raise ValueError("push needs exactly one of folder / device")
+        scope_key = self.PUSH_DEVICE_KEY if device else self.PUSH_FOLDER_KEY
+        body: Dict[str, Any] = {scope_key: [device or folder], "description": description}
         if admins:
             body["admin"] = list(admins)
         try:

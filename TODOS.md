@@ -190,6 +190,29 @@ interfaces do not. Three kinds in, the only safe assumption is that it varies.
 **Priority:** P2 (v2.0)
 **Depends on:** its own fidelity probe.
 
+### `push` no-op detection never fires — repeat pushes create empty commit jobs
+
+**What:** `push_folder` returns `status="noop"` when SCM says there is nothing to
+push (`_NOTHING_TO_PUSH` matches the error text). Against the live tenant on
+2026-08-03, pushing a device with **nothing staged** returned a normal job id
+(128) with `result_str=OK` and details identical to the real push (126) —
+"Configuration committed successfully" — rather than an error. So the noop path
+is unreachable on this code path and every push looks like it did work.
+
+**Why it matters:** CI that pushes on every merge will mint an empty
+CommitAndPush job each time, and the evidence bundle records `status="success"`
+for a push that changed nothing. It also means "did my push actually commit
+something?" cannot be answered from the job record — both jobs are
+byte-identical apart from the id.
+
+**Direction:** compare the candidate before/after, or diff config versions, and
+derive noop from that rather than from an error string. Worth checking whether
+the folder path behaves the same way (it may have been noop-detected only
+because a *different* error was returned).
+
+**Effort:** M
+**Priority:** P2
+
 ## Contract enforcement
 
 ### Reject a malformed Terraform root instead of best-effort parsing
