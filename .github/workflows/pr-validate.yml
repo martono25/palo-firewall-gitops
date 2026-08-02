@@ -5,6 +5,10 @@
 # ─────────────────────────────────────────────────────────────────────────
 name: pr-validate
 
+# This workflow needs AWS OIDC + SCM credentials and runs a real plan, so it
+# stays scoped to paths that can actually change the desired state. The unit
+# tests are NOT here — they run unfiltered in test.yml, because filtering them
+# meant a PR touching only tests/ or .github/ ran nothing at all.
 on:
   workflow_dispatch: {}
   pull_request:
@@ -35,9 +39,8 @@ jobs:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
 
-      # 0. Unit tests — a PR must not regress the compiler/enrich/classifier.
-      - name: Run tests
-        run: python -m pytest -q
+      # Unit tests are NOT run here — test.yml runs them unfiltered on every
+      # PR, so duplicating them would just double the wait on any src/ change.
 
       # 1. Fail-closed intent validation. Any invalid intent fails the PR here
       #    with an actionable report — the requester sees exactly what to fix.
