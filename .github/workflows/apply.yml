@@ -120,6 +120,10 @@ jobs:
       # Per folder: stage via terraform (candidate), then push to make it live.
       # The push FAILS CLOSED if the candidate was edited outside our automation.
       # One folder at a time preserves 1:1 isolation / clean per-change rollback.
+      # apply.yml writes plan-$folder.txt for its contract guard. It does not
+      # publish them today, but redacting keeps the invariant "no file this
+      # workflow writes contains a credential" true regardless of what a future
+      # step does with them.
       - name: terraform apply (stage) + SCM push — per folder
         run: |
           set -euo pipefail

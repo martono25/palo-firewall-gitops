@@ -151,6 +151,19 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Strip credential values BEFORE anything is published. GitHub masks
+      # secrets in the live log stream but NOT in artifact contents or in
+      # `gh pr comment` bodies — and both are produced from files that capture
+      # terraform's stderr while SCM_CLIENT_SECRET is in the job env. A provider
+      # or auth error echoing a credential would land somewhere durable and
+      # public while the visible log looked clean.
+      #
+      # always(): must run even when the plan step went red, because that is
+      # exactly when an error message carrying a credential is most likely.
+      - name: Redact credentials from published files
+        if: always()
+        run: python3 .github/scripts/redact.py plan-*.txt enrich-*.txt
+
       # always(): the plan step can now FAIL (it used to swallow everything with
       # `|| true`). A failing plan is exactly when the reviewer needs the output,
       # so the artifact must upload even though the previous step went red.

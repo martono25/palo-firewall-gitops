@@ -41,6 +41,23 @@ ADR-0004 contract check, so HOLE 3 cannot recur on zones.
 `.github/workflows/drift-detect.yml`. This is the only check that can see a zone
 added by hand: `terraform plan` cannot see additions, and zones carry no tags.
 
+### Credential redaction for published CI files — DONE v1.7.0
+
+`.github/scripts/redact.py` strips secret VALUES from `plan-*.txt` and
+`enrich-*.txt` before the artifact upload and the PR comment. GitHub masks the
+live log stream but not artifact contents or `gh pr comment` bodies, and those
+files capture terraform's stderr while `SCM_CLIENT_SECRET` is in the job env.
+
+Runs with `if: always()` — a failing plan is exactly when an error carrying a
+credential is most likely. One test asserts every secret the workflow injects is
+in `SECRET_VARS`, so adding a secret to the job env without redacting it fails
+the suite.
+
+### Zone probe production guard — DONE v1.7.0
+
+`spike/zone-probe` now refuses `prod-edge`, `ngfw-shared` and `All` via a
+`validation` block, matching `interface-probe`. Prose in a README is not a guard.
+
 ### Schema-level contract check (HOLE 3) — DONE PR #32
 
 `declared_object_attributes` parses a variable's `object({...})` type and
@@ -157,42 +174,6 @@ gains tags on these types, or if reading TF state proves acceptable.
 **Depends on:** None.
 
 ## CI / security
-
-### Keep terraform stderr out of published artifacts and PR comments
-
-**What:** `pr-validate` folds stderr into `plan-$folder.txt` (`2>&1 | tee`),
-which is uploaded as an artifact and pasted into a PR comment. The job env holds
-`SCM_CLIENT_SECRET`.
-
-**Why:** GitHub's secret masking applies to the log stream, not to artifact file
-contents or `gh pr comment` bodies. Any provider or auth error that echoes a
-credential would reach a durable artifact and a public PR comment unredacted
-while the visible log looked clean. Not observed — the risk is structural.
-
-**Context:** Options are dropping `2>&1`, tee-ing stderr to a separate
-unpublished file, or scrubbing (`sed "s/${SCM_CLIENT_SECRET}/***/g"`) before the
-tee. The artifact is genuinely useful for debugging a failed plan, so prefer
-scrubbing over dropping.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None.
-
-### Guard the zone probe against pointing at production
-
-**What:** `spike/zone-probe/main.tf`'s `folder` variable has no validation, so
-`-var 'folder=prod-edge'` creates a real object in the production folder against
-live credentials. The only guard is prose in the README.
-
-**Why:** A copy-paste or shell-history recall is all it takes, and the probe runs
-with write-capable SCM credentials.
-
-**Context:** A `validation` block rejecting known production folders (or an
-allowlist of scratch folders) is a few lines.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None.
 
 ## Provisioning
 

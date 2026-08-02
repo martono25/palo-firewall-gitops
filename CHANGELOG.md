@@ -3,6 +3,35 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] — 2026-08-02
+
+Security hardening of the CI path. No functional change.
+
+### Credentials can no longer reach a published artifact or PR comment
+`pr-validate` folds terraform's stderr into `plan-*.txt`, uploads it as an
+artifact, and pastes it into a PR comment — while `SCM_CLIENT_SECRET` sits in the
+job env. **GitHub masks the live log stream but not artifact contents or
+`gh pr comment` bodies**, so a provider or auth error echoing a credential would
+land somewhere durable and public while the visible log looked clean.
+
+Not observed — structural, and open since the plan-step fix in v1.1.0 introduced
+the `2>&1`.
+
+`.github/scripts/redact.py` strips secret values before either publish step, with
+`if: always()` because a failing plan is exactly when such an error is most
+likely. Literal substring replacement, not regex: a secret can contain any
+character.
+
+One test asserts **every secret the workflow injects** appears in `SECRET_VARS`,
+so adding a secret to the job env without redacting it fails the suite.
+
+### `spike/zone-probe` refuses production folders
+It carried the warning in prose only, while `interface-probe` enforced it in a
+`validation` block. Prose is not a guard. Now refuses `prod-edge`,
+`ngfw-shared` and `All`; verified all three rejected and `GitOps` accepted.
+
+**Tests: 458 → 470.**
+
 ## [1.6.0] — 2026-08-02
 
 **ADR-0001's registry promise, finally kept.** Adding an intent kind is now one
