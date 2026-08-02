@@ -34,6 +34,13 @@ reference names were never validated at all.
 Root and module object types are byte-identical, enforced per-attribute by the
 ADR-0004 contract check, so HOLE 3 cannot recur on zones.
 
+### Zone drift detection — DONE v1.3.0
+
+`fwgitops snapshot-zones` reads a folder's live zones (read-only) and
+`fwgitops drift --zones-snapshot` compares them, wired into
+`.github/workflows/drift-detect.yml`. This is the only check that can see a zone
+added by hand: `terraform plan` cannot see additions, and zones carry no tags.
+
 ### Schema-level contract check (HOLE 3) — DONE PR #32
 
 `declared_object_attributes` parses a variable's `object({...})` type and
@@ -125,6 +132,27 @@ unnormalised into the declared set.
 same false-negative rejection `baseline_zones` was added to fix.
 
 **Effort:** S
+**Priority:** P3
+**Depends on:** None.
+
+## Drift
+
+### State-based drift cannot tell an orphan from a hand-added object
+
+**What:** `UNEXPECTED` collapses two causes that the tag-based engine keeps
+apart: "we created it and the intent was later deleted" (orphaned) and "someone
+created it by hand" (unmanaged).
+
+**Why:** Not fixable without a provenance marker, and `scm_zone` has no `tag`
+attribute. The alternative is deriving ownership from Terraform state, which
+would work but couples drift detection to state-file availability — the thing
+drift exists to be independent of.
+
+**Context:** Documented in `drift.py` and surfaced in the report wording, which
+deliberately does not claim to know the cause. Revisit if the provider ever
+gains tags on these types, or if reading TF state proves acceptable.
+
+**Effort:** M
 **Priority:** P3
 **Depends on:** None.
 

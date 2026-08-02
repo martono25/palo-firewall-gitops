@@ -58,7 +58,7 @@ pip install -e '.[dev]'
 fwgitops compile intent --env-map catalog/environments.yaml --out terraform
 fwgitops compile intent --check      # validate only, write nothing
 
-pytest -q                            # 408 tests
+pytest -q                            # 421 tests
 ```
 
 Fail-closed and all-or-nothing: if any intent is invalid, the compiler prints an
