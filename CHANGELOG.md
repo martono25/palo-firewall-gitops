@@ -3,6 +3,56 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-08-02
+
+**`InterfaceRequest` — intent kind #3**, and the first kind added since the
+registry landed. Designed in ADR-0005, built once all four of its prerequisites
+were met.
+
+### What it does
+CONFIGURES an existing interface rather than creating one. On the pilot tenant
+the interfaces already exist as folder-scope variables (`$eth-local`) with
+`layer3` empty on every one — what an `InterfaceRequest` supplies is the
+addressing.
+
+```yaml
+kind: InterfaceRequest
+spec:
+  environment: prod
+  interface: "$eth-local"
+  ip: ["10.20.0.1/24"]     # or: dhcp: true — exactly one
+  mtu: 1500
+```
+
+Exactly one addressing mode is required. The provider says so, and the loader
+rejects violations at PR time rather than letting the device commit do it.
+
+### The registry paid off
+Adding this kind was **one `REGISTRY` entry** driving compile, tfvars emission,
+classification, report labelling and snapshotting — plus a Terraform variable and
+resource. It is the first kind not wired by hand into eight places.
+
+`run_classify` and the snapshot command are now generic over the registry, so a
+future kind is classified and snapshottable the moment it is registered.
+`snapshot-zones` becomes `snapshot <kind> <folder>`; `classify --zones-snapshot`
+becomes `--state-snapshot` (repeatable).
+
+### Risk
+- `interface_becomes_addressed` (HIGH) — assigning addressing where `layer3` was
+  empty puts the interface **on a network**. Editing an existing address changes
+  something already live. Not the same act.
+- `folder_with_children` (HIGH) — shared with every kind. The env map decides
+  which folder an interface change targets: `prod` → `prod-edge` is a local
+  override affecting production only, while pointing an env at `ngfw-shared`
+  reaches the sandbox too and is tiered up accordingly.
+
+### Known gap
+`fwgitops drift`'s object engine is still zone-specific, so interfaces have no
+drift coverage wired even though the registry declares `drift_engine="state"`.
+Tracked in `TODOS.md`.
+
+**Tests: 470 → 491.**
+
 ## [1.7.0] — 2026-08-02
 
 Security hardening of the CI path. No functional change.

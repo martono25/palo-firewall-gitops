@@ -32,4 +32,5 @@ module "security_folder" {
   service_objects = var.service_objects
   security_rules  = var.security_rules
   zones           = var.zones
+  interfaces      = var.interfaces
 }

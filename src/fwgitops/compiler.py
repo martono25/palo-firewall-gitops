@@ -315,6 +315,28 @@ def dumps_tfvars(changes: List[CompiledChange]) -> str:
 
 
 # ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────
+@dataclass(frozen=True)
+class CompiledInterface:
+    """Compiled output of an InterfaceRequest (kind #3) — one scm_ethernet_interface.
+
+    CONFIGURES an existing interface rather than creating one (ADR-0005): on the
+    pilot tenant the interfaces exist as folder-scope variables with `layer3`
+    empty, and what an InterfaceRequest supplies is the addressing.
+    """
+
+    folder: str
+    name: str                                # the folder-scope name, "$eth-local"
+    ip: List[str] = field(default_factory=list)
+    dhcp: bool = False
+    mtu: Optional[int] = None
+    comment: Optional[str] = None
+    management_profile: Optional[str] = None
+
+    @property
+    def is_addressed(self) -> bool:
+        return bool(self.ip) or self.dhcp
+
+
 def _acl_dict(acl) -> Optional[Dict[str, List[str]]]:
     """ZoneAcl -> the provider's include_list/exclude_list shape."""
     if acl is None:
@@ -333,6 +355,49 @@ def _compile_zone(zr: ZoneRequest, env_map: EnvMap) -> CompiledZone:
         dos_profile=sp.dos_profile, dos_log_forwarding=sp.dos_log_forwarding,
         user_acl=_acl_dict(sp.user_acl), device_acl=_acl_dict(sp.device_acl),
     )
+
+
+def _compile_interface(ir, env_map: EnvMap) -> CompiledInterface:
+    res = env_map.resolve(ir.spec.environment)  # raises ResolveError (fail closed)
+    sp = ir.spec
+    return CompiledInterface(
+        folder=res.folder, name=sp.interface,
+        ip=list(sp.ip), dhcp=sp.dhcp, mtu=sp.mtu,
+        comment=sp.comment, management_profile=sp.management_profile,
+    )
+
+
+def interface_tfvars(interfaces: List[CompiledInterface]) -> Dict[str, Any]:
+    """Aggregate compiled interfaces into the per-folder `interfaces` tfvars.
+
+    Shape mirrors scm_ethernet_interface exactly: addressing lives under
+    `layer3`, and EXACTLY ONE of `ip` / `dhcp_client` is non-null — the provider
+    requires it and the intent loader already enforces it.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    for i in interfaces:
+        if i.name in out:
+            raise CompileError(
+                f"duplicate interface key {i.name!r} — two InterfaceRequests "
+                f"configure the same interface in folder {i.folder!r}"
+            )
+        out[i.name] = {
+            "name": i.name,
+            "folder": i.folder,
+            "comment": i.comment,
+            "layer3": {
+                "ip": [{"name": cidr} for cidr in i.ip] if i.ip else None,
+                "dhcp_client": {"enable": True} if i.dhcp else None,
+                "mtu": i.mtu,
+                "interface_management_profile": i.management_profile,
+            },
+        }
+    return {"interfaces": out}
+
+
+def dumps_interface_tfvars(interfaces: List[CompiledInterface]) -> str:
+    """Byte-stable JSON for `interfaces.auto.tfvars.json`."""
+    return dumps_payload(interface_tfvars(interfaces))
 
 
 def zone_tfvars(zones: List[CompiledZone]) -> Dict[str, Any]:

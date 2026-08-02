@@ -1,0 +1,18 @@
+# Interface management profile catalog (InterfaceRequest) — ACTIVE.
+#
+# Which admin services (ping, SSH, HTTPS, SNMP…) answer on an interface. When
+# present, `spec.management_profile` on an InterfaceRequest is validated: an
+# unknown name is rejected at PR time instead of failing at the device commit.
+#
+# Security note: attaching a management profile to a DATA interface exposes
+# admin services on that network. Absence is the safe default, which is why
+# there is no "missing profile" risk check — unlike a zone protection profile,
+# where absence means no protection at all.
+#
+# List ONLY profiles that exist in SCM (Network > Interface Mgmt Profiles).
+# Verified live 2026-08-02 via
+# GET /config/network/v1/interface-management-profiles?folder=prod-edge
+# (the `folder` param is required; without it the API returns 400).
+profiles:
+  - redist-collector-profile
+  - auto-vpn-ping-profile

@@ -100,3 +100,32 @@ variable "zones" {
   }))
   default = {}
 }
+
+# ── InterfaceRequest (ADR-0001 kind #3) ───────────────────────────────────
+# Shape mirrors the scm_ethernet_interface provider schema (v1.0.11). Verified
+# live 2026-08-02 that the provider writes these faithfully, including the
+# nested `layer3.ip` list-of-objects — so no `enrich` pass is needed.
+#
+# ADR-0005: this CONFIGURES an existing interface. On the tenant the interfaces
+# already exist as folder-scope variables (`$eth-local`) with `layer3` empty;
+# what an InterfaceRequest supplies is the addressing.
+#
+# EXACTLY ONE of `ip` / `dhcp_client` is non-null — the provider requires it and
+# the intent loader rejects violations at PR time.
+variable "interfaces" {
+  description = "Map of interface name -> configuration (InterfaceRequest, ADR-0001)."
+  type = map(object({
+    name    = string
+    folder  = string
+    comment = optional(string)
+    layer3 = optional(object({
+      ip          = optional(list(object({ name = string })))
+      dhcp_client = optional(object({ enable = optional(bool) }))
+      mtu         = optional(number)
+      # Which admin services answer here. Attaching one to a DATA interface
+      # exposes admin services on that network — absence is the safe default.
+      interface_management_profile = optional(string)
+    }))
+  }))
+  default = {}
+}

@@ -28,7 +28,13 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
-from fwgitops.compiler import AddressObject, CompiledChange, CompiledZone, SecurityRule
+from fwgitops.compiler import (
+    AddressObject,
+    CompiledChange,
+    CompiledInterface,
+    CompiledZone,
+    SecurityRule,
+)
 from fwgitops.evidence import RiskVerdict
 
 CLASSIFIER_VERSION = "1.0"
@@ -406,6 +412,69 @@ def _folder_blast_radius(folder: str, hierarchy) -> Optional[Dict[str, str]]:
         "reason": (f"scoped to folder {folder!r}, which has child folder(s) {kids} — "
                    f"this change reaches every one of them"),
     }
+
+
+def _addressing_of(fields: Dict[str, Any]) -> List[Any]:
+    """Whatever addressing an interface currently carries, any mode."""
+    layer3 = fields.get("layer3") or {}
+    if not isinstance(layer3, dict):
+        return []
+    out: List[Any] = []
+    for key in ("ip", "dhcp_client", "pppoe"):
+        value = layer3.get(key)
+        if isinstance(value, list):
+            out.extend(value)
+        elif value:
+            out.append(value)
+    return out
+
+
+def classify_interface(
+    interface: CompiledInterface,
+    *,
+    hierarchy=None,
+    current: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
+) -> RiskVerdict:
+    """Risk-classify an InterfaceRequest (ADR-0001 kind #3). Fail-closed.
+
+    ADR-0005 prerequisites 1 and 2, applied to the kind they were built for:
+
+    * `folder_with_children` (HIGH) — shared with every other kind. An interface
+      change is the first thing this platform writes at a scope that feeds
+      production AND the sandbox, which is why that check exists.
+    * `interface_becomes_addressed` (HIGH) — assigning addressing where `layer3`
+      was empty puts the interface ON A NETWORK. Editing an existing address
+      changes something already live. Both are real changes; they are not the
+      same act, and on this tenant `layer3` is `{}` on every interface, so the
+      first InterfaceRequest against any of them is the populating case.
+    """
+    fired: List[Dict[str, str]] = []
+
+    blast = _folder_blast_radius(interface.folder, hierarchy)
+    if blast is not None:
+        fired.append(blast)
+
+    if current is not None and interface.is_addressed:
+        actual = current.get((interface.folder, interface.name))
+        if actual is not None and not _addressing_of(actual):
+            mode = "DHCP" if interface.dhcp else f"{sorted(interface.ip)}"
+            fired.append({
+                "check": "interface_becomes_addressed",
+                "tier": "HIGH",
+                "reason": (f"interface {interface.name!r} currently has no addressing and this "
+                           f"change assigns {mode} — it goes on a network"),
+            })
+
+    tier = "LOW"
+    for f in fired:
+        tier = _worst(tier, f["tier"])
+
+    return RiskVerdict(
+        tier=tier,
+        classifier_version=CLASSIFIER_VERSION,
+        thresholds_version=DEFAULT_THRESHOLDS.version,
+        checks_fired=tuple(fired),
+    )
 
 
 def _interfaces_of(fields: Dict[str, Any]) -> List[str]:
