@@ -1,7 +1,7 @@
-# ADR-0006 — Day-1 kinds name their `folder:`; `AccessRequest` keeps `environment:`
+# ADR-0006 — Day-1 kinds name their target; `AccessRequest` keeps `environment:`
 
-- **Status:** Accepted — **built** (v1.11.0), **corrected** (v1.11.1 — see the
-  correction note; the device-folder premise below was wrong)
+- **Status:** Accepted — **built** (v1.11.0), **corrected** (v1.11.1), **extended
+  with `device:`** (v1.12.0 — see the addendum)
 - **Date:** 2026-08-02
 - **Deciders:** Martono, Claude
 
@@ -154,3 +154,51 @@ premise into an ADR, a catalog and a test; the folder listing *looked*
 unambiguous. The standing rule is to verify against pan.dev before asserting how
 SCM behaves, and it applies to confirming a belief, not only to diagnosing a
 failure.
+
+## Addendum (2026-08-02, v1.12.0) — `device:` is the third target
+
+Martono's correction to the correction: **in SCM the firewall IS the last level
+of the folder hierarchy**, and config inherits down to it
+(`All → ngfw-shared → prod-edge → <firewall>`). v1.11.1 over-corrected by
+deleting firewalls from `catalog/folders.yaml` entirely, which discarded that
+truth along with the false one. What is true is narrower than either version:
+
+> A firewall is a hierarchy member. It is **addressed** `device=<serial>`, never
+> `folder=<serial>`.
+
+So `folders.yaml` lists firewalls under a `devices:` key beneath their folder —
+hierarchy members that `folder:` can never name — and the Day-1 kinds take a
+third target form:
+
+| field | names | validated against |
+|---|---|---|
+| `folder:` | an SCM folder | `folders.yaml` — declared + targetable |
+| `device:` | a firewall serial | `folders.yaml` `devices:` — declared + targetable |
+| `environment:` | an app-language env | `environments.yaml` (platform config) |
+
+Exactly one. Each is fail-closed, and putting a serial in `folder:` (or a folder
+in `device:`) is rejected with a message naming the right field — the v1.11.0
+mistake caught at the requester's door.
+
+### Why a firewall gets its own Terraform root
+
+Probed, not assumed (`spike/device-override-probe`): a device-scope write to an
+**inherited** object creates a **per-device override** — a new object with its
+own id — leaving the shared object, the other firewall and the parent folders
+untouched. Deleting it reverts to inheritance.
+
+Two different objects means two different states. A `device:` intent compiles to
+`terraform/device-<serial>/`, never into its folder's root; sharing a root would
+let one scope's plan destroy the other's overrides. `Scope.dirname` decides this,
+and `tests/test_tfroots.py` asserts the roots on disk match.
+
+That test also compares every root's `variable` blocks against the module's
+**structurally** (declared attribute paths, comments ignored), because the roots
+are copies and that duplication is where HOLE 3 returns.
+
+### Consequence: the narrow target exists now
+
+The v2.0 hardware proof can scope to one firewall, which is what the whole
+detour was for. Interface addressing — the change most likely to break
+connectivity — can be applied to a single device without touching the other or
+the shared objects.

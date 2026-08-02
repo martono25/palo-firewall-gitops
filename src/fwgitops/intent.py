@@ -139,11 +139,18 @@ class ZoneSpec:
     interfaces: List[str]    # member interfaces (may be empty — an empty zone is valid)
 
     # ── Target (exactly one) ──────────────────────────────────────────────
-    # `folder` names the SCM folder (or device-serial folder) directly; the
-    # author of a Day-1 change is a network engineer for whom that IS the
-    # intent. `environment` is the app-language indirection AccessRequest uses.
-    # Validated in `_load_target`: a folder must be declared AND targetable.
+    # The author of a Day-1 change is a network engineer for whom the target IS
+    # the intent, so it is named directly:
+    #   `folder` — an SCM folder
+    #   `device` — a FIREWALL serial. In SCM the firewall is the last level of
+    #              the hierarchy and inherits down it, but it is addressed
+    #              `device=`, never `folder=`. The narrower target: a
+    #              device-scope write creates a per-device override
+    #              (spike/device-override-probe).
+    # `environment` is the app-language indirection AccessRequest uses.
+    # Validated in `_load_target`: declared AND targetable, or rejected.
     folder: Optional[str] = None
+    device: Optional[str] = None
     environment: Optional[str] = None
 
     # ── Security posture. The ADR-0003 lesson applied to zones ────────────
@@ -186,11 +193,18 @@ class RouteSpec:
     destination: str                     # CIDR, e.g. "0.0.0.0/0"
 
     # ── Target (exactly one) ──────────────────────────────────────────────
-    # `folder` names the SCM folder (or device-serial folder) directly; the
-    # author of a Day-1 change is a network engineer for whom that IS the
-    # intent. `environment` is the app-language indirection AccessRequest uses.
-    # Validated in `_load_target`: a folder must be declared AND targetable.
+    # The author of a Day-1 change is a network engineer for whom the target IS
+    # the intent, so it is named directly:
+    #   `folder` — an SCM folder
+    #   `device` — a FIREWALL serial. In SCM the firewall is the last level of
+    #              the hierarchy and inherits down it, but it is addressed
+    #              `device=`, never `folder=`. The narrower target: a
+    #              device-scope write creates a per-device override
+    #              (spike/device-override-probe).
+    # `environment` is the app-language indirection AccessRequest uses.
+    # Validated in `_load_target`: declared AND targetable, or rejected.
     folder: Optional[str] = None
+    device: Optional[str] = None
     environment: Optional[str] = None
     router: str = "default"
     vrf: str = "default"
@@ -230,11 +244,18 @@ class InterfaceSpec:
     interface: str                       # the folder-scope name, e.g. "$eth-local"
 
     # ── Target (exactly one) ──────────────────────────────────────────────
-    # `folder` names the SCM folder (or device-serial folder) directly; the
-    # author of a Day-1 change is a network engineer for whom that IS the
-    # intent. `environment` is the app-language indirection AccessRequest uses.
-    # Validated in `_load_target`: a folder must be declared AND targetable.
+    # The author of a Day-1 change is a network engineer for whom the target IS
+    # the intent, so it is named directly:
+    #   `folder` — an SCM folder
+    #   `device` — a FIREWALL serial. In SCM the firewall is the last level of
+    #              the hierarchy and inherits down it, but it is addressed
+    #              `device=`, never `folder=`. The narrower target: a
+    #              device-scope write creates a per-device override
+    #              (spike/device-override-probe).
+    # `environment` is the app-language indirection AccessRequest uses.
+    # Validated in `_load_target`: declared AND targetable, or rejected.
     folder: Optional[str] = None
+    device: Optional[str] = None
     environment: Optional[str] = None
     #: Static addressing: CIDRs, e.g. ["10.0.1.1/24"]. Mutually exclusive with dhcp.
     ip: List[str] = field(default_factory=list)
@@ -387,7 +408,7 @@ def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
-    folder, environment = _load_target(sp, path, c)
+    folder, device, environment = _load_target(sp, path, c)
     zone = _req_str(sp, "zone", path, c)
     ztype = sp.get("type")
     if ztype not in _ZONE_TYPES:
@@ -414,13 +435,13 @@ def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
     _validate_name(log_forwarding, c.log_forwarding_catalog, f"{path}.log_forwarding", c)
     _validate_name(dos_log_forwarding, c.log_forwarding_catalog, f"{path}.dos_log_forwarding", c)
 
-    if (folder is None and environment is None) or zone is None \
+    if (folder is None and device is None and environment is None) or zone is None \
             or ztype is None or interfaces is None:
         return None
     if not all((ok_pp, ok_lf, ok_dp, ok_dlf, ok_ui, ok_di, ok_ua, ok_da)):
         return None
     return ZoneSpec(
-        folder=folder, environment=environment,
+        folder=folder, device=device, environment=environment,
         zone=zone, zone_type=ztype, interfaces=list(interfaces),
         protection_profile=protection_profile, log_forwarding=log_forwarding,
         user_id=user_id, device_id=device_id,
@@ -440,7 +461,7 @@ def _load_interface_spec(sp: Any, c: "_Collector") -> Optional[InterfaceSpec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
-    folder, environment = _load_target(sp, path, c)
+    folder, device, environment = _load_target(sp, path, c)
     interface = _req_str(sp, "interface", path, c)
 
     ip = sp.get("ip", [])
@@ -476,33 +497,46 @@ def _load_interface_spec(sp: Any, c: "_Collector") -> Optional[InterfaceSpec]:
             c.add(path, "set an addressing mode: `ip: [...]` or `dhcp: true`")
             return None
 
-    if (folder is None and environment is None) or interface is None or ip is None:
+    if (folder is None and device is None and environment is None) \
+            or interface is None or ip is None:
         return None
     if not all((ok_dhcp, ok_mtu, ok_comment, ok_mp)):
         return None
     return InterfaceSpec(
-        folder=folder, environment=environment, interface=interface,
+        folder=folder, device=device, environment=environment, interface=interface,
         ip=[x.strip() for x in ip], dhcp=bool(dhcp), mtu=mtu,
         comment=comment, management_profile=management_profile,
     )
 
 
-def _load_target(sp: dict, path: str, c: "_Collector") -> Tuple[Optional[str], Optional[str]]:
-    """Resolve a Day-1 kind's target. Returns `(folder, environment)`.
+def _load_target(
+    sp: dict, path: str, c: "_Collector"
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Resolve a Day-1 kind's target. Returns `(folder, device, environment)`.
 
-    Exactly one of `folder:` / `environment:`.
+    Exactly one of `folder:` / `device:` / `environment:`.
 
-    WHY BOTH EXIST. `AccessRequest` is authored by app teams who should never
-    need to know SCM topology, so it keeps `environment:` and the platform maps
-    it to a folder. The Day-1 kinds are authored by network engineers, for whom
-    the folder IS the intent — and `environment` resolves 1:1, so it cannot name
-    a DEVICE folder at all. Forcing one addressing model on both would be the
-    faked uniformity ADR-0001's registry exists to avoid.
+    WHY THREE. `AccessRequest` is authored by app teams who should never need to
+    know SCM topology, so it keeps `environment:` and the platform maps it to a
+    folder. The Day-1 kinds are authored by network engineers, for whom the
+    target IS the intent. Forcing one addressing model on both would be the faked
+    uniformity ADR-0001's registry exists to avoid.
 
-    `folder:` is only safe because it is checked against the catalog here:
-    unknown or non-targetable is REJECTED, not tiered up. HIGH is approvable,
-    and a write to a shared parent like `ngfw-shared` should not be one
-    rubber-stamp away from reaching every device at once.
+    FOLDER vs DEVICE. In SCM the FIREWALL IS THE LAST LEVEL of the hierarchy and
+    inherits down it (All -> ngfw-shared -> prod-edge -> firewall) — but it is
+    addressed `device=<serial>`, never `folder=<serial>`, which returns 400
+    "Folder doesn't exist". They are separate fields here because they are
+    separate scopes, not because a firewall sits outside the hierarchy.
+
+    Targeting a firewall is the NARROWER act: verified in
+    `spike/device-override-probe`, a device-scope write to an inherited object
+    creates a per-device override, leaving the shared object, the other firewall
+    and the parent folders untouched.
+
+    Both `folder:` and `device:` are only safe because they are checked against
+    the catalog here: unknown or non-targetable is REJECTED, not tiered up. HIGH
+    is approvable, and a write to a shared parent like `ngfw-shared` should not
+    be one rubber-stamp away from reaching every firewall at once.
 
     Targetability is deliberately NOT applied to the `environment:` path — that
     mapping lives in `catalog/environments.yaml`, which is reviewed platform
@@ -510,32 +544,44 @@ def _load_target(sp: dict, path: str, c: "_Collector") -> Tuple[Optional[str], O
     writes.
     """
     folder, ok_f = _opt_str(sp, "folder", path, c)
+    device, ok_d = _opt_str(sp, "device", path, c)
     environment, ok_e = _opt_str(sp, "environment", path, c)
-    if not (ok_f and ok_e):
-        return None, None
+    if not (ok_f and ok_d and ok_e):
+        return None, None, None
 
-    if folder and environment:
-        c.add(path, "set exactly one target: `folder` (SCM folder or device serial) "
-                    "OR `environment`")
-        return None, None
-    if not folder and not environment:
-        c.add(path, "set a target: `folder: <scm-folder>` or `environment: <name>`")
-        return None, None
+    given = [n for n, v in (("folder", folder), ("device", device),
+                            ("environment", environment)) if v]
+    if len(given) > 1:
+        c.add(path, f"set exactly one target, got {given}: `folder` (SCM folder), "
+                    f"`device` (firewall serial) or `environment`")
+        return None, None, None
+    if not given:
+        c.add(path, "set a target: `folder: <scm-folder>`, `device: <serial>` "
+                    "or `environment: <name>`")
+        return None, None, None
+
+    h = c.folder_hierarchy
+    if (folder or device) and h is None:
+        # Fail closed. Without the catalog there is nothing to check against,
+        # and an unchecked target is the whole footgun.
+        field_name = "folder" if folder else "device"
+        c.add(f"{path}.{field_name}",
+              f"cannot validate `{field_name}` — no folder catalog loaded "
+              f"(catalog/folders.yaml). Refusing to target an unchecked scope.")
+        return None, None, None
 
     if folder:
-        h = c.folder_hierarchy
-        if h is None:
-            # Fail closed. Without the catalog there is nothing to check the
-            # folder against, and an unchecked folder is the whole footgun.
+        if h.device_known(folder):
+            # The v1.11.0 mistake, caught at the requester's door.
             c.add(f"{path}.folder",
-                  "cannot validate `folder` — no folder catalog loaded "
-                  "(catalog/folders.yaml). Refusing to target an unchecked folder.")
-            return None, None
+                  f"{folder!r} is a FIREWALL, not a folder — `folder={folder}` returns "
+                  f"400 'Folder doesn\'t exist' from SCM. Use `device: {folder}` instead.")
+            return None, None, None
         if not h.known(folder):
             c.add(f"{path}.folder",
                   f"folder {folder!r} is not declared in catalog/folders.yaml. "
                   f"Declare it there (in the same PR that onboards it) before targeting it.")
-            return None, None
+            return None, None, None
         if not h.is_targetable(folder):
             kids = ", ".join(sorted(h.children_of(folder)))
             why = (f" — it is a parent of [{kids}], so a change here reaches all of them"
@@ -543,15 +589,37 @@ def _load_target(sp: dict, path: str, c: "_Collector") -> Tuple[Optional[str], O
             c.add(f"{path}.folder",
                   f"folder {folder!r} is not targetable{why}. "
                   f"Targetable folders: {', '.join(h.targetable_folders()) or '(none)'}.")
-            return None, None
+            return None, None, None
 
-    return folder, environment
+    if device:
+        if h.known(device):
+            c.add(f"{path}.device",
+                  f"{device!r} is a folder, not a firewall. Use `folder: {device}`.")
+            return None, None, None
+        if not h.device_known(device):
+            c.add(f"{path}.device",
+                  f"firewall {device!r} is not declared in catalog/folders.yaml. "
+                  f"Declare it under its folder's `devices:` (in the same PR that "
+                  f"onboards it) before targeting it.")
+            return None, None, None
+        if not h.is_device_targetable(device):
+            c.add(f"{path}.device",
+                  f"firewall {device!r} is not targetable. Targetable firewalls: "
+                  f"{', '.join(h.targetable_device_serials()) or '(none)'}.")
+            return None, None, None
+
+    return folder, device, environment
 
 
-def _resolve_target_folder(
-    folder: Optional[str], environment: Optional[str], c: "_Collector"
+def _resolve_target_scope(
+    folder: Optional[str], device: Optional[str], environment: Optional[str],
+    c: "_Collector",
 ) -> Optional[str]:
-    """The folder a Day-1 intent lands in, whichever way it was addressed.
+    """The catalog KEY a Day-1 intent lands under, however it was addressed.
+
+    A firewall keys as `device:<serial>` so catalogs (routers.yaml) can hold a
+    per-firewall entry distinct from its folder's, matching the override
+    semantics SCM actually has.
 
     Load-time resolution, so catalogs keyed by folder (routers.yaml) can be
     consulted here and the compiler stays pure. Returns None when the target is
@@ -560,6 +628,8 @@ def _resolve_target_folder(
     """
     if folder is not None:
         return folder
+    if device is not None:
+        return f"device:{device}"
     if environment is not None and c.env_map is not None:
         try:
             return c.env_map.resolve(environment).folder
@@ -573,7 +643,7 @@ def _load_route_spec(sp: Any, c: "_Collector") -> Optional[RouteSpec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
-    folder, environment = _load_target(sp, path, c)
+    folder, device, environment = _load_target(sp, path, c)
     destination = _req_str(sp, "destination", path, c)
     if destination is not None and not _CIDR_RE.match(destination):
         c.add(f"{path}.destination", f"must be CIDR (address/prefix), got {destination!r}")
@@ -607,7 +677,7 @@ def _load_route_spec(sp: Any, c: "_Collector") -> Optional[RouteSpec]:
     # the compiler aggregates routes into one router object, and writing that
     # object without its interface list would break routing wholesale.
     interfaces: Tuple[str, ...] = ()
-    target = _resolve_target_folder(folder, environment, c)
+    target = _resolve_target_scope(folder, device, environment, c)
     if target is not None and c.router_catalog is not None:
         found = c.router_catalog.interfaces_for(target, router, vrf)
         if found is None:
@@ -618,12 +688,12 @@ def _load_route_spec(sp: Any, c: "_Collector") -> Optional[RouteSpec]:
             return None
         interfaces = found
 
-    if (folder is None and environment is None) or destination is None:
+    if (folder is None and device is None and environment is None) or destination is None:
         return None
     if not all((ok_r, ok_v, ok_nh, ok_nhi, ok_m, ok_a)):
         return None
     return RouteSpec(
-        folder=folder, environment=environment,
+        folder=folder, device=device, environment=environment,
         destination=destination, router=router, vrf=vrf,
         nexthop=nexthop, nexthop_interface=nexthop_interface,
         metric=metric, admin_dist=admin_dist, vrf_interfaces=interfaces,
@@ -748,12 +818,13 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     # the folder they named — a silently wrong target, which is the exact failure
     # class this platform exists to prevent. AccessRequest is app-language on
     # purpose: its requesters should never name an SCM folder.
-    if "folder" in sp:
-        c.add(f"{path}.folder",
-              "AccessRequest targets an `environment:`, not a folder — app teams do not "
-              "name SCM folders. (`folder:` is for the Day-1 kinds: InterfaceRequest, "
-              "ZoneRequest, RouteRequest.) Remove it, or map the folder to an environment "
-              "in catalog/environments.yaml.")
+    for key in ("folder", "device"):
+        if key in sp:
+            c.add(f"{path}.{key}",
+                  f"AccessRequest targets an `environment:`, not a {key} — app teams do "
+                  f"not name SCM folders or firewall serials. (`{key}:` is for the Day-1 "
+                  f"kinds: InterfaceRequest, ZoneRequest, RouteRequest.) Remove it, or map "
+                  f"the target to an environment in catalog/environments.yaml.")
 
     action = sp.get("action")
     if action not in _ACTIONS:

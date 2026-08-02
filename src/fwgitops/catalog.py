@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 _PROTOCOLS = {"tcp", "udp"}
@@ -251,6 +251,13 @@ class FolderHierarchy:
     #: Folders explicitly marked targetable. A folder absent from this set is
     #: NOT targetable — see `is_targetable`.
     targetable: FrozenSet[str] = frozenset()
+    #: serial -> the folder it sits under. In SCM the FIREWALL IS THE LAST LEVEL
+    #: of the hierarchy and inherits down it, so firewalls are modelled here —
+    #: but they are addressed `device=<serial>`, never `folder=<serial>`, so
+    #: they are kept apart from `children`.
+    devices: Dict[str, str] = field(default_factory=dict)
+    #: Serials explicitly marked targetable, same fail-closed rule as folders.
+    targetable_devices: FrozenSet[str] = frozenset()
 
     def has_children(self, folder: str) -> bool:
         return bool(self.children.get(folder))
@@ -274,6 +281,25 @@ class FolderHierarchy:
         """For error messages — tells the requester what they may actually name."""
         return sorted(self.targetable)
 
+    # ── Firewalls (the last level of the hierarchy) ───────────────────────
+    def device_known(self, serial: str) -> bool:
+        return serial in self.devices
+
+    def is_device_targetable(self, serial: str) -> bool:
+        """Fail closed, exactly as for folders: undeclared == not targetable."""
+        return serial in self.targetable_devices
+
+    def targetable_device_serials(self) -> List[str]:
+        return sorted(self.targetable_devices)
+
+    def folder_of_device(self, serial: str) -> Optional[str]:
+        """The folder a firewall sits under — what it inherits from."""
+        return self.devices.get(serial)
+
+    def devices_of(self, folder: str) -> FrozenSet[str]:
+        """Firewalls beneath a folder. A change to the folder reaches them all."""
+        return frozenset(s for s, f in self.devices.items() if f == folder)
+
     @classmethod
     def from_dict(cls, data: Any) -> "FolderHierarchy":
         """Build from parsed YAML. Fails closed on a bad shape."""
@@ -284,6 +310,8 @@ class FolderHierarchy:
             raise CatalogError("folder hierarchy: `folders` must be a mapping")
         out: Dict[str, FrozenSet[str]] = {}
         targetable: set = set()
+        devices: Dict[str, str] = {}
+        targetable_devices: set = set()
         for name, spec in folders.items():
             # A device folder is named for the serial. Unquoted, YAML reads a
             # serial with NO leading zero (123456789012345) as an int — the
@@ -318,7 +346,49 @@ class FolderHierarchy:
                 )
             if flag is True:
                 targetable.add(name.strip())
-        return cls(children=out, targetable=frozenset(targetable))
+
+            # Firewalls beneath this folder. Same quoting trap as folder names:
+            # a serial with no leading zero parses as an int.
+            devs = spec.get("devices") if isinstance(spec, dict) else None
+            if devs is None:
+                continue
+            if not isinstance(devs, dict):
+                raise CatalogError(
+                    f"folder hierarchy: {name!r}.devices must be a mapping of "
+                    f"serial -> spec")
+            for serial, dspec in devs.items():
+                if isinstance(serial, int):
+                    raise CatalogError(
+                        f"folder hierarchy: device serial {serial!r} parsed as a number — "
+                        f'quote it ("{serial}").')
+                if not isinstance(serial, str) or not serial.strip():
+                    raise CatalogError(f"folder hierarchy: bad device serial {serial!r}")
+                serial = serial.strip()
+                if serial in devices:
+                    raise CatalogError(
+                        f"folder hierarchy: device {serial!r} listed under both "
+                        f"{devices[serial]!r} and {name.strip()!r} — a firewall sits "
+                        f"under exactly one folder")
+                devices[serial] = name.strip()
+                dflag = dspec.get("targetable") if isinstance(dspec, dict) else None
+                if dflag is not None and not isinstance(dflag, bool):
+                    raise CatalogError(
+                        f"folder hierarchy: {serial!r}.targetable must be true or false, "
+                        f"got {dflag!r}")
+                if dflag is True:
+                    targetable_devices.add(serial)
+
+        # A serial must not also be a folder name — that is the v1.11.0 mistake
+        # in its purest form, and it would make `folder:` and `device:` disagree
+        # about what a name means.
+        clash = sorted(set(devices) & set(out))
+        if clash:
+            raise CatalogError(
+                f"folder hierarchy: {clash} appear as BOTH a folder and a firewall. "
+                f"A firewall is the last level of the hierarchy but is addressed "
+                f"`device=<serial>`, never `folder=<serial>`.")
+        return cls(children=out, targetable=frozenset(targetable),
+                   devices=devices, targetable_devices=frozenset(targetable_devices))
 
 
 @dataclass(frozen=True)

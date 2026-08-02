@@ -170,6 +170,10 @@ def test_zone_tfvars_shape():
         "zones": {"dmz": {
             "name": "dmz",
             "folder": "prod-edge",
+            # Exactly one of folder/device is non-null — the provider enforces
+            # "exactly one of device, folder, snippet". Present-but-null keeps
+            # the JSON byte-stable across compiles.
+            "device": None,
             "network": {
                 "layer3": ["e1/2"],
                 "zone_protection_profile": None,

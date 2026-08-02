@@ -92,13 +92,68 @@ class CompiledChange:
 
 
 @dataclass(frozen=True)
+class Scope:
+    """WHERE a Day-1 object lands: an SCM folder, or a single firewall.
+
+    In SCM the firewall is the last level of the hierarchy and inherits down it,
+    but folder and device are separate ADDRESSES — `folder=<serial>` returns 400
+    "Folder doesn't exist". The provider says the same: "exactly one of device,
+    folder, snippet" on every resource.
+
+    Targeting a firewall is the narrower act. Verified in
+    `spike/device-override-probe`: a device-scope write to an inherited object
+    creates a per-device override and leaves the shared object, the other
+    firewall and the parent folders untouched. Deleting it reverts to
+    inheritance.
+    """
+
+    kind: str      # "folder" | "device"
+    value: str
+
+    @property
+    def key(self) -> str:
+        """Stable key for grouping and for catalogs keyed by scope."""
+        return self.value if self.kind == "folder" else f"device:{self.value}"
+
+    @property
+    def dirname(self) -> str:
+        """Terraform root directory name. One root == one state (design Arch-2),
+        and a firewall's state must not share a root with its folder's."""
+        return self.value if self.kind == "folder" else f"device-{self.value}"
+
+    @property
+    def tfvars(self) -> Dict[str, Any]:
+        """The scope attributes every resource carries. Exactly one is non-null;
+        the provider rejects the object otherwise."""
+        return {
+            "folder": self.value if self.kind == "folder" else None,
+            "device": self.value if self.kind == "device" else None,
+        }
+
+    def __str__(self) -> str:
+        return self.key
+
+
+def scope_of(obj: Any) -> Scope:
+    """The Scope of a compiled object, from its folder/device fields."""
+    device = getattr(obj, "device", None)
+    if device:
+        return Scope(kind="device", value=device)
+    return Scope(kind="folder", value=obj.folder)
+
+
+@dataclass(frozen=True)
 class CompiledZone:
     """Compiled output of a ZoneRequest (kind #2) — one scm_zone in a folder."""
 
-    folder: str
     name: str
     zone_type: str
     interfaces: List[str]
+
+    # Exactly one of folder/device — see Scope. A firewall is the last
+    # level of the SCM hierarchy but is addressed `device=`, never `folder=`.
+    folder: Optional[str] = None
+    device: Optional[str] = None
     # Security posture — see ZoneSpec for why each one matters.
     protection_profile: Optional[str] = None
     log_forwarding: Optional[str] = None
@@ -324,11 +379,15 @@ class CompiledRoute:
     the VRF's interface membership.
     """
 
-    folder: str
     router: str
     vrf: str
     name: str                                # the request id — stable for_each key
     destination: str
+
+    # Exactly one of folder/device — see Scope. A firewall is the last
+    # level of the SCM hierarchy but is addressed `device=`, never `folder=`.
+    folder: Optional[str] = None
+    device: Optional[str] = None
     nexthop: Optional[str] = None
     nexthop_interface: Optional[str] = None
     metric: Optional[int] = None
@@ -347,8 +406,12 @@ class CompiledInterface:
     empty, and what an InterfaceRequest supplies is the addressing.
     """
 
-    folder: str
     name: str                                # the folder-scope name, "$eth-local"
+
+    # Exactly one of folder/device — see Scope. A firewall is the last
+    # level of the SCM hierarchy but is addressed `device=`, never `folder=`.
+    folder: Optional[str] = None
+    device: Optional[str] = None
     ip: List[str] = field(default_factory=list)
     dhcp: bool = False
     mtu: Optional[int] = None
@@ -367,23 +430,31 @@ def _acl_dict(acl) -> Optional[Dict[str, List[str]]]:
     return {"include_list": list(acl.include), "exclude_list": list(acl.exclude)}
 
 
-def _target_folder(spec, env_map: EnvMap) -> str:
-    """The folder a Day-1 compiled object lands in.
+def _scope_kwargs(spec, env_map: EnvMap) -> Dict[str, Any]:
+    """`folder=`/`device=` kwargs for a compiled dataclass."""
+    folder, device = _target(spec, env_map)
+    return {"folder": folder, "device": device}
 
-    `folder` set means the intent named its target directly (already validated
-    as declared AND targetable at load time). Otherwise fall back to the
-    `environment` indirection AccessRequest uses. `env_map.resolve` raises
-    ResolveError, so an unknown environment still fails closed.
+
+def _target(spec, env_map: EnvMap) -> Tuple[Optional[str], Optional[str]]:
+    """(folder, device) for a Day-1 compiled object. Exactly one is set.
+
+    A directly-named `folder`/`device` was already validated as declared AND
+    targetable at load time. Otherwise fall back to the `environment`
+    indirection AccessRequest uses; `env_map.resolve` raises ResolveError, so an
+    unknown environment still fails closed.
     """
+    if getattr(spec, "device", None):
+        return None, spec.device
     if getattr(spec, "folder", None):
-        return spec.folder
-    return env_map.resolve(spec.environment).folder
+        return spec.folder, None
+    return env_map.resolve(spec.environment).folder, None
 
 
 def _compile_zone(zr: ZoneRequest, env_map: EnvMap) -> CompiledZone:
     sp = zr.spec
     return CompiledZone(
-        folder=_target_folder(sp, env_map), name=sp.zone,
+        **_scope_kwargs(sp, env_map), name=sp.zone,
         zone_type=sp.zone_type, interfaces=list(sp.interfaces),
         protection_profile=sp.protection_profile, log_forwarding=sp.log_forwarding,
         user_id=sp.user_id, device_id=sp.device_id,
@@ -395,7 +466,7 @@ def _compile_zone(zr: ZoneRequest, env_map: EnvMap) -> CompiledZone:
 def _compile_interface(ir, env_map: EnvMap) -> CompiledInterface:
     sp = ir.spec
     return CompiledInterface(
-        folder=_target_folder(sp, env_map), name=sp.interface,
+        **_scope_kwargs(sp, env_map), name=sp.interface,
         ip=list(sp.ip), dhcp=sp.dhcp, mtu=sp.mtu,
         comment=sp.comment, management_profile=sp.management_profile,
     )
@@ -404,7 +475,7 @@ def _compile_interface(ir, env_map: EnvMap) -> CompiledInterface:
 def _compile_route(rr, env_map: EnvMap) -> CompiledRoute:
     sp = rr.spec
     return CompiledRoute(
-        folder=_target_folder(sp, env_map), router=sp.router, vrf=sp.vrf,
+        **_scope_kwargs(sp, env_map), router=sp.router, vrf=sp.vrf,
         name=rr.metadata.id, destination=sp.destination,
         nexthop=sp.nexthop, nexthop_interface=sp.nexthop_interface,
         metric=sp.metric, admin_dist=sp.admin_dist,
@@ -425,7 +496,7 @@ def route_tfvars(routes: List[CompiledRoute]) -> Dict[str, Any]:
     by_router: Dict[str, Dict[str, Any]] = {}
     for r in sorted(routes, key=lambda r: (r.router, r.vrf, r.name)):
         router = by_router.setdefault(r.router, {
-            "name": r.router, "folder": r.folder, "_vrfs": {},
+            "name": r.router, **scope_of(r).tfvars, "_vrfs": {},
         })
         if router["folder"] != r.folder:
             raise CompileError(
@@ -472,7 +543,8 @@ def route_tfvars(routes: List[CompiledRoute]) -> Dict[str, Any]:
                 "interface": v["interface"],
                 "routing_table": {"ip": {"static_route": routes_list}},
             })
-        out[name] = {"name": router["name"], "folder": router["folder"], "vrf": vrfs}
+        out[name] = {"name": router["name"], "folder": router["folder"],
+                     "device": router["device"], "vrf": vrfs}
     return {"routers": out}
 
 
@@ -492,7 +564,7 @@ def interface_tfvars(interfaces: List[CompiledInterface]) -> Dict[str, Any]:
             )
         out[i.name] = {
             "name": i.name,
-            "folder": i.folder,
+            **scope_of(i).tfvars,
             "comment": i.comment,
             "layer3": {
                 "ip": [{"name": cidr} for cidr in i.ip] if i.ip else None,
@@ -526,7 +598,7 @@ def zone_tfvars(zones: List[CompiledZone]) -> Dict[str, Any]:
         # PR diff shows only real changes.
         out[z.name] = {
             "name": z.name,
-            "folder": z.folder,
+            **scope_of(z).tfvars,
             "network": {
                 z.zone_type: list(z.interfaces),
                 "zone_protection_profile": z.protection_profile,

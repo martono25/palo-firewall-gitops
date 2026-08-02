@@ -68,8 +68,14 @@ variable "security_rules" {
 variable "zones" {
   description = "Map of zone name -> zone definition (ZoneRequest, ADR-0001)."
   type = map(object({
-    name   = string
-    folder = string
+    name = string
+    # Exactly one of folder/device is non-null (the provider enforces "exactly
+    # one of device, folder, snippet"). A firewall is the last level of the SCM
+    # hierarchy and inherits down it, but is addressed `device=`, never
+    # `folder=`. A device-scope write to an inherited object creates a
+    # per-device OVERRIDE — verified in spike/device-override-probe.
+    folder = optional(string)
+    device = optional(string)
     network = optional(object({
       layer2       = optional(list(string))
       layer3       = optional(list(string))
@@ -115,8 +121,14 @@ variable "zones" {
 variable "interfaces" {
   description = "Map of interface name -> configuration (InterfaceRequest, ADR-0001)."
   type = map(object({
-    name    = string
-    folder  = string
+    name = string
+    # Exactly one of folder/device is non-null (the provider enforces "exactly
+    # one of device, folder, snippet"). A firewall is the last level of the SCM
+    # hierarchy and inherits down it, but is addressed `device=`, never
+    # `folder=`. A device-scope write to an inherited object creates a
+    # per-device OVERRIDE — verified in spike/device-override-probe.
+    folder  = optional(string)
+    device  = optional(string)
     comment = optional(string)
     layer3 = optional(object({
       ip          = optional(list(object({ name = string })))
@@ -142,8 +154,14 @@ variable "interfaces" {
 variable "routers" {
   description = "Map of logical router name -> definition (RouteRequest, ADR-0001)."
   type = map(object({
-    name   = string
-    folder = string
+    name = string
+    # Exactly one of folder/device is non-null (the provider enforces "exactly
+    # one of device, folder, snippet"). A firewall is the last level of the SCM
+    # hierarchy and inherits down it, but is addressed `device=`, never
+    # `folder=`. A device-scope write to an inherited object creates a
+    # per-device OVERRIDE — verified in spike/device-override-probe.
+    folder = optional(string)
+    device = optional(string)
     vrf = optional(list(object({
       name      = string
       interface = optional(list(string))

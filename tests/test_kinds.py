@@ -20,7 +20,7 @@ from fwgitops.compiler import CompileError, CompiledChange, CompiledZone  # noqa
 from fwgitops.kinds import (  # noqa: E402
     REGISTRY,
     compile_any,
-    group_by_kind_and_folder,
+    group_by_kind_and_scope,
     handler_for_compiled,
     handler_for_request,
     kinds_with_drift_engine,
@@ -39,7 +39,7 @@ def test_every_handler_is_fully_populated(kind):
     h = REGISTRY[kind]
     assert h.kind == kind
     for attr in ("request_type", "compiled_type", "compile", "tfvars_filename",
-                 "tfvars", "folder_of", "name_of", "classify"):
+                 "tfvars", "scope_of", "name_of", "classify"):
         assert getattr(h, attr) is not None, f"{kind}.{attr} is not set"
     assert h.drift_engine in ("tag", "state"), f"{kind}: undeclared drift engine"
     assert isinstance(h.has_evidence, bool)
@@ -108,13 +108,30 @@ def test_of_kind_filters_without_isinstance_at_the_call_site():
     assert of_kind(mixed, "AccessRequest") == rules
 
 
-def test_group_by_kind_and_folder_keys_on_both():
+def test_group_by_kind_and_scope_keys_on_both():
+    from fwgitops.compiler import Scope
     a = CompiledZone(folder="f1", name="z1", zone_type="layer3", interfaces=[])
     b = CompiledZone(folder="f2", name="z2", zone_type="layer3", interfaces=[])
     c = CompiledZone(folder="f1", name="z3", zone_type="layer3", interfaces=[])
-    grouped = group_by_kind_and_folder([a, b, c])
-    assert grouped[("ZoneRequest", "f1")] == [a, c]
-    assert grouped[("ZoneRequest", "f2")] == [b]
+    grouped = group_by_kind_and_scope([a, b, c])
+    assert grouped[("ZoneRequest", Scope("folder", "f1"))] == [a, c]
+    assert grouped[("ZoneRequest", Scope("folder", "f2"))] == [b]
+
+
+def test_a_firewall_scope_never_merges_with_its_folders():
+    """A device write is a per-device OVERRIDE of a different object, not an
+    edit of the folder's — so they must not share a group or a Terraform
+    state."""
+    from fwgitops.compiler import Scope
+    in_folder = CompiledZone(folder="prod-edge", name="z", zone_type="layer3", interfaces=[])
+    on_device = CompiledZone(device="007955000894453", name="z", zone_type="layer3",
+                             interfaces=[])
+    grouped = group_by_kind_and_scope([in_folder, on_device])
+    assert grouped[("ZoneRequest", Scope("folder", "prod-edge"))] == [in_folder]
+    assert grouped[("ZoneRequest", Scope("device", "007955000894453"))] == [on_device]
+    # And they land in different Terraform roots.
+    assert Scope("device", "007955000894453").dirname == "device-007955000894453"
+    assert Scope("folder", "prod-edge").dirname == "prod-edge"
 
 
 # ── capability is DECLARED, not faked ─────────────────────────────────────
@@ -145,7 +162,7 @@ def test_a_new_kind_needs_exactly_one_registry_entry():
     everything the CLI does is driven off it."""
     h = REGISTRY["ZoneRequest"]
     z = CompiledZone(folder="prod-edge", name="dmz", zone_type="layer3", interfaces=[])
-    assert h.folder_of(z) == "prod-edge"
+    assert h.scope_of(z).key == "prod-edge"
     assert h.name_of(z) == "dmz"
     assert "zones" in h.tfvars([z])
     assert h.tfvars_filename.endswith(".auto.tfvars.json")

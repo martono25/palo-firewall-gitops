@@ -15,15 +15,22 @@
 #      COMPILE time, not merely tiered up by the classifier. AccessRequest is
 #      unaffected — app teams keep `environment:` and never name an SCM folder.
 #
-# ── ONLY CONTAINERS BELONG IN THIS FILE ───────────────────────────────────
+# ── FOLDERS AND FIREWALLS ARE BOTH HIERARCHY, ADDRESSED DIFFERENTLY ───────
 # GET /config/setup/v1/folders returns TWO kinds of entry, told apart by `type`:
 #
 #   {"name": "prod-edge",       "type": "container"}          <- a real folder
 #   {"name": "007955000894453", "type": "on-prem",
 #    "serial_number": "007955000894453", "model": "PA-VM"}    <- a DEVICE
 #
-# A device is NOT a folder, however much the listing looks like one. Verified
-# three ways on 2026-08-02:
+# In SCM the FIREWALL IS THE LAST LEVEL OF THE HIERARCHY, and config inherits
+# all the way down to it:
+#
+#   All -> ngfw-shared -> prod-edge -> <firewall 007955000894453>
+#
+# So a firewall belongs in this file — a change to `prod-edge` really does reach
+# every firewall beneath it. What a firewall is NOT is a `folder=` you can
+# address. It is reached with `device=<serial>`. Verified three ways on
+# 2026-08-02:
 #   * GET /config/network/v1/zones?folder=007955000894453 -> 400 API_I00013
 #     "Folder 007955000894453 doesn't exist"
 #   * the same serial as `device=` works and returns ethernet1/3, ethernet1/4
@@ -31,22 +38,22 @@
 #     params, and the Terraform provider says "exactly one of device, folder,
 #     snippet" on every resource
 #
-# So device entries must never be listed here. v1.11.0 briefly did list them,
-# marked targetable — an intent could have named one, compiled clean, and failed
-# only at apply. See ADR-0006's correction note. Targeting a single device needs
-# a `device:` scope, which this platform does not implement yet.
+# Both halves matter, and each was got wrong in turn:
+#   * v1.11.0 listed the serials under `children:` and marked them targetable —
+#     an intent could name one, compile clean, and fail only at apply.
+#   * v1.11.1 over-corrected by deleting them from the hierarchy entirely, which
+#     discarded the true part: they ARE descendants.
+# They are therefore listed below under `devices:` — hierarchy members that
+# `folder:` can never name, and that `device:` addresses. See ADR-0006.
 #
 # The classifier is PURE (no live SCM reads), so this is declared rather than
 # discovered. Keep it in step with SCM; the drift work would be the natural
 # place to verify it automatically — including the `type` check that would have
 # caught the mistake above.
 #
-# Verified live 2026-08-02 via GET /config/setup/v1/folders (containers only):
+# Verified live 2026-08-02 via GET /config/setup/v1/folders:
 #   All -> ngfw-shared -> {prod-edge, GitOps}
-# prod-edge additionally has two `on-prem` DEVICES attached (007955000893662,
-# 007955000894453). They are not children in the folder sense and are not listed
-# below; a change to prod-edge reaching both firewalls is that folder's whole
-# purpose, not a hidden fan-out.
+#   prod-edge -> firewalls {007955000893662, 007955000894453}
 #
 # Prisma Access built-ins (Mobile Users, Remote Networks, …) are not managed by
 # this platform and are deliberately absent.
@@ -57,10 +64,25 @@ folders:
     targetable: false
 
   prod-edge:
-    # Production. No child CONTAINERS — its two firewalls are `on-prem` device
-    # entries, not folders.
+    # Production. No child CONTAINERS, but two firewalls beneath it — a change
+    # here reaches both, which is this folder's purpose rather than a hidden
+    # fan-out, so it stays targetable and is not tiered up for it.
     children: []
     targetable: true
+    devices:
+      # Addressed as `device: <serial>` in an intent, NEVER `folder:`.
+      "007955000894453":
+        hostname: fw-prod-edge-4453     # display_name in SCM
+        model: PA-VM
+        # CONNECTED 2026-08-02. A push can commit to it.
+        targetable: true
+      "007955000893662":
+        hostname: fw-prod-edge-3662
+        model: PA-VM
+        # DISCONNECTED 2026-08-02 — config stages in SCM but a push cannot
+        # commit to it. Still targetable: staging config for a firewall that is
+        # temporarily offline is legitimate, and `push` reports the failure.
+        targetable: true
 
   GitOps:
     # Sandbox: zero devices, nothing inherits from it. Where the provider

@@ -1,0 +1,3 @@
+# Do not hand-edit. Generate this file from the live AWS account:
+#   ./terraform/make-backend.sh device-007955000894453
+# (backend.hcl is gitignored — it names your account.)
