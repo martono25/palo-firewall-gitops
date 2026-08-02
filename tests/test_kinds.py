@@ -1,0 +1,145 @@
+"""The intent-kind registry (ADR-0001).
+
+These tests exist because the registry's whole purpose is to make a half-wired
+kind impossible. `ZoneRequest` shipped into three stages and was silently absent
+from four, and Terraform's exit-0 on an undeclared variable meant nothing
+noticed for a release (ADR-0004). So the tests assert the REGISTRY is complete
+and self-consistent, not just that dispatch works.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from fwgitops.compiler import CompileError, CompiledChange, CompiledZone  # noqa: E402
+from fwgitops.kinds import (  # noqa: E402
+    REGISTRY,
+    compile_any,
+    group_by_kind_and_folder,
+    handler_for_compiled,
+    handler_for_request,
+    kinds_with_drift_engine,
+    of_kind,
+    registered_tfvars_filenames,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+# ── the registry must be internally consistent ────────────────────────────
+@pytest.mark.parametrize("kind", sorted(REGISTRY))
+def test_every_handler_is_fully_populated(kind):
+    """A handler with a missing field is a kind wired into some stages and not
+    others — exactly the shape that shipped broken."""
+    h = REGISTRY[kind]
+    assert h.kind == kind
+    for attr in ("request_type", "compiled_type", "compile", "tfvars_filename",
+                 "tfvars", "folder_of", "name_of", "classify"):
+        assert getattr(h, attr) is not None, f"{kind}.{attr} is not set"
+    assert h.drift_engine in ("tag", "state"), f"{kind}: undeclared drift engine"
+    assert isinstance(h.has_evidence, bool)
+
+
+def test_kinds_match_the_intent_loaders_exactly():
+    """The loader registry and the kind registry must not drift apart — a kind
+    that loads but has no handler compiles into nothing."""
+    from fwgitops.intent import _KIND_LOADERS
+    assert set(REGISTRY) == set(_KIND_LOADERS)
+
+
+def test_tfvars_filenames_are_unique_per_kind():
+    """Two kinds sharing a filename would silently overwrite each other."""
+    names = list(registered_tfvars_filenames().values())
+    assert len(names) == len(set(names))
+
+
+def test_every_tfvars_filename_matches_the_gitignore_glob():
+    """Compiled output is a build artifact. The glob must cover every kind,
+    including ones added later."""
+    import subprocess
+    for filename in registered_tfvars_filenames().values():
+        rel = f"terraform/prod-edge/{filename}"
+        rc = subprocess.run(["git", "check-ignore", "-q", rel],
+                            cwd=REPO_ROOT).returncode
+        assert rc == 0, f"{rel} is NOT gitignored — it would be committed as source"
+
+
+def test_compiled_types_are_distinct():
+    """handler_for_compiled resolves by isinstance, so overlapping types would
+    make dispatch order-dependent."""
+    types = [h.compiled_type for h in REGISTRY.values()]
+    assert len(types) == len(set(types))
+    for a in types:
+        for b in types:
+            if a is not b:
+                assert not issubclass(a, b), f"{a.__name__} subclasses {b.__name__}"
+
+
+# ── dispatch ──────────────────────────────────────────────────────────────
+def test_handler_for_request_and_compiled_agree():
+    from test_intent import valid_doc
+    from fwgitops.intent import load_intent
+    from fwgitops.resolve import EnvMap
+    em = EnvMap.from_dict({"prod": {"folder": "f", "from_zone": "a", "to_zone": "b"}})
+    req = load_intent(valid_doc())
+    h1 = handler_for_request(req)
+    h2 = handler_for_compiled(compile_any(req, em))
+    assert h1.kind == h2.kind == "AccessRequest"
+
+
+@pytest.mark.parametrize("obj", [object(), "string", 42, None])
+def test_dispatch_fails_closed_on_an_unregistered_type(obj):
+    with pytest.raises(CompileError, match="no kind registered"):
+        handler_for_compiled(obj)
+    with pytest.raises(CompileError, match="no kind registered"):
+        handler_for_request(obj)
+
+
+def test_of_kind_filters_without_isinstance_at_the_call_site():
+    rules = [CompiledChange(address_objects=[], service_objects=[], rule=None)]
+    zones = [CompiledZone(folder="f", name="z", zone_type="layer3", interfaces=[])]
+    mixed = rules + zones
+    assert of_kind(mixed, "ZoneRequest") == zones
+    assert of_kind(mixed, "AccessRequest") == rules
+
+
+def test_group_by_kind_and_folder_keys_on_both():
+    a = CompiledZone(folder="f1", name="z1", zone_type="layer3", interfaces=[])
+    b = CompiledZone(folder="f2", name="z2", zone_type="layer3", interfaces=[])
+    c = CompiledZone(folder="f1", name="z3", zone_type="layer3", interfaces=[])
+    grouped = group_by_kind_and_folder([a, b, c])
+    assert grouped[("ZoneRequest", "f1")] == [a, c]
+    assert grouped[("ZoneRequest", "f2")] == [b]
+
+
+# ── capability is DECLARED, not faked ─────────────────────────────────────
+def test_drift_engines_are_declared_per_kind_not_assumed_uniform():
+    """Rules carry gitops: tags so drift knows WHO created something. scm_zone
+    has no tag attribute, so zones use state-based drift. Same word, genuinely
+    different mechanism — the registry records which, rather than pretending
+    one signature fits both."""
+    assert [h.kind for h in kinds_with_drift_engine("tag")] == ["AccessRequest"]
+    assert [h.kind for h in kinds_with_drift_engine("state")] == ["ZoneRequest"]
+
+
+def test_evidence_capability_is_declared_rather_than_discovered_at_runtime():
+    """build_bundle is rule-shaped today. Recording that is honest; a protocol
+    member returning None would be an interface with a hole."""
+    assert REGISTRY["AccessRequest"].has_evidence is True
+    assert REGISTRY["ZoneRequest"].has_evidence is False
+
+
+def test_a_new_kind_needs_exactly_one_registry_entry():
+    """The point of the whole refactor: adding a kind is one registration, and
+    everything the CLI does is driven off it."""
+    h = REGISTRY["ZoneRequest"]
+    z = CompiledZone(folder="prod-edge", name="dmz", zone_type="layer3", interfaces=[])
+    assert h.folder_of(z) == "prod-edge"
+    assert h.name_of(z) == "dmz"
+    assert "zones" in h.tfvars([z])
+    assert h.tfvars_filename.endswith(".auto.tfvars.json")

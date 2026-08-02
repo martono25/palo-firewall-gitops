@@ -64,7 +64,7 @@ remembered (loader, compiler, CLI) and silently omitted from the four nobody did
 auto-tfvars variable with exit 0, the result compiled, planned and applied green
 for an entire release without ever reaching a firewall. See ADR-0004.
 
-### Correction: drift is not kind-agnostic
+### Correction: drift is not kind-agnostic (and the registry says so)
 
 `drift.py` detects drift entirely from `gitops:` tags (`is_managed`,
 `parse_managed_meta`), and the module carries a whole `scm_tag` resource because
@@ -73,10 +73,13 @@ against provider v1.0.11. So zones cannot participate in the tag-based drift
 model at all: a hand-added zone is invisible, and there is no `gitops:req`
 provenance for a zone.
 
-Before promising drift coverage for any future kind, check whether its SCM
-resource supports tags. A `KindHandler` protocol with optional members for
-stages a kind cannot support is an interface with holes, which is why the
-registry refactor is deferred rather than rushed.
+Both engines now exist (v1.3.0): tag-based for rules, state-based for objects
+that cannot carry tags. `KindHandler.drift_engine` records which a kind uses, so
+"does this kind have drift coverage" is answerable without guessing.
+
+Before promising drift coverage for a future kind, check whether its SCM resource
+supports tags — `scm_ethernet_interface` does not either, and only 14 of the
+provider's resources do.
 
 - `AccessRequest` is kind #1 (built + proven). `ZoneRequest` is kind #2. Grow as
   we mature: `InterfaceRequest`, `RouteRequest`, `NatRequest`, group kinds.
