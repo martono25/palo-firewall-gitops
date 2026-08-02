@@ -367,11 +367,23 @@ def _acl_dict(acl) -> Optional[Dict[str, List[str]]]:
     return {"include_list": list(acl.include), "exclude_list": list(acl.exclude)}
 
 
+def _target_folder(spec, env_map: EnvMap) -> str:
+    """The folder a Day-1 compiled object lands in.
+
+    `folder` set means the intent named its target directly (already validated
+    as declared AND targetable at load time). Otherwise fall back to the
+    `environment` indirection AccessRequest uses. `env_map.resolve` raises
+    ResolveError, so an unknown environment still fails closed.
+    """
+    if getattr(spec, "folder", None):
+        return spec.folder
+    return env_map.resolve(spec.environment).folder
+
+
 def _compile_zone(zr: ZoneRequest, env_map: EnvMap) -> CompiledZone:
-    res = env_map.resolve(zr.spec.environment)  # raises ResolveError (fail closed)
     sp = zr.spec
     return CompiledZone(
-        folder=res.folder, name=sp.zone,
+        folder=_target_folder(sp, env_map), name=sp.zone,
         zone_type=sp.zone_type, interfaces=list(sp.interfaces),
         protection_profile=sp.protection_profile, log_forwarding=sp.log_forwarding,
         user_id=sp.user_id, device_id=sp.device_id,
@@ -381,20 +393,18 @@ def _compile_zone(zr: ZoneRequest, env_map: EnvMap) -> CompiledZone:
 
 
 def _compile_interface(ir, env_map: EnvMap) -> CompiledInterface:
-    res = env_map.resolve(ir.spec.environment)  # raises ResolveError (fail closed)
     sp = ir.spec
     return CompiledInterface(
-        folder=res.folder, name=sp.interface,
+        folder=_target_folder(sp, env_map), name=sp.interface,
         ip=list(sp.ip), dhcp=sp.dhcp, mtu=sp.mtu,
         comment=sp.comment, management_profile=sp.management_profile,
     )
 
 
 def _compile_route(rr, env_map: EnvMap) -> CompiledRoute:
-    res = env_map.resolve(rr.spec.environment)  # raises ResolveError (fail closed)
     sp = rr.spec
     return CompiledRoute(
-        folder=res.folder, router=sp.router, vrf=sp.vrf,
+        folder=_target_folder(sp, env_map), router=sp.router, vrf=sp.vrf,
         name=rr.metadata.id, destination=sp.destination,
         nexthop=sp.nexthop, nexthop_interface=sp.nexthop_interface,
         metric=sp.metric, admin_dist=sp.admin_dist,

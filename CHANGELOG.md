@@ -3,6 +3,48 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] — 2026-08-02
+
+The Day-1 kinds now name their target folder directly. See ADR-0006.
+
+### `folder:` on InterfaceRequest / ZoneRequest / RouteRequest
+`environment:` resolves 1:1 to a folder, so it could not name a DEVICE folder at
+all — and SCM parents one under `prod-edge` per onboarded firewall, which is the
+tightest scope that still reaches real hardware. Worse, the only way to express a
+new target was to edit `catalog/environments.yaml`, turning a one-off targeted
+change into a platform-config PR.
+
+`AccessRequest` is unchanged and keeps `environment:` — app teams should never
+need to know SCM topology. Different author, different addressing; ADR-0001's
+principle is that kinds declare capability rather than fake uniformity.
+
+Day-1 kinds take **exactly one** of `folder:` / `environment:`.
+
+### Guarded by the catalog, not the classifier
+`catalog/folders.yaml` gains `targetable: true|false`. An intent naming an
+unknown or non-targetable folder is **rejected at compile time** — not tiered up.
+The `folder_with_children` check still fires HIGH, but HIGH is *approvable*, and
+a write to a shared parent like `ngfw-shared` should not be one rubber-stamp away
+from reaching every device at once. Fail closed throughout: unknown folders are
+not targetable, and a **missing** catalog makes `folder:` unusable rather than
+unchecked.
+
+### Fixed: the shipped folder hierarchy understated production blast radius
+`catalog/folders.yaml` declared `prod-edge: children: []` while SCM has had two
+device folders under it all along. The classifier reads that file, so **changes
+to the production folder scored as reaching no descendants when they in fact
+reach both firewalls.** Understating blast radius on the production folder is the
+worst direction to be wrong in. A test asserted the stale shape; it now asserts
+the live one.
+
+### Fixed: `AccessRequest` silently ignored `folder:`
+It was an unknown key, so an AccessRequest that copied `folder:` from a Day-1
+example landed in whatever `environment` resolved to while its author believed
+otherwise — a silently wrong target. Now rejected with a message naming
+`environment:`.
+
+538 tests.
+
 ## [1.10.0] — 2026-08-02
 
 `RouteRequest` (ADR-0001 kind #4) closes ADR-0002's ordered Day-1 chain:

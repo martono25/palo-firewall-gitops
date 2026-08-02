@@ -9,7 +9,8 @@ the context, the decision, and its consequences at a point in time.
 | [0002](0002-day1-provisioning-thin-bootstrap.md) | Day-1 provisioning: thin bootstrap + ordered config jobs | Accepted — bootstrap half built |
 | [0003](0003-security-rule-component-model.md) | Security-rule component model (App-ID, profiles, forwarding, ordering) | Accepted — built, proven on hardware |
 | [0004](0004-compiler-terraform-contract.md) | The compiler → Terraform contract must be enforced | Accepted — built |
-| [0005](0005-interfacerequest-folder-scope.md) | `InterfaceRequest` targets folder scope via the `$eth-*` variables | Accepted — direction |
+| [0005](0005-interfacerequest-folder-scope.md) | `InterfaceRequest` targets folder scope via the `$eth-*` variables | Accepted — built |
+| [0006](0006-day1-kinds-target-a-folder.md) | Day-1 kinds name their `folder:`; `AccessRequest` keeps `environment:` | Accepted — built |
 
 **0001** — the intent-loader registry and `ZoneRequest` are built; the registry
 is otherwise a registry in name only (classify / evidence / drift are still

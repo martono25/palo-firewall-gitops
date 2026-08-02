@@ -377,10 +377,60 @@ def test_the_shipped_folder_hierarchy_parses_and_matches_the_tenant():
 
     from fwgitops.catalog import FolderHierarchy
     h = FolderHierarchy.from_dict(yaml.safe_load(open("catalog/folders.yaml")))
-    # Verified live 2026-08-02: All -> ngfw-shared -> {prod-edge, GitOps}
+    # Verified live 2026-08-02:
+    #   All -> ngfw-shared -> {prod-edge, GitOps}
+    #   prod-edge -> {007955000893662, 007955000894453}   <- one folder PER DEVICE
     assert h.has_children("ngfw-shared")
     assert h.children_of("ngfw-shared") == frozenset({"prod-edge", "GitOps"})
-    assert not h.has_children("prod-edge")
+
+    # This assertion used to read `not h.has_children("prod-edge")`, encoding a
+    # stale catalog. SCM parents a folder under prod-edge for EACH onboarded
+    # device, so a change to the production folder reaches both firewalls — and
+    # the classifier was scoring it as reaching nothing. Understating blast
+    # radius on the production folder is the worst direction to be wrong in.
+    assert h.has_children("prod-edge")
+    assert h.children_of("prod-edge") == frozenset({"007955000893662", "007955000894453"})
+    assert not h.has_children("GitOps")
+
+
+def test_shared_parents_are_not_targetable_but_leaves_are():
+    """`folder:` in a Day-1 intent is only safe because of this. Targetability
+    is checked at COMPILE time rather than tiered up, because HIGH is approvable
+    and a write to a shared parent should not be one rubber-stamp away."""
+    import yaml
+
+    from fwgitops.catalog import FolderHierarchy
+    h = FolderHierarchy.from_dict(yaml.safe_load(open("catalog/folders.yaml")))
+    assert not h.is_targetable("ngfw-shared")     # parents prod AND sandbox
+    assert h.is_targetable("prod-edge")
+    assert h.is_targetable("GitOps")
+    assert h.is_targetable("007955000894453")     # device folder
+    # Fail closed: never seen == never targetable.
+    assert not h.is_targetable("All")
+    assert not h.is_targetable("typo-folder")
+    assert not h.known("typo-folder")
+
+
+def test_a_device_folder_name_must_be_quoted_in_yaml():
+    """An unquoted serial with no leading zero parses as an int. Coercing it
+    back to a string is worse than rejecting — it would never match the real
+    folder — so reject with an actionable message."""
+    import yaml
+
+    from fwgitops.catalog import CatalogError, FolderHierarchy
+    with pytest.raises(CatalogError, match="quote it"):
+        FolderHierarchy.from_dict(
+            yaml.safe_load("folders:\n  123456789012345:\n    children: []\n"))
+
+
+def test_the_tenants_serials_survive_unquoted_only_by_luck():
+    """Both current serials start with `00`, which YAML rejects as octal and
+    falls back to str — so they parse correctly even unquoted. That is luck, not
+    design, and the reason the shipped catalog quotes them anyway."""
+    import yaml
+
+    parsed = yaml.safe_load("folders:\n  007955000894453:\n    children: []\n")
+    assert isinstance(next(iter(parsed["folders"])), str)
 
 
 @pytest.mark.parametrize("bad", [
