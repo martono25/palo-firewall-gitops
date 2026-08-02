@@ -549,9 +549,11 @@ def test_a_matching_object_type_has_no_attribute_violations(tmp_path):
     assert check_object_attributes(_root(tmp_path, body), "security_rules", RULE_PAYLOAD) == []
 
 
-def test_nested_object_attributes_do_not_leak_into_the_parent(tmp_path):
-    """`optional(object({...}))` nests — its attribute names belong to the
-    nested type, not the one being checked."""
+def test_nested_attributes_are_scoped_to_their_parent_path(tmp_path):
+    """`optional(object({...}))` nests. Its attribute names belong to the NESTED
+    type, so they must never appear as bare top-level names — but they must be
+    visible as dotted paths, because HOLE 3 applies at any depth.
+    """
     from fwgitops.tfcontract import declared_object_attributes
     d = _root(tmp_path, '''
 variable "zones" {
@@ -559,13 +561,17 @@ variable "zones" {
     name   = string
     folder = string
     network = optional(object({
-      layer3     = optional(list(string))
+      layer3         = optional(list(string))
       must_not_count = optional(string)
     }))
   }))
 }
 ''')
-    assert declared_object_attributes(d, "zones") == {"name", "folder", "network"}
+    paths = declared_object_attributes(d, "zones")
+    assert {"name", "folder", "network"} <= paths
+    assert "network.layer3" in paths and "network.must_not_count" in paths
+    # the nested names must NOT masquerade as attributes of the parent
+    assert "layer3" not in paths and "must_not_count" not in paths
 
 
 @pytest.mark.parametrize("body,var", [
@@ -651,3 +657,83 @@ def test_this_repos_root_object_types_accept_everything_the_compiler_emits():
                 f"{folder}: root variable {key!r} does not declare everything the "
                 f"compiler emits — Terraform would discard it silently"
             )
+
+
+# ── HOLE 3 at DEPTH (ADR-0005 prerequisite: `layer3` is a nested object) ────
+def test_hole_3_is_caught_inside_a_nested_object(tmp_path):
+    """The documented limit of the original check, now closed.
+
+    Terraform discards an undeclared attribute at ANY depth. `layer3` on an
+    interface and `network` on a zone are nested objects, so a root whose NESTED
+    type is narrower than the module's would drop fields with the top-level key
+    looking perfectly fine.
+    """
+    from fwgitops.tfcontract import check_object_attributes
+    d = _root(tmp_path, '''
+variable "zones" {
+  type = map(object({
+    name    = string
+    network = optional(object({
+      layer3 = optional(list(string))
+    }))
+  }))
+}
+module "m" {
+  source = "../x"
+  zones  = var.zones
+}
+''')
+    payload = {"dmz": {"name": "dmz", "network": {
+        "layer3": [], "zone_protection_profile": "best-practice"}}}
+    problems = check_object_attributes(d, "zones", payload)
+    assert len(problems) == 1
+    assert "network.zone_protection_profile" in problems[0]
+
+
+def test_a_nested_type_that_declares_everything_is_clean(tmp_path):
+    from fwgitops.tfcontract import check_object_attributes
+    d = _root(tmp_path, '''
+variable "zones" {
+  type = map(object({
+    name    = string
+    network = optional(object({
+      layer3                  = optional(list(string))
+      zone_protection_profile = optional(string)
+    }))
+  }))
+}
+module "m" { source = "../x"
+  zones = var.zones }
+''')
+    payload = {"dmz": {"name": "dmz", "network": {
+        "layer3": [], "zone_protection_profile": "best-practice"}}}
+    assert check_object_attributes(d, "zones", payload) == []
+
+
+def test_a_null_nested_object_asserts_nothing_about_its_children(tmp_path):
+    """The compiler emits `"user_acl": null` for an unset optional object. That
+    is a claim about `user_acl`, not about its nested attributes."""
+    from fwgitops.tfcontract import check_object_attributes
+    d = _root(tmp_path, '''
+variable "zones" {
+  type = map(object({
+    name     = string
+    user_acl = optional(object({ include_list = optional(list(string)) }))
+  }))
+}
+module "m" { source = "../x"
+  zones = var.zones }
+''')
+    assert check_object_attributes(d, "zones", {"dmz": {"name": "dmz", "user_acl": None}}) == []
+
+
+def test_the_repos_real_zone_type_declares_every_nested_path_emitted():
+    """Guards the live tree at depth, not just at the top level."""
+    from fwgitops.compiler import CompiledZone, zone_tfvars
+    from fwgitops.tfcontract import check_object_attributes
+    z = CompiledZone(folder="prod-edge", name="dmz", zone_type="layer3", interfaces=[],
+                     protection_profile="p", log_forwarding="l", user_id=True,
+                     user_acl={"include_list": [], "exclude_list": []},
+                     device_acl={"include_list": [], "exclude_list": []})
+    root = REPO_ROOT / "terraform" / "prod-edge"
+    assert check_object_attributes(root, "zones", zone_tfvars([z])["zones"]) == []

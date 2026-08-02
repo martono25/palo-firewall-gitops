@@ -202,38 +202,35 @@ allowlist of scratch folders) is a few lines.
 interfaces by their `$eth-*` variable names, CONFIGURING an existing interface
 (setting `layer3` addressing) rather than creating one.
 
-**Blocking prerequisites from ADR-0005**, all of which are the price of the
-blast radius (`ngfw-shared` feeds both `prod-edge` and `GitOps`):
-1. classifier treats a change scoped to a folder with children as HIGH minimum;
+**Blocking prerequisites from ADR-0005** — the price of the blast radius
+(`ngfw-shared` feeds both `prod-edge` and `GitOps`):
+
+1. ~~classifier treats a change scoped to a folder with children as HIGH~~
+   **DONE v1.4.0** — `folder_with_children`, driven by `catalog/folders.yaml`.
+   Applies to every kind, not just interfaces.
 2. a `novel_addressing` check — assigning an IP where `layer3` was `{}` is not
-   the same act as editing an existing one;
-3. the per-attribute contract check (ADR-0004) covers `layer3`, which is a
-   nested object — exactly where HOLE 3 lives;
+   the same act as editing an existing one. **OPEN**, and it needs the current
+   `layer3` state, so it depends on a live read or the drift snapshot.
+3. ~~per-attribute contract check covers `layer3`, a nested object~~
+   **DONE v1.4.0** — the HOLE 3 check now recurses, comparing dotted paths.
 4. run the `scm_ethernet_interface` fidelity probe against a folder-scope
-   interface, which was deliberately deferred until the design was settled.
+   interface. **OPEN** — the one prerequisite that needs a write to
+   `ngfw-shared`, which is why it is still deferred.
 
-**Why:** ADR-0002 specifies `InterfaceRequest` as `ethernet1/1 layer3,
-DHCP/static IP` — a folder-local interface carrying addressing. Read-only
-discovery on 2026-08-02 showed the tenant does not work that way: interfaces are
-named variables (`$eth-local`, `$eth-internet`) with per-device `default_value`s
-(`ethernet1/4`, `ethernet1/3`), defined once in the parent folder `ngfw-shared`
-and inherited by both `prod-edge` and `GitOps`, with `layer3 = {}` — no
-addressing stored in SCM at all.
+**Why:** the interfaces exist on both devices and neither has an IP —
+`layer3` is `{}` at every scope. Configuring that through Git is the first link
+of ADR-0002's Day-1 chain, and nothing else in the chain is buildable until it
+is.
 
-So the design in ADR-0002 has no target as written, and an `InterfaceRequest`
-would either write to a folder feeding production *and* the sandbox, or create
-local overrides of inherited objects. Both are materially different, and the
-first carries more blast radius than any Day-2 change so far.
+**Context:** the design is settled (ADR-0005): folder scope, addressing by
+`$eth-*` name, CONFIGURING an existing interface rather than creating one.
+`$eth-local` and `ethernet1/4` proved to be the same object under two names.
+Two of the four prerequisites are done; the probe kit at `spike/zone-probe/` is
+ready to point at `scm_ethernet_interface` when prerequisite 4 is taken.
 
-**Context:** The `scm_ethernet_interface` fidelity probe was deliberately NOT
-run — fidelity of a resource the design may not use is not the blocker, and
-unlike zones there is no clean scratch target (ngfw-shared feeds production;
-GitOps would create an override). The probe kit at `spike/zone-probe/` is ready
-to point at whichever resource this decision lands on. Full write-up in ADR-0002.
-
-**Effort:** M (decision) + S (probe, once the target is known)
+**Effort:** L
 **Priority:** P1
-**Depends on:** None — this is the gate on the whole Day-1 chain.
+**Depends on:** prerequisites 2 and 4 above.
 
 ## Compiler / intent model
 

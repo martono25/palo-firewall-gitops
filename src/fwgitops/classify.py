@@ -256,6 +256,7 @@ def classify(
     *,
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
     policy: Optional[PolicyContext] = None,
+    hierarchy=None,
 ) -> RiskVerdict:
     """Classify a compiled change into a RiskVerdict (fail-closed).
 
@@ -267,6 +268,10 @@ def classify(
     rule = change.rule
     by_name = {a.name: a for a in change.address_objects}
     fired: List[Dict[str, str]] = []
+
+    blast = _folder_blast_radius(rule.folder, hierarchy)
+    if blast is not None:
+        fired.append(blast)
 
     def fire(tier: str, check: str, reason: str) -> None:
         fired.append({"check": check, "reason": reason, "tier": tier})
@@ -380,7 +385,30 @@ def classify(
     )
 
 
-def classify_zone(zone: CompiledZone) -> RiskVerdict:
+def _folder_blast_radius(folder: str, hierarchy) -> Optional[Dict[str, str]]:
+    """HIGH when a change is scoped to a folder that has CHILD folders.
+
+    Such a change reaches every descendant at once. On the pilot tenant
+    `ngfw-shared` parents both `prod-edge` (production) and `GitOps` (sandbox),
+    so one change there lands on production and the sandbox together — a
+    materially larger blast radius than any folder-local change.
+
+    ADR-0005 makes this a blocking prerequisite for `InterfaceRequest`, which is
+    the first kind that would write at that scope. It applies to every kind, so
+    it lives here rather than inside one classifier.
+    """
+    if hierarchy is None or not hierarchy.has_children(folder):
+        return None
+    kids = ", ".join(sorted(hierarchy.children_of(folder)))
+    return {
+        "check": "folder_with_children",
+        "tier": "HIGH",
+        "reason": (f"scoped to folder {folder!r}, which has child folder(s) {kids} — "
+                   f"this change reaches every one of them"),
+    }
+
+
+def classify_zone(zone: CompiledZone, *, hierarchy=None) -> RiskVerdict:
     """Risk-classify a ZoneRequest (ADR-0001 kind #2). Fail-closed.
 
     Deliberately a separate entry point rather than a branch inside `classify`:
@@ -401,6 +429,10 @@ def classify_zone(zone: CompiledZone) -> RiskVerdict:
       the rule is simply skipped, and traffic falls through to whatever is next.
     """
     fired: List[Dict[str, str]] = []
+
+    blast = _folder_blast_radius(zone.folder, hierarchy)
+    if blast is not None:
+        fired.append(blast)
 
     if not zone.has_protection:
         fired.append({

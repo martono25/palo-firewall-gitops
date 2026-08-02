@@ -347,6 +347,20 @@ def run_classify(
     """
     from fwgitops.classify import TIERS, PolicyContext, classify, classify_zone
 
+    # Folder hierarchy (optional). A change scoped to a folder WITH CHILDREN
+    # reaches every one of them — the largest blast radius this platform can
+    # produce, so the classifier tiers it up (ADR-0005). The classifier stays
+    # pure: the hierarchy is declared config, not a live SCM read.
+    hierarchy = None
+    hierarchy_path = env_map_path.parent / "folders.yaml"
+    if hierarchy_path.is_file():
+        from fwgitops.catalog import CatalogError, FolderHierarchy
+        try:
+            hierarchy = FolderHierarchy.from_dict(read_yaml(hierarchy_path))
+        except (CatalogError, Exception) as e:  # noqa: BLE001
+            print(f"error: invalid folder hierarchy {hierarchy_path}: {e}", file=err)
+            return 1
+
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
     if not env_map_path.is_file():
@@ -407,7 +421,7 @@ def run_classify(
     # profile has no flood/recon protection, and User-ID off silently breaks any
     # rule matching on source_user — both are findings, not defaults.
     for z in sorted(zones, key=lambda z: (z.folder, z.name)):
-        v = classify_zone(z)
+        v = classify_zone(z, hierarchy=hierarchy)
         tiers[v.tier] = tiers.get(v.tier, 0) + 1
         checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
         print(f"  zone/{z.name:11} {v.tier:9} {checks}", file=out)
@@ -415,7 +429,7 @@ def run_classify(
             exceeded.append(f"zone/{z.name}={v.tier}")
 
     for ch in sorted(changes, key=lambda c: c.rule.name):
-        v = classify(ch, policy=policy)
+        v = classify(ch, policy=policy, hierarchy=hierarchy)
         tiers[v.tier] = tiers.get(v.tier, 0) + 1
         checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
         print(f"  {ch.rule.name:16} {v.tier:9} {checks}", file=out)

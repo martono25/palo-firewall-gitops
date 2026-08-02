@@ -225,3 +225,48 @@ class AppCatalog:
         if problems:
             raise CatalogError("invalid app catalog:\n  - " + "\n  - ".join(problems))
         return cls(apps=out)
+
+
+@dataclass(frozen=True)
+class FolderHierarchy:
+    """Which SCM folders have children (validation-only, no expansion).
+
+    A change scoped to a folder with children reaches every descendant. That is
+    the largest blast radius this platform can produce, so the classifier tiers
+    it up — see `classify`'s `folder_with_children` check and ADR-0005.
+
+    Absent hierarchy means no check, never a silent pass to LOW: the caller
+    decides whether to require one.
+    """
+
+    children: Dict[str, FrozenSet[str]]
+
+    def has_children(self, folder: str) -> bool:
+        return bool(self.children.get(folder))
+
+    def children_of(self, folder: str) -> FrozenSet[str]:
+        return self.children.get(folder, frozenset())
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "FolderHierarchy":
+        """Build from parsed YAML. Fails closed on a bad shape."""
+        if not isinstance(data, dict):
+            raise CatalogError("folder hierarchy must be a mapping")
+        folders = data.get("folders", data)
+        if not isinstance(folders, dict):
+            raise CatalogError("folder hierarchy: `folders` must be a mapping")
+        out: Dict[str, FrozenSet[str]] = {}
+        for name, spec in folders.items():
+            if not isinstance(name, str) or not name.strip():
+                raise CatalogError(f"folder hierarchy: bad folder name {name!r}")
+            kids = spec.get("children", []) if isinstance(spec, dict) else spec
+            if kids is None:
+                kids = []
+            if not isinstance(kids, list) or not all(
+                isinstance(k, str) and k.strip() for k in kids
+            ):
+                raise CatalogError(
+                    f"folder hierarchy: {name!r}.children must be a list of folder names"
+                )
+            out[name.strip()] = frozenset(k.strip() for k in kids)
+        return cls(children=out)

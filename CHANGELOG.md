@@ -3,6 +3,35 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-08-02
+
+Two of ADR-0005's four blocking prerequisites for `InterfaceRequest`. Both close
+gaps that exist today rather than only mattering later.
+
+### HOLE 3 now applies at any depth
+The object-attribute check inspected only the TOP level of an `object({...})`
+type — a documented limitation. Terraform discards an undeclared attribute at
+**any** depth, and both `network` (zones) and `layer3` (interfaces) are nested,
+so a root whose nested type was narrower than the module's would drop fields
+while the top-level key looked perfectly wired.
+
+The check now recurses and compares dotted paths
+(`network.zone_protection_profile`). A `null` nested object asserts nothing about
+its children, so an unset `optional(object(...))` is not a false positive.
+
+### New check — `folder_with_children` (HIGH)
+A change scoped to a folder that has child folders reaches every one of them. On
+this tenant `ngfw-shared` parents both `prod-edge` (production) and `GitOps`
+(sandbox), so one change there lands on both — the largest blast radius this
+platform can produce.
+
+Driven by a new `catalog/folders.yaml`. The classifier stays **pure**: the
+hierarchy is declared config, not a live SCM read. Applies to every kind, so an
+env map pointing at a parent folder tiers up its *rules* too, not just
+interfaces. Absent hierarchy disables the check rather than inventing a verdict.
+
+**Tests: 421 → 434.**
+
 ## [1.3.0] — 2026-08-02
 
 **Drift detection now covers objects that cannot carry tags.**
