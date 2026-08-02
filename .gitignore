@@ -24,8 +24,13 @@ terraform/modules/*/.terraform.lock.hcl
 # the source of truth; CI compiles them fresh for plan/apply, so requesters never
 # run the compiler and never commit these. (Do NOT track them — that forced a
 # manual `fwgitops compile` step on requesters, breaking the no-tooling path.)
-terraform/*/rules.auto.tfvars.json
-terraform/*/zones.auto.tfvars.json
+# Glob, not one line per kind. Listing them individually meant every new intent
+# kind needed a matching gitignore line, and forgetting it commits a build
+# artifact that can then go stale against the intent it claims to represent.
+# ZoneRequest already shipped once without its Terraform wiring for exactly this
+# shape of omission (ADR-0004) — one pattern that cannot be forgotten is better
+# than a checklist item that can.
+terraform/*/*.auto.tfvars.json
 # Secret-bearing tfvars (conventional) stay out:
 terraform.tfvars
 *.secret.tfvars

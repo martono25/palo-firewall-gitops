@@ -737,3 +737,23 @@ def test_the_repos_real_zone_type_declares_every_nested_path_emitted():
                      device_acl={"include_list": [], "exclude_list": []})
     root = REPO_ROOT / "terraform" / "prod-edge"
     assert check_object_attributes(root, "zones", zone_tfvars([z])["zones"]) == []
+
+
+def test_no_compiled_tfvars_artifact_is_tracked_by_git():
+    """Compiled desired-state is a BUILD ARTIFACT, never source.
+
+    A committed `*.auto.tfvars.json` can go stale against the intent it claims to
+    represent, and CI recompiles from intent on every run — so a tracked one is
+    silently ignored at best and misleading at worst. The gitignore uses a glob
+    rather than one line per kind precisely so adding a kind cannot forget it.
+    """
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "*.auto.tfvars.json"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert tracked == [], (
+        f"compiled tfvars committed as source: {tracked}. These are build "
+        f"artifacts — check the `terraform/*/*.auto.tfvars.json` gitignore glob."
+    )
