@@ -161,18 +161,34 @@ allowlist of scratch folders) is a few lines.
 
 ## Provisioning
 
-### Verify scm_ethernet_interface field fidelity before InterfaceRequest
+### Decide what InterfaceRequest manages, BEFORE probing any interface resource
 
-**What:** Re-run the T5 probe pattern against the interface resource.
+**What:** Settle whether `InterfaceRequest` manages the shared-folder interface
+variable, a folder-local override of it, or nothing at all because bootstrap
+owns interface bring-up. Only then probe that resource's provider fidelity.
 
-**Why:** The same provider-fidelity question applies, and the T5 result (zones
-are fine, rules are not) shows fidelity varies **per resource type** — it cannot
-be assumed from one resource to another. Cheap to answer, and it sizes
-InterfaceRequest before it is scoped.
+**Why:** ADR-0002 specifies `InterfaceRequest` as `ethernet1/1 layer3,
+DHCP/static IP` — a folder-local interface carrying addressing. Read-only
+discovery on 2026-08-02 showed the tenant does not work that way: interfaces are
+named variables (`$eth-local`, `$eth-internet`) with per-device `default_value`s
+(`ethernet1/4`, `ethernet1/3`), defined once in the parent folder `ngfw-shared`
+and inherited by both `prod-edge` and `GitOps`, with `layer3 = {}` — no
+addressing stored in SCM at all.
 
-**Effort:** S
-**Priority:** P2
-**Depends on:** None.
+So the design in ADR-0002 has no target as written, and an `InterfaceRequest`
+would either write to a folder feeding production *and* the sandbox, or create
+local overrides of inherited objects. Both are materially different, and the
+first carries more blast radius than any Day-2 change so far.
+
+**Context:** The `scm_ethernet_interface` fidelity probe was deliberately NOT
+run — fidelity of a resource the design may not use is not the blocker, and
+unlike zones there is no clean scratch target (ngfw-shared feeds production;
+GitOps would create an override). The probe kit at `spike/zone-probe/` is ready
+to point at whichever resource this decision lands on. Full write-up in ADR-0002.
+
+**Effort:** M (decision) + S (probe, once the target is known)
+**Priority:** P1
+**Depends on:** None — this is the gate on the whole Day-1 chain.
 
 ## Compiler / intent model
 
@@ -287,12 +303,14 @@ drift invisibly. The boundary rule matters because `fwgitops drift` only compare
 intents against an SCM snapshot, so anything reconcilable that lives in inventory
 silently loses drift detection.
 
-**Context — the objection that deferred this:** an inventory knows *substrate*
-facts ("the EC2 instance has eth1/1"). A zone bind actually fails when the
-interface is not configured as **layer3 in PAN-OS**, which is a config fact owned
-by the future `InterfaceRequest`. So an interface catalog alone validates the
-wrong predicate and still hands the requester a green PR that fails at commit.
-Resolve that before building it. Secrets (`vmseries_authcode`,
+**Context — the objection that deferred this, now CONFIRMED against the tenant:**
+an inventory knows *substrate* facts ("the EC2 instance has eth1/1"), but the
+live tenant does not reference interfaces that way at all. Zones reference
+inherited SCM *variables* (`$eth-local`), defined in the parent folder
+`ngfw-shared`. So validating interface names against a device's physical
+interfaces validates the wrong vocabulary — the real one is the inherited
+`$eth-*` set, and resolving it requires understanding folder inheritance.
+Rework the premise before building this. Secrets (`vmseries_authcode`,
 `scm_registration_pin_*`) must stay out of Git regardless.
 
 **Effort:** L
