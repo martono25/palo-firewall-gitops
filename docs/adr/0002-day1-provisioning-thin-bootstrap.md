@@ -71,9 +71,18 @@ bootstrap bucket, IAM, init-cfg), plus `provision.py`, `onboard.py` and
 `admin_password.py`. A VM-Series has been booted, onboarded and proven on live
 hardware.
 
-**Not built — most of the data-plane half.** None of `InterfaceRequest`,
-`RouteRequest` or `NatRequest` exists. Cross-kind dependency ordering — named
-above as "the real engineering" — is not built either.
+**Data-plane half — partially built.** `InterfaceRequest` (v1.8.0) and
+`ZoneRequest` (v1.2.0) are done and reach the firewall. `RouteRequest` is the
+remaining link in the ordered chain. **`NatRequest` is deferred to v2.0**
+(decision 2026-08-02): it is not in the chain, so it does not block Day-1.
+Cross-kind dependency ordering — named above as "the real engineering" — is not
+built either.
+
+Worth knowing before either is scoped: `scm_logical_router` has no `tag`
+attribute (so `RouteRequest` would use state-based drift, already generic),
+while `scm_nat_rule` DOES (so `NatRequest` would use the tag-based engine and
+get orphan-vs-unmanaged attribution). Their drift stories differ, which is part
+of why they are sequenced separately.
 
 **`ZoneRequest` is now complete** (v1.2.0): it compiles to `scm_zone`, reaches
 the device, carries the full security posture (zone-protection profile,

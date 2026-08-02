@@ -143,6 +143,50 @@ session scratchpad. Worth promoting into the repo (e.g. `spike/zone-probe/`) if
 this pattern gets reused for `InterfaceRequest`, which faces the same
 provider-fidelity question for `scm_ethernet_interface`.
 
+## Intent kinds
+
+### RouteRequest (kind #4) — the last link in ADR-0002's Day-1 chain
+
+**What:** `InterfaceRequest → ZoneRequest → RouteRequest → AccessRequest`. The
+first two are built; this is what remains before a Day-1 build is expressible
+end to end.
+
+**Context:** the tenant has one logical router (`default`). `scm_logical_router`
+has **no `tag` attribute**, so it would register `drift_engine="state"` like
+zones and interfaces — which the drift engine now covers generically, so no new
+engine is needed.
+
+Run the fidelity probe against it first. The pattern is three-for-three at
+catching what inference would have got wrong: rules drop fields, zones do not,
+interfaces do not. Kit at `spike/interface-probe/`.
+
+**Effort:** L
+**Priority:** P1
+**Depends on:** nothing — the registry, contract and drift paths all cover a new
+kind automatically.
+
+### NatRequest — DEFERRED to v2.0
+
+**What:** NAT rules as an intent kind.
+
+**Why deferred (decision, 2026-08-02):** NAT is **not** in ADR-0002's ordered
+Day-1 chain (`Interface → Zone → Route → Access`), so deferring it does not block
+Day-1 provisioning. `RouteRequest` is the remaining chain link and comes first.
+
+**Context worth keeping:** `scm_nat_rule` **IS taggable** — unlike `scm_zone` and
+`scm_ethernet_interface`, and like `scm_security_rule`. So `NatRequest` would
+register `drift_engine="tag"` and get orphan-vs-unmanaged attribution, which the
+state-based engine cannot provide. Its drift story is therefore the *rules* one,
+not the zones one, and worth settling deliberately rather than by analogy to the
+kind built most recently.
+
+It also needs its own provider-fidelity probe. Rules drop fields; zones and
+interfaces do not. Three kinds in, the only safe assumption is that it varies.
+
+**Effort:** L
+**Priority:** P2 (v2.0)
+**Depends on:** its own fidelity probe.
+
 ## Contract enforcement
 
 ### Reject a malformed Terraform root instead of best-effort parsing
