@@ -83,8 +83,8 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   intake, break-glass with automated evidence.
 - **Day-1 as GitOps (ADR-0002) — DATA PLANE COMPLETE.** The bootstrap half was already built;
   the ordered data-plane chain (`InterfaceRequest` → `ZoneRequest` → `RouteRequest` →
-  `AccessRequest`) is now expressible end to end. `RouteRequest` still wants a live provider
-  fidelity probe before it is applied in anger — see [`TODOS.md`](TODOS.md).
+  `AccessRequest`) is now expressible end to end, each kind probed against the live provider
+  before being declared safe to apply. See [`TODOS.md`](TODOS.md).
 
 The three questions this project opened with are answered: no commercial firewall-analysis
 tool is owned (classifier built in-house), the pilot is a greenfield SCM folder, and the form

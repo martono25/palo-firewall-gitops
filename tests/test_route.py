@@ -237,7 +237,10 @@ def test_emitted_paths_recurse_into_lists_of_objects():
 
 
 def test_a_list_of_scalars_contributes_no_attribute_names():
-    """layer3.ip is a list of CIDR strings — a string asserts no attributes."""
+    """A string asserts no attribute names, so a list of them adds only its own
+    path. (Not a shape the compiler currently emits — `interfaces` wraps its
+    addresses as `ip: [{name: ...}]` — but the recursion must not invent paths
+    for scalars if a future kind does emit one.)"""
     assert _emitted_paths({"layer3": {"ip": ["10.0.0.1/24"]}}) == {"layer3", "layer3.ip"}
 
 

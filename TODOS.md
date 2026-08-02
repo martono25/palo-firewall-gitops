@@ -145,27 +145,19 @@ provider-fidelity question for `scm_ethernet_interface`.
 
 ## Intent kinds
 
-### `scm_logical_router` fidelity probe — GATE before applying a route
+### `scm_logical_router` fidelity probe — DONE, PASSED (2026-08-02)
 
-**What:** run the probe kit against `scm_logical_router` in the `GitOps` folder
-(0 devices, nothing inherits from it) and read back what the provider actually
-wrote.
+Ran against the live tenant in `GitOps`, read back over the SCM API, destroyed.
+**All seven checked paths honored, four levels deep, and a re-plan showed no
+phantom diff.** So `RouteRequest` needs no `enrich` subsystem — it is a compiler
++ tfvars mapping. Gate closed; `RouteRequest` is safe to apply.
 
-**Why this is a gate, not a nicety.** `RouteRequest` shipped in v1.10.0 **without
-it** — the only kind that did. The pattern is three-for-three at catching what
-inference would have got wrong: `scm_security_rule` silently drops
-`profile_setting`/`log_setting`/ordering (ADR-0003), while `scm_zone` and
-`scm_ethernet_interface` write faithfully. Routes are nested four levels deep
-(`vrf[].routing_table.ip.static_route[]`), which is the shape most likely to be
-partially handled.
+Kit and full result table: `spike/router-probe/README.md`.
 
-The failure mode if the provider drops nested routes is bad and quiet: the apply
-succeeds, the router keeps its interface membership, and **no route is written**.
-Terraform then reports converged. Do not apply a RouteRequest to a folder with
-devices until this is answered.
-
-**Effort:** S — kit already exists at `spike/interface-probe/`, adapt it.
-**Priority:** P1
+Fidelity is per resource type and still must not be extrapolated — the record is
+now four for four at catching what inference would have got wrong or guessed:
+`scm_security_rule` drops fields; `scm_zone`, `scm_ethernet_interface` and
+`scm_logical_router` do not. **Probe before building the next kind.**
 
 ### RouteRequest (kind #4) — DONE (v1.10.0)
 
@@ -174,7 +166,7 @@ membership from `catalog/routers.yaml` resolved at load time; `drift_engine=
 "state"`; `default_route` + `router_becomes_locally_owned` risk checks. Closes
 ADR-0002's chain (`Interface → Zone → Route → Access`).
 
-Outstanding: the fidelity probe above.
+The fidelity probe above has since run and passed — nothing outstanding.
 
 ### NatRequest — DEFERRED to v2.0
 

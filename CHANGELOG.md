@@ -43,11 +43,18 @@ route against an inherited router creates a local override, moving ownership).
 Routes are the first kind whose failure mode is an **outage** rather than a
 no-op.
 
-### Not done
-The live provider-fidelity probe against `scm_logical_router`. The pattern is
-three-for-three at catching what inference would have got wrong (rules drop
-fields; zones and interfaces do not), and this kind is untested against it.
-Tracked in `TODOS.md` as the gate before a real apply.
+### Provider fidelity: probed, faithful
+`scm_logical_router` was probed against the live tenant before this kind was
+declared safe to apply — created in `GitOps` (zero devices, nothing inherits),
+read back over the SCM API, destroyed. **All seven checked paths honored, four
+levels deep**, and a re-plan showed no phantom diff (which is how the
+`scm_security_rule` problem first surfaced). So `RouteRequest` needs no `enrich`
+subsystem. Kit and results: `spike/router-probe/`.
+
+The record is four for four at catching what inference would have got wrong or
+merely guessed — `scm_security_rule` drops fields; `scm_zone`,
+`scm_ethernet_interface` and `scm_logical_router` do not. Fidelity is per
+resource type: probe before building the next kind, do not extrapolate.
 
 524 tests.
 
