@@ -138,3 +138,17 @@ resource "scm_zone" "this" {
   user_acl                     = each.value.user_acl
   device_acl                   = each.value.device_acl
 }
+
+# ── Interfaces (InterfaceRequest, ADR-0001 kind #3) ───────────────────────
+# Like scm_zone, scm_ethernet_interface has NO `tag` attribute, so interfaces
+# cannot carry `gitops:` provenance and are invisible to tag-based drift. They
+# use the state-based engine instead (drift_engine="state" in the registry).
+resource "scm_ethernet_interface" "this" {
+  for_each = var.interfaces
+
+  name   = each.value.name
+  folder = each.value.folder
+
+  comment = each.value.comment
+  layer3  = each.value.layer3
+}

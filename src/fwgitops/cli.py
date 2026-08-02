@@ -37,6 +37,7 @@ from fwgitops.compiler import (
 from fwgitops.intent import IntentError, load_intent
 from fwgitops.kinds import (
     REGISTRY,
+    kinds_with_state_api,
     compile_any,
     group_by_kind_and_folder,
     of_kind,
@@ -312,6 +313,13 @@ def _load_catalogs(
                                   kind="log-forwarding profile", key="profiles", err=err)
     if not ok:
         return None, False
+    # Interface management profiles — which admin services answer on an
+    # interface (InterfaceRequest).
+    ifprof, ok = _load_name_catalog(catalog_dir / "interface-profiles.yaml",
+                                    kind="interface management profile",
+                                    key="profiles", err=err)
+    if not ok:
+        return None, False
     # Zone PROTECTION profiles — flood/recon, bound to a zone. Distinct from
     # profiles.yaml, which lists security profile GROUPS bound to a rule.
     zoneprot, ok = _load_name_catalog(catalog_dir / "zone-protection.yaml",
@@ -322,6 +330,7 @@ def _load_catalogs(
         "service_catalog": svc, "app_catalog": app, "profile_catalog": prof,
         "application_catalog": appid, "log_forwarding_catalog": logf,
         "zone_protection_catalog": zoneprot,
+        "interface_profile_catalog": ifprof,
     }, True
 
 
@@ -330,7 +339,7 @@ def run_classify(
     env_map_path: Path,
     *,
     gate: Optional[str] = None,
-    zones_snapshot_path: Optional[Path] = None,
+    state_snapshot_paths: Optional[List[Path]] = None,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
@@ -357,15 +366,20 @@ def run_classify(
     # change" — the same distinction ADR-0005 wants for interface addressing.
     # Absent snapshot disables those checks rather than guessing.
     current = None
-    if zones_snapshot_path is not None:
-        rows, code = _read_snapshot_rows(zones_snapshot_path, err)
-        if rows is None:
-            return code
+    if state_snapshot_paths:
         current = {}
-        for x in rows:
-            if isinstance(x, dict) and x.get("name"):
-                scope = str(x.get("scope") or x.get("folder"))
-                current[(scope, str(x["name"]))] = x
+        for path in state_snapshot_paths:
+            rows, code = _read_snapshot_rows(path, err)
+            if rows is None:
+                return code
+            for x in rows:
+                if isinstance(x, dict) and x.get("name"):
+                    # Key on the QUERIED folder, not the one SCM reports the
+                    # object as DEFINED in — an inherited object would otherwise
+                    # never match its declaration and the check would silently
+                    # never fire.
+                    scope = str(x.get("scope") or x.get("folder"))
+                    current[(scope, str(x["name"]))] = x
 
     hierarchy = None
     hierarchy_path = env_map_path.parent / "folders.yaml"
@@ -431,26 +445,24 @@ def run_classify(
     exceeded: List[str] = []
     gate_rank = TIERS.index(gate) if gate else None
 
-    # Zones are classified too (ADR-0001 kind #2). A zone with no protection
-    # profile has no flood/recon protection, and User-ID off silently breaks any
-    # rule matching on source_user — both are findings, not defaults.
-    for z in sorted(zones, key=lambda z: (z.folder, z.name)):
-        v = REGISTRY["ZoneRequest"].classify(z, hierarchy=hierarchy, current=current)
-        tiers[v.tier] = tiers.get(v.tier, 0) + 1
-        checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
-        print(f"  zone/{z.name:11} {v.tier:9} {checks}", file=out)
-        if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
-            exceeded.append(f"zone/{z.name}={v.tier}")
-
-    for ch in sorted(changes, key=lambda c: c.rule.name):
-        v = REGISTRY["AccessRequest"].classify(ch, policy=policy, hierarchy=hierarchy)
-        tiers[v.tier] = tiers.get(v.tier, 0) + 1
-        checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
-        print(f"  {ch.rule.name:16} {v.tier:9} {checks}", file=out)
-        if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
-            exceeded.append(f"{ch.rule.name}={v.tier}")
+    # ONE loop over every registered kind (ADR-0001). This used to be a
+    # hand-written block per kind — the shape that let ZoneRequest go
+    # unclassified entirely ("policy stages: rules only"). Each handler takes
+    # the context it needs and ignores the rest, so a new kind is classified
+    # here the moment it is registered.
+    for kind in sorted(REGISTRY):
+        handler = REGISTRY[kind]
+        for obj in sorted(of_kind(compiled, kind),
+                          key=lambda o, h=handler: (h.folder_of(o), h.name_of(o))):
+            v = handler.classify(obj, policy=policy, hierarchy=hierarchy, current=current)
+            tiers[v.tier] = tiers.get(v.tier, 0) + 1
+            checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
+            label = f"{handler.report_prefix}{handler.name_of(obj)}"
+            print(f"  {label:22} {v.tier:9} {checks}", file=out)
+            if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
+                exceeded.append(f"{label}={v.tier}")
     print(
-        f"classified {len(changes) + len(zones)}: "
+        f"classified {len(compiled)}: "
         f"{tiers['LOW']} LOW · {tiers['HIGH']} HIGH · {tiers['CRITICAL']} CRITICAL",
         file=out,
     )
@@ -608,14 +620,19 @@ def run_drift(
     return 0 if (report.is_clean and not drifted) else 3
 
 
-def run_snapshot_zones(
+def run_snapshot(
+    kind: str,
     folder: str,
     out_path: Path,
     *,
     out=None,
     err=None,
 ) -> int:
-    """Read a folder's live zones from SCM into a drift snapshot. READ-ONLY.
+    """Read a folder's live objects of one KIND from SCM. READ-ONLY.
+
+    Driven off `KindHandler.state_api_path`, so a kind that registers one is
+    snapshottable with no code here — the alternative was a hand-written command
+    per kind, which is the sprawl ADR-0001's registry exists to prevent.
 
     Records the QUERIED folder as `scope` on every row. SCM returns the folder an
     object is DEFINED in, which for an inherited object is an ancestor — without
@@ -629,10 +646,16 @@ def run_snapshot_zones(
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
+    handler = REGISTRY.get(kind)
+    if handler is None or not handler.state_api_path:
+        snappable = ", ".join(sorted(h.kind for h in kinds_with_state_api()))
+        print(f"error: {kind!r} has no state API path; snapshottable kinds: {snappable}",
+              file=err)
+        return 1
     try:
         session = ScmSession(credentials=ScmCredentials.from_env())
         payload = session.request(
-            "GET", "/config/network/v1/zones", params={"folder": folder, "limit": 200}
+            "GET", handler.state_api_path, params={"folder": folder, "limit": 200}
         )
     except ScmConfigError as e:
         print(f"error: SCM credentials not usable: {e}", file=err)
@@ -642,10 +665,10 @@ def run_snapshot_zones(
         return 1
 
     rows = []
-    for z in payload.get("data", []):
-        if not isinstance(z, dict) or not z.get("name"):
+    for obj in payload.get("data", []):
+        if not isinstance(obj, dict) or not obj.get("name"):
             continue
-        row = {k: v for k, v in z.items() if k not in ("id", "tfid")}
+        row = {k: v for k, v in obj.items() if k not in ("id", "tfid")}
         row.setdefault("folder", folder)
         row["scope"] = folder
         rows.append(row)
@@ -653,7 +676,7 @@ def run_snapshot_zones(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     inherited = sum(1 for r in rows if r["folder"] != folder)
-    print(f"wrote {len(rows)} zone(s) for folder {folder!r} to {out_path} "
+    print(f"wrote {len(rows)} {kind} object(s) for folder {folder!r} to {out_path} "
           f"({inherited} inherited from an ancestor)", file=out)
     return 0
 
@@ -1071,9 +1094,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="directory of intent YAML (default: intent)")
     cl.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path,
                     help="environment resolution map (default: catalog/environments.yaml)")
-    cl.add_argument("--zones-snapshot", type=Path,
-                    help="live zone snapshot (from `snapshot-zones`); enables state-aware "
-                         "checks such as a zone gaining its first interface")
+    cl.add_argument("--state-snapshot", type=Path, action="append", dest="state_snapshots",
+                    help="live snapshot from `fwgitops snapshot <kind> <folder>`; repeatable. "
+                         "Enables state-aware checks (a zone gaining its first interface, an "
+                         "interface gaining addressing). Absent = those checks are skipped.")
     cl.add_argument("--gate", choices=("LOW", "HIGH", "CRITICAL"),
                     help="fail (exit 3) if any change's tier exceeds this max-auto tier")
     cl.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
@@ -1106,8 +1130,9 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     dr.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
 
-    sn = sub.add_parser("snapshot-zones",
-                        help="read a folder's live zones from SCM into a drift snapshot")
+    sn = sub.add_parser("snapshot",
+                        help="read a folder's live objects of one kind from SCM (read-only)")
+    sn.add_argument("kind", help="intent kind, e.g. ZoneRequest / InterfaceRequest")
     sn.add_argument("folder", help="SCM folder to read")
     sn.add_argument("--out", required=True, type=Path, help="where to write the snapshot JSON")
 
@@ -1167,7 +1192,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "classify":
         return run_classify(
             args.intent_root, args.env_map, gate=args.gate,
-            zones_snapshot_path=args.zones_snapshot,
+            state_snapshot_paths=args.state_snapshots,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "evidence":
@@ -1182,8 +1207,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             zones_snapshot_path=args.zones_snapshot,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
-    if args.command == "snapshot-zones":
-        return run_snapshot_zones(args.folder, args.out)
+    if args.command == "snapshot":
+        return run_snapshot(args.kind, args.folder, args.out)
     if args.command == "push":
         return run_push(
             args.folder,

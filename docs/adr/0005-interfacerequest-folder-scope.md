@@ -1,6 +1,6 @@
 # ADR-0005 — `InterfaceRequest` targets folder scope via the `$eth-*` variables
 
-- **Status:** Accepted (direction; not yet built)
+- **Status:** Accepted — **built** (v1.8.0)
 - **Date:** 2026-08-02
 - **Deciders:** Martono, Claude
 
@@ -125,6 +125,24 @@ exist rather than by weakening the abstraction:
   so `drift.py`'s tag-based model would not cover this kind either. That is now
   two kinds out of three, and is the strongest argument for a second,
   state-based drift mechanism (`TODOS.md`).
+
+## Built (v1.8.0)
+
+`InterfaceRequest` is kind #3. One `REGISTRY` entry drives compile, tfvars
+emission, classification and snapshotting; the Terraform side is a `interfaces`
+variable plus an `scm_ethernet_interface` resource.
+
+**Which folder it writes to comes from the env map, not from this ADR.** Today
+`prod` resolves to `prod-edge`, so an `InterfaceRequest` creates a **local
+override** of the inherited `ngfw-shared` object — the safer of the two options
+this ADR identified, affecting production only and not the sandbox. Point an
+environment at `ngfw-shared` and `folder_with_children` fires HIGH, so the tier
+gate refuses to auto-apply it. The control decides the risk; the env map decides
+the scope.
+
+Addressing modes: exactly one of `ip` (static CIDRs) or `dhcp` — the provider
+requires it, and the intent loader rejects violations at PR time rather than
+letting the device commit do it.
 
 ## Related
 - ADR-0002 — the Day-1 chain whose interface mechanism this corrects.

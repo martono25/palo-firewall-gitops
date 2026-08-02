@@ -41,6 +41,17 @@ ADR-0004 contract check, so HOLE 3 cannot recur on zones.
 `.github/workflows/drift-detect.yml`. This is the only check that can see a zone
 added by hand: `terraform plan` cannot see additions, and zones carry no tags.
 
+### InterfaceRequest (kind #3) — DONE v1.8.0
+
+Built per ADR-0005: folder scope, `$eth-*` names, CONFIGURES an existing
+interface. One registry entry drives compile, tfvars, classify and snapshot.
+All four prerequisites were met first.
+
+Not yet done: generalise `fwgitops drift`'s object engine over the registry the
+way `classify` and `snapshot` now are — `declared_zone_state` is still
+zone-specific, so interfaces have no drift coverage wired even though the
+registry declares `drift_engine="state"` for them.
+
 ### Credential redaction for published CI files — DONE v1.7.0
 
 `.github/scripts/redact.py` strips secret VALUES from `plan-*.txt` and
@@ -176,46 +187,6 @@ gains tags on these types, or if reading TF state proves acceptable.
 ## CI / security
 
 ## Provisioning
-
-### Build InterfaceRequest (kind #3) — design settled by ADR-0005
-
-**What:** Build `InterfaceRequest` per ADR-0005: FOLDER scope, addressing
-interfaces by their `$eth-*` variable names, CONFIGURING an existing interface
-(setting `layer3` addressing) rather than creating one.
-
-**Blocking prerequisites from ADR-0005** — the price of the blast radius
-(`ngfw-shared` feeds both `prod-edge` and `GitOps`):
-
-1. ~~classifier treats a change scoped to a folder with children as HIGH~~
-   **DONE v1.4.0** — `folder_with_children`, driven by `catalog/folders.yaml`.
-   Applies to every kind, not just interfaces.
-2. ~~a `novel_addressing` check~~ **DONE v1.5.0** — generalised as
-   `_becomes_populated` and shipped exercised on zones
-   (`zone_becomes_traffic_bearing`). Current state comes from the drift
-   snapshot via `classify --zones-snapshot`.
-3. ~~per-attribute contract check covers `layer3`, a nested object~~
-   **DONE v1.4.0** — the HOLE 3 check now recurses, comparing dotted paths.
-4. ~~run the `scm_ethernet_interface` fidelity probe~~ **DONE 2026-08-02** —
-   the provider is FAITHFUL, including nested `layer3.ip`, so no enrich
-   subsystem is needed. Run safely in `GitOps` (zero devices, new name), not
-   `ngfw-shared`; kit at `spike/interface-probe/`.
-
-**All four prerequisites are met. `InterfaceRequest` is ready to build.**
-
-**Why:** the interfaces exist on both devices and neither has an IP —
-`layer3` is `{}` at every scope. Configuring that through Git is the first link
-of ADR-0002's Day-1 chain, and nothing else in the chain is buildable until it
-is.
-
-**Context:** the design is settled (ADR-0005): folder scope, addressing by
-`$eth-*` name, CONFIGURING an existing interface rather than creating one.
-`$eth-local` and `ethernet1/4` proved to be the same object under two names.
-Two of the four prerequisites are done; the probe kit at `spike/zone-probe/` is
-ready to point at `scm_ethernet_interface` when prerequisite 4 is taken.
-
-**Effort:** L
-**Priority:** P1
-**Depends on:** nothing — all four prerequisites are met.
 
 ## Compiler / intent model
 

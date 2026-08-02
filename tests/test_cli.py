@@ -501,7 +501,7 @@ def test_classify_uses_the_zone_snapshot_scope_not_the_defining_folder(tmp_path,
     snap.write_text(json.dumps([{"name": "zone-internal", "folder": "ngfw-shared",
                                  "scope": "prod-edge", "network": {"layer3": []}}]))
 
-    rc = run_classify(tmp_path / "intent", env_map, zones_snapshot_path=snap, gate="LOW")
+    rc = run_classify(tmp_path / "intent", env_map, state_snapshot_paths=[snap], gate="LOW")
     out = capsys.readouterr().out
     assert "zone_becomes_traffic_bearing" in out
     assert rc == 3, "a zone starting to carry traffic must not auto-apply at LOW"

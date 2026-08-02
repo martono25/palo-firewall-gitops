@@ -98,7 +98,7 @@ jobs:
             case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
             [ -f "$dir/main.tf" ] || continue
             echo "::group::zone drift $folder"
-            fwgitops snapshot-zones "$folder" --out "zones-$folder.json"
+            fwgitops snapshot ZoneRequest "$folder" --out "zones-$folder.json"
             rc=0
             fwgitops drift --zones-snapshot "zones-$folder.json" || rc=$?
             echo "::endgroup::"

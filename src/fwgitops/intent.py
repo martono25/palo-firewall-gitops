@@ -162,6 +162,42 @@ class ZoneSpec:
 
 
 @dataclass(frozen=True)
+class InterfaceSpec:
+    """kind: InterfaceRequest (ADR-0001 kind #3) — CONFIGURE an existing interface.
+
+    ADR-0005: this does NOT create an interface. On the pilot tenant the
+    interfaces already exist, named as folder-scope variables (`$eth-local`,
+    `$eth-internet`) defined in the shared parent and inherited, each carrying a
+    per-device `default_value`. What is missing is addressing — `layer3` is `{}`
+    on every one of them. So an InterfaceRequest fills that in.
+
+    Exactly one addressing mode may be set. The provider says so
+    ("You must specify exactly one of dhcp_client, ip, and pppoe") and the
+    device commit would say so too, later and less helpfully.
+    """
+
+    environment: str
+    interface: str                       # the folder-scope name, e.g. "$eth-local"
+    #: Static addressing: CIDRs, e.g. ["10.0.1.1/24"]. Mutually exclusive with dhcp.
+    ip: List[str] = field(default_factory=list)
+    #: DHCP client. Mutually exclusive with `ip`.
+    dhcp: bool = False
+    mtu: Optional[int] = None
+    comment: Optional[str] = None
+    #: Interface management profile — which admin services answer on this
+    #: interface. A reference name, catalog-validated like a rule's profile.
+    management_profile: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class InterfaceRequest:
+    """kind: InterfaceRequest — configures one interface in a folder (kind #3)."""
+
+    metadata: Metadata
+    spec: InterfaceSpec
+
+
+@dataclass(frozen=True)
 class ZoneRequest:
     """kind: ZoneRequest — declares a zone in a folder (ADR-0001 kind #2)."""
 
@@ -179,6 +215,7 @@ class _Collector:
         application_catalog: Any = None,
         log_forwarding_catalog: Any = None,
         zone_protection_catalog: Any = None,
+        interface_profile_catalog: Any = None,
     ) -> None:
         self.problems: List[Problem] = []
         #: Optional ServiceCatalog (Phase 2). Enables the `service: name:` form.
@@ -193,6 +230,8 @@ class _Collector:
         self.log_forwarding_catalog = log_forwarding_catalog
         #: Zone PROTECTION profiles (ZoneRequest) — flood/recon protection.
         self.zone_protection_catalog = zone_protection_catalog
+        #: Interface management profiles (InterfaceRequest).
+        self.interface_profile_catalog = interface_profile_catalog
 
     def add(self, path: str, message: str) -> None:
         self.problems.append(Problem(path, message))
@@ -207,6 +246,7 @@ def load_intent(
     application_catalog: Any = None,
     log_forwarding_catalog: Any = None,
     zone_protection_catalog: Any = None,
+    interface_profile_catalog: Any = None,
 ) -> AccessRequest:
     """Parse + validate an intent dict, dispatching on `kind` (ADR-0001).
 
@@ -230,6 +270,7 @@ def load_intent(
         profile_catalog=profile_catalog, application_catalog=application_catalog,
         log_forwarding_catalog=log_forwarding_catalog,
         zone_protection_catalog=zone_protection_catalog,
+        interface_profile_catalog=interface_profile_catalog,
     )
     kind = data.get("kind")
     loader = _KIND_LOADERS.get(kind)
@@ -264,6 +305,7 @@ def _load_access_request(data: dict, **catalogs: Any) -> AccessRequest:
 #: PAN-OS zone network types.
 _ZONE_TYPES = {"layer3", "layer2", "virtual-wire", "tap", "external", "tunnel"}
 ZONE_KIND = "ZoneRequest"
+INTERFACE_KIND = "InterfaceRequest"
 
 
 def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
@@ -311,6 +353,76 @@ def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
     )
 
 
+#: Valid CIDR-ish shape for static addressing. Deliberately permissive on the
+#: address itself — SCM reference-validates, and over-strict local regex would
+#: reject forms the device accepts.
+_CIDR_RE = re.compile(r"^[0-9a-fA-F:.]+/\d{1,3}$")
+
+
+def _load_interface_spec(sp: Any, c: "_Collector") -> Optional[InterfaceSpec]:
+    path = "spec"
+    if not isinstance(sp, dict):
+        c.add(path, "required mapping")
+        return None
+    environment = _req_str(sp, "environment", path, c)
+    interface = _req_str(sp, "interface", path, c)
+
+    ip = sp.get("ip", [])
+    if not isinstance(ip, list) or not all(isinstance(x, str) and x.strip() for x in ip):
+        c.add(f"{path}.ip", "must be a list of CIDR strings, e.g. ['10.0.1.1/24']")
+        ip = None
+    elif ip and not all(_CIDR_RE.match(x.strip()) for x in ip):
+        bad = [x for x in ip if not _CIDR_RE.match(x.strip())]
+        c.add(f"{path}.ip", f"not CIDR form (address/prefix): {bad}")
+        ip = None
+
+    dhcp, ok_dhcp = _opt_bool(sp, "dhcp", path, c)
+    mtu = sp.get("mtu")
+    if mtu is not None and (not isinstance(mtu, int) or isinstance(mtu, bool) or mtu <= 0):
+        c.add(f"{path}.mtu", f"must be a positive integer when set, got {mtu!r}")
+        mtu = None
+        ok_mtu = False
+    else:
+        ok_mtu = True
+    comment, ok_comment = _opt_str(sp, "comment", path, c)
+    management_profile, ok_mp = _opt_str(sp, "management_profile", path, c)
+    _validate_name(management_profile, c.interface_profile_catalog,
+                   f"{path}.management_profile", c)
+
+    # The provider requires EXACTLY ONE of ip / dhcp_client / pppoe. Catch it
+    # here rather than at the device commit, where the message is worse and the
+    # change has already been applied to a candidate config.
+    if ip is not None and ok_dhcp:
+        if bool(ip) and dhcp:
+            c.add(path, "set exactly one addressing mode: `ip` OR `dhcp`, not both")
+            return None
+        if not ip and not dhcp:
+            c.add(path, "set an addressing mode: `ip: [...]` or `dhcp: true`")
+            return None
+
+    if environment is None or interface is None or ip is None:
+        return None
+    if not all((ok_dhcp, ok_mtu, ok_comment, ok_mp)):
+        return None
+    return InterfaceSpec(
+        environment=environment, interface=interface,
+        ip=[x.strip() for x in ip], dhcp=bool(dhcp), mtu=mtu,
+        comment=comment, management_profile=management_profile,
+    )
+
+
+def _load_interface_request(data: dict, **catalogs: Any) -> InterfaceRequest:
+    """Loader for `kind: InterfaceRequest` (kind #3)."""
+    c = _Collector(**catalogs)
+    if data.get("apiVersion") != API_VERSION:
+        c.add("apiVersion", f"must be {API_VERSION!r}, got {data.get('apiVersion')!r}")
+    metadata = _load_metadata(data.get("metadata"), c)
+    spec = _load_interface_spec(data.get("spec"), c)
+    if c.problems:
+        raise IntentError(c.problems)
+    return InterfaceRequest(metadata=metadata, spec=spec)  # type: ignore[arg-type]
+
+
 def _load_zone_request(data: dict, **catalogs: Any) -> ZoneRequest:
     """Loader for `kind: ZoneRequest` (kind #2).
 
@@ -330,7 +442,14 @@ def _load_zone_request(data: dict, **catalogs: Any) -> ZoneRequest:
 #: Intent kind -> loader (ADR-0001). Register new kinds here; each loader
 #: validates that kind's schema and returns its typed request. The pipeline
 #: compiles/classifies per kind. Keeps the envelope check in one place.
-_KIND_LOADERS = {KIND: _load_access_request, ZONE_KIND: _load_zone_request}
+#: Intent kind -> loader. The ONE place a new kind's schema is registered; its
+#: pipeline behaviour is registered once more in `fwgitops.kinds.REGISTRY`, and
+#: a test asserts the two sets match exactly.
+_KIND_LOADERS = {
+    KIND: _load_access_request,
+    ZONE_KIND: _load_zone_request,
+    INTERFACE_KIND: _load_interface_request,
+}
 
 
 def _req_str(obj: dict, key: str, path: str, c: _Collector) -> Optional[str]:

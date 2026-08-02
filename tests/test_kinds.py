@@ -123,8 +123,14 @@ def test_drift_engines_are_declared_per_kind_not_assumed_uniform():
     has no tag attribute, so zones use state-based drift. Same word, genuinely
     different mechanism — the registry records which, rather than pretending
     one signature fits both."""
-    assert [h.kind for h in kinds_with_drift_engine("tag")] == ["AccessRequest"]
-    assert [h.kind for h in kinds_with_drift_engine("state")] == ["ZoneRequest"]
+    tag = {h.kind for h in kinds_with_drift_engine("tag")}
+    state = {h.kind for h in kinds_with_drift_engine("state")}
+    # Rules are the ONLY taggable kind — scm_zone and scm_ethernet_interface
+    # both lack a `tag` attribute, and only 14 of the provider's resources have
+    # one. Tag-based drift is the exception, not the default.
+    assert tag == {"AccessRequest"}
+    assert {"ZoneRequest", "InterfaceRequest"} <= state
+    assert tag | state == set(REGISTRY), "every kind must declare a drift engine"
 
 
 def test_evidence_capability_is_declared_rather_than_discovered_at_runtime():

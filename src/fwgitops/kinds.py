@@ -40,13 +40,16 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from fwgitops.compiler import (
     CompileError,
     CompiledChange,
+    CompiledInterface,
     CompiledZone,
     compile_request,
+    interface_tfvars,
     to_tfvars,
     zone_tfvars,
 )
+from fwgitops.compiler import _compile_interface as _compile_interface_impl
 from fwgitops.compiler import _compile_zone as _compile_zone_impl
-from fwgitops.intent import AccessRequest, ZoneRequest
+from fwgitops.intent import AccessRequest, InterfaceRequest, ZoneRequest
 
 
 @dataclass(frozen=True)
@@ -62,9 +65,17 @@ class KindHandler:
     folder_of: Callable[[Any], str]             # compiled -> SCM folder
     name_of: Callable[[Any], str]               # compiled -> human name (reports)
     classify: Callable[..., Any]                # compiled -> RiskVerdict
+    #: Prefix for report lines, so `dmz` (a zone) is not mistaken for a rule.
+    #: Display metadata, legitimately per-kind — not a behaviour switch.
+    report_prefix: str
     #: "tag" (provenance tags exist) or "state" (they do not). NOT a shared
     #: signature — see the module docstring.
     drift_engine: str
+    #: SCM read path for this kind's CURRENT state, or None where the kind does
+    #: not use state-based comparison. Registered here so the snapshot command
+    #: and the state-aware classifier checks are driven off the registry rather
+    #: than a hand-written block per kind.
+    state_api_path: Optional[str]
     #: Whether `evidence.build_bundle` accepts this kind at all.
     has_evidence: bool
 
@@ -73,6 +84,13 @@ def _rule_classify(compiled: CompiledChange, **ctx: Any) -> Any:
     from fwgitops.classify import classify
 
     return classify(compiled, policy=ctx.get("policy"), hierarchy=ctx.get("hierarchy"))
+
+
+def _interface_classify(compiled: CompiledInterface, **ctx: Any) -> Any:
+    from fwgitops.classify import classify_interface
+
+    return classify_interface(compiled, hierarchy=ctx.get("hierarchy"),
+                              current=ctx.get("current"))
 
 
 def _zone_classify(compiled: CompiledZone, **ctx: Any) -> Any:
@@ -96,8 +114,25 @@ REGISTRY: Dict[str, KindHandler] = {
         folder_of=lambda c: c.rule.folder,
         name_of=lambda c: c.rule.name,
         classify=_rule_classify,
-        drift_engine="tag",      # rules carry gitops: provenance tags
+        report_prefix="",
+        drift_engine="tag",
+        state_api_path=None,   # rules use the tag-based engine      # rules carry gitops: provenance tags
         has_evidence=True,
+    ),
+    "InterfaceRequest": KindHandler(
+        kind="InterfaceRequest",
+        request_type=InterfaceRequest,
+        compiled_type=CompiledInterface,
+        compile=_compile_interface_impl,
+        tfvars_filename="interfaces.auto.tfvars.json",
+        tfvars=interface_tfvars,
+        folder_of=lambda c: c.folder,
+        name_of=lambda c: c.name,
+        classify=_interface_classify,
+        report_prefix="interface/",
+        drift_engine="state",
+        state_api_path="/config/network/v1/ethernet-interfaces",    # scm_ethernet_interface has no `tag` attribute
+        has_evidence=False,      # bundles are rule-shaped today
     ),
     "ZoneRequest": KindHandler(
         kind="ZoneRequest",
@@ -109,7 +144,9 @@ REGISTRY: Dict[str, KindHandler] = {
         folder_of=lambda c: c.folder,
         name_of=lambda c: c.name,
         classify=_zone_classify,
-        drift_engine="state",    # scm_zone has no `tag` attribute
+        report_prefix="zone/",
+        drift_engine="state",
+        state_api_path="/config/network/v1/zones",    # scm_zone has no `tag` attribute
         has_evidence=False,      # bundles are rule-shaped today
     ),
 }
@@ -160,6 +197,11 @@ def of_kind(compiled: List[Any], kind: str) -> List[Any]:
     """Every compiled object of one kind. Replaces the CLI's isinstance filters."""
     handler = REGISTRY[kind]
     return [c for c in compiled if isinstance(c, handler.compiled_type)]
+
+
+def kinds_with_state_api() -> List[KindHandler]:
+    """Kinds whose current state can be snapshotted from SCM."""
+    return [h for h in REGISTRY.values() if h.state_api_path]
 
 
 def kinds_with_drift_engine(engine: str) -> List[KindHandler]:
