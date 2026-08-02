@@ -3,6 +3,63 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-08-02
+
+**`ZoneRequest` reaches the firewall.** Kind #2 has existed since #18 but never
+had a Terraform resource behind it — v1.1.0 made that failure loud instead of
+silent; this closes it. Zones now carry a full security posture, not just a name
+and an interface list.
+
+### Zones reach the device
+- `scm_zone` resource + `zones` variable + module wiring. The root and module
+  object types are byte-identical and the compile-time contract check
+  (ADR-0004) enforces that per-attribute, so HOLE 3 cannot recur here.
+- Rules **order after the zones they reference**: a rule's `from`/`to` resolves
+  through `scm_zone.this[...]` for zones this module manages, while baseline
+  zones (`local`, `internet`, `proxy`) pass through as plain strings. The
+  predicate reads `var.zones`, not the resource, so the branch stays decidable
+  at plan time — and it is deliberately not a blanket `depends_on`, which
+  previously caused a destroy-cascade on address objects.
+
+### Zone security posture (the ADR-0003 lesson, applied to zones)
+A zone is not just a name and a port list. `ZoneRequest` now accepts:
+
+| Field | Why it matters |
+|---|---|
+| `protection_profile` | Absent = **no** flood, reconnaissance or packet-based-attack protection |
+| `user_id` | Off = any rule matching `source_user` **silently never matches** |
+| `log_forwarding` | Otherwise local logs only |
+| `device_id`, `dos_profile`, `dos_log_forwarding`, `user_acl`, `device_acl` | Full provider parity |
+
+`protection_profile` is a **zone**-protection profile — flood/recon, bound to a
+zone. Not the same thing as a rule's `profile`, which is a security profile
+*group* giving IPS/AV/URL inspection. A zone with neither has neither. New
+catalog: `catalog/zone-protection.yaml`.
+
+### Risk classification for zones
+`fwgitops classify` covers zones, having previously dropped them on the floor
+("policy stages: rules only"):
+
+- `zone_without_protection` (**HIGH**) — the `allow_without_inspection` lesson
+  for zones: the absence of a security control is a finding, not a default.
+  A LOW gate now refuses to auto-apply an unprotected zone.
+- `user_id_disabled_on_zone` (LOW note) — the rule model has supported
+  `source_user` since v1.0, and the failure is silent: the rule is skipped and
+  traffic falls through to whatever is next.
+
+### Fixed
+`_load_zone_request` built its collector **without catalogs**, so a ZoneRequest's
+reference names were never validated at all. A typo'd profile now fails at PR
+time, as ADR-0003 requires for rules.
+
+### Known limits
+Zones cannot be drift-tracked: `scm_zone` has no `tag` attribute, so the
+`gitops:` provenance markers `drift.py` relies on cannot be attached. Only 14 of
+the provider's resources are taggable — this is a general limit of the
+tag-based model, not a zone quirk. Tracked in `TODOS.md`.
+
+**Tests: 392 → 408.**
+
 ## [1.1.0] — 2026-08-02
 
 Closes a class of bug where the compiler produced config that **silently never

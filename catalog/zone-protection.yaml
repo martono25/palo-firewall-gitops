@@ -1,0 +1,18 @@
+# Zone-protection profile catalog (ZoneRequest) — ACTIVE.
+#
+# Zone PROTECTION profile names that exist in the SCM folder(s). When present,
+# `spec.protection_profile` on a ZoneRequest is validated: an unknown name is
+# rejected at PR time instead of failing at the device commit.
+#
+# NOT the same thing as catalog/profiles.yaml — that lists security profile
+# GROUPS (bound to a rule, giving IPS/AV/URL inspection). This lists ZONE
+# protection profiles (bound to a zone, giving flood / reconnaissance /
+# packet-based-attack protection). A zone with none has neither.
+#
+# List ONLY profiles that actually exist in SCM (Network > Zone Protection).
+# Verified live 2026-08-02 via
+# GET /config/network/v1/zone-protection-profiles?folder=prod-edge
+# (the `folder` param is required; without it the API returns 400).
+# The key is `profiles:` (shared NameCatalog shape).
+profiles:
+  - best-practice

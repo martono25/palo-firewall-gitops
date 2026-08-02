@@ -99,6 +99,20 @@ class CompiledZone:
     name: str
     zone_type: str
     interfaces: List[str]
+    # Security posture — see ZoneSpec for why each one matters.
+    protection_profile: Optional[str] = None
+    log_forwarding: Optional[str] = None
+    user_id: Optional[bool] = None
+    device_id: Optional[bool] = None
+    dos_profile: Optional[str] = None
+    dos_log_forwarding: Optional[str] = None
+    user_acl: Optional[Dict[str, List[str]]] = None
+    device_acl: Optional[Dict[str, List[str]]] = None
+
+    @property
+    def has_protection(self) -> bool:
+        """A zone with no protection profile has NO flood/recon protection."""
+        return bool(self.protection_profile)
 
 
 def compile_any(request: Any, env_map: EnvMap, section: "Section" = None) -> Any:
@@ -308,11 +322,23 @@ def dumps_tfvars(changes: List[CompiledChange]) -> str:
 
 
 # ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────
+def _acl_dict(acl) -> Optional[Dict[str, List[str]]]:
+    """ZoneAcl -> the provider's include_list/exclude_list shape."""
+    if acl is None:
+        return None
+    return {"include_list": list(acl.include), "exclude_list": list(acl.exclude)}
+
+
 def _compile_zone(zr: ZoneRequest, env_map: EnvMap) -> CompiledZone:
     res = env_map.resolve(zr.spec.environment)  # raises ResolveError (fail closed)
+    sp = zr.spec
     return CompiledZone(
-        folder=res.folder, name=zr.spec.zone,
-        zone_type=zr.spec.zone_type, interfaces=list(zr.spec.interfaces),
+        folder=res.folder, name=sp.zone,
+        zone_type=sp.zone_type, interfaces=list(sp.interfaces),
+        protection_profile=sp.protection_profile, log_forwarding=sp.log_forwarding,
+        user_id=sp.user_id, device_id=sp.device_id,
+        dos_profile=sp.dos_profile, dos_log_forwarding=sp.dos_log_forwarding,
+        user_acl=_acl_dict(sp.user_acl), device_acl=_acl_dict(sp.device_acl),
     )
 
 
@@ -326,7 +352,26 @@ def zone_tfvars(zones: List[CompiledZone]) -> Dict[str, Any]:
     for z in zones:
         if z.name in out:
             raise CompileError(f"duplicate zone key {z.name!r} — two ZoneRequests share metadata.id/zone")
-        out[z.name] = {"name": z.name, "folder": z.folder, "network": {z.zone_type: list(z.interfaces)}}
+        # Shape mirrors the scm_zone provider schema exactly: the protection
+        # profile and log setting live INSIDE `network`; the identification
+        # toggles, DoS fields and ACLs are top-level. Keys are always present
+        # (null when unset) so the JSON is byte-stable across compiles and a
+        # PR diff shows only real changes.
+        out[z.name] = {
+            "name": z.name,
+            "folder": z.folder,
+            "network": {
+                z.zone_type: list(z.interfaces),
+                "zone_protection_profile": z.protection_profile,
+                "log_setting": z.log_forwarding,
+            },
+            "enable_user_identification": z.user_id,
+            "enable_device_identification": z.device_id,
+            "dos_profile": z.dos_profile,
+            "dos_log_setting": z.dos_log_forwarding,
+            "user_acl": z.user_acl,
+            "device_acl": z.device_acl,
+        }
     return {"zones": out}
 
 

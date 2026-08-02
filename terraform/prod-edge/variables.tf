@@ -65,3 +65,45 @@ variable "security_rules" {
   }))
   default = {}
 }
+
+# ── ZoneRequest (ADR-0001 kind #2) ────────────────────────────────────────
+# Byte-identical to terraform/modules/security_folder/variables.tf. HOLE 3:
+# Terraform SILENTLY DISCARDS object attributes the target type does not
+# declare, so a root type narrower than the module's drops fields with no
+# diagnostic. `fwgitops compile` now asserts this per-attribute (ADR-0004), so
+# a drift here fails the compile rather than shipping a half-configured zone.
+variable "zones" {
+  description = "Map of zone name -> zone definition (ZoneRequest, ADR-0001)."
+  type = map(object({
+    name   = string
+    folder = string
+    network = optional(object({
+      layer2       = optional(list(string))
+      layer3       = optional(list(string))
+      external     = optional(list(string))
+      tap          = optional(list(string))
+      virtual_wire = optional(list(string))
+      # ── security posture (ADR-0003 equivalent for zones) ──────────────
+      # A zone with no protection profile has NO flood or reconnaissance
+      # protection. The risk classifier flags that; it is not silently fine.
+      zone_protection_profile         = optional(string)
+      log_setting                     = optional(string)
+      enable_packet_buffer_protection = optional(bool)
+    }))
+    # User-ID must be enabled PER ZONE or a rule matching on `source_user`
+    # never matches — the rule model has supported source_user since v1.0.
+    enable_user_identification   = optional(bool)
+    enable_device_identification = optional(bool)
+    dos_profile                  = optional(string)
+    dos_log_setting              = optional(string)
+    user_acl = optional(object({
+      include_list = optional(list(string))
+      exclude_list = optional(list(string))
+    }))
+    device_acl = optional(object({
+      include_list = optional(list(string))
+      exclude_list = optional(list(string))
+    }))
+  }))
+  default = {}
+}

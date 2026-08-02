@@ -146,7 +146,7 @@ def test_compile_zone_request_writes_zones_tfvars(tmp_path, capsys):
     rc = run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False)
     assert rc == 0
     zf = json.loads((out / "prod-edge" / "zones.auto.tfvars.json").read_text())
-    assert zf["zones"]["dmz"]["network"] == {"layer3": ["ethernet1/2"]}
+    assert zf["zones"]["dmz"]["network"]["layer3"] == ["ethernet1/2"]
     assert zf["zones"]["dmz"]["folder"] == "prod-edge"
     # a ZoneRequest-only compile writes no rules file
     assert not (out / "prod-edge" / "rules.auto.tfvars.json").exists()
@@ -412,3 +412,46 @@ def test_duplicate_zone_key_reports_and_exits_2_not_a_traceback(tmp_path, capsys
     assert rc == 2
     err = capsys.readouterr().err
     assert "REJECTED" in err and "duplicate zone key" in err
+
+
+ZONE_SEC_ENV = "prod:\n  folder: prod-edge\n  from_zone: local\n  to_zone: internet\n"
+
+
+def _write_zone(root, zid, zone, extra=""):
+    (root / f"{zid}.yaml").write_text(
+        "apiVersion: fw-intent/v1\nkind: ZoneRequest\n"
+        f"metadata: {{id: {zid}, requester: m@corp, ticket: J-1,"
+        " justification: x, requested: 2026-08-02}\n"
+        f"spec:\n  environment: prod\n  zone: {zone}\n  type: layer3\n  interfaces: []\n{extra}"
+    )
+
+
+def test_classify_covers_zones_and_gates_on_them(tmp_path, capsys):
+    """run_classify used to drop zones on the floor ("policy stages: rules only"),
+    so a zone with no protection profile was never risk-assessed at all."""
+    root = tmp_path / "intent" / "prod"
+    root.mkdir(parents=True)
+    _write_zone(root, "Z-BARE", "dmz-bare")
+    _write_zone(root, "Z-ARMED", "dmz-armed",
+                "  protection_profile: best-practice\n  user_id: true\n")
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ZONE_SEC_ENV)
+
+    rc = run_classify(tmp_path / "intent", env_map)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "zone/dmz-bare" in out and "zone_without_protection" in out
+    assert "zone/dmz-armed" in out
+
+    # An unprotected zone is HIGH, so a LOW gate must refuse to auto-apply it.
+    assert run_classify(tmp_path / "intent", env_map, gate="LOW") == 3
+
+
+def test_a_fully_configured_zone_passes_a_low_gate(tmp_path):
+    root = tmp_path / "intent" / "prod"
+    root.mkdir(parents=True)
+    _write_zone(root, "Z-ARMED", "dmz-armed",
+                "  protection_profile: best-practice\n  user_id: true\n")
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ZONE_SEC_ENV)
+    assert run_classify(tmp_path / "intent", env_map, gate="LOW") == 0

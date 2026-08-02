@@ -287,9 +287,10 @@ def _load_catalogs(
 ) -> Tuple[Optional[Dict[str, object]], bool]:
     """Load every reference catalog into a kwargs dict for `load_intent`.
 
-    The three ADR-0003 name catalogs live at conventional paths next to the
-    service catalog (`profiles.yaml`, `applications.yaml`, `log-forwarding.yaml`);
-    each is optional. Returns (kwargs, ok) — any malformed catalog fails the run.
+    The name catalogs live at conventional paths next to the service catalog
+    (`profiles.yaml`, `applications.yaml`, `log-forwarding.yaml`, and
+    `zone-protection.yaml` for ZoneRequest); each is optional. Returns
+    (kwargs, ok) — any malformed catalog fails the run.
     """
     catalog_dir = service_catalog_path.parent
     svc, ok = _load_service_catalog(service_catalog_path, err)
@@ -311,9 +312,16 @@ def _load_catalogs(
                                   kind="log-forwarding profile", key="profiles", err=err)
     if not ok:
         return None, False
+    # Zone PROTECTION profiles — flood/recon, bound to a zone. Distinct from
+    # profiles.yaml, which lists security profile GROUPS bound to a rule.
+    zoneprot, ok = _load_name_catalog(catalog_dir / "zone-protection.yaml",
+                                      kind="zone-protection profile", key="profiles", err=err)
+    if not ok:
+        return None, False
     return {
         "service_catalog": svc, "app_catalog": app, "profile_catalog": prof,
         "application_catalog": appid, "log_forwarding_catalog": logf,
+        "zone_protection_catalog": zoneprot,
     }, True
 
 
@@ -337,7 +345,7 @@ def run_classify(
     HIGH/CRITICAL changes need an explicit human override, not silent auto-apply.
     Exit codes:  0 ok · 1 usage/IO error · 2 invalid intent · 3 gate exceeded.
     """
-    from fwgitops.classify import TIERS, PolicyContext, classify
+    from fwgitops.classify import TIERS, PolicyContext, classify, classify_zone
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
@@ -362,6 +370,7 @@ def run_classify(
         return 0
 
     changes: List[CompiledChange] = []
+    zones: List[CompiledZone] = []
     problems: List[str] = []
     for path in intents:
         rel = _display_path(path)
@@ -372,7 +381,9 @@ def run_classify(
             continue
         try:
             c = compile_any(load_intent(doc, **cats), env_map)
-            if isinstance(c, CompiledChange):  # policy stages: rules only (zones are infra)
+            if isinstance(c, CompiledZone):
+                zones.append(c)
+            if isinstance(c, CompiledChange):
                 changes.append(c)
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -391,6 +402,18 @@ def run_classify(
     tiers = {"LOW": 0, "HIGH": 0, "CRITICAL": 0}
     exceeded: List[str] = []
     gate_rank = TIERS.index(gate) if gate else None
+
+    # Zones are classified too (ADR-0001 kind #2). A zone with no protection
+    # profile has no flood/recon protection, and User-ID off silently breaks any
+    # rule matching on source_user — both are findings, not defaults.
+    for z in sorted(zones, key=lambda z: (z.folder, z.name)):
+        v = classify_zone(z)
+        tiers[v.tier] = tiers.get(v.tier, 0) + 1
+        checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
+        print(f"  zone/{z.name:11} {v.tier:9} {checks}", file=out)
+        if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
+            exceeded.append(f"zone/{z.name}={v.tier}")
+
     for ch in sorted(changes, key=lambda c: c.rule.name):
         v = classify(ch, policy=policy)
         tiers[v.tier] = tiers.get(v.tier, 0) + 1
@@ -399,7 +422,7 @@ def run_classify(
         if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
             exceeded.append(f"{ch.rule.name}={v.tier}")
     print(
-        f"classified {len(changes)}: "
+        f"classified {len(changes) + len(zones)}: "
         f"{tiers['LOW']} LOW · {tiers['HIGH']} HIGH · {tiers['CRITICAL']} CRITICAL",
         file=out,
     )

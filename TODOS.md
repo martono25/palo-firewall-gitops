@@ -21,6 +21,38 @@ a cross-model challenge invalidated two of its load-bearing assumptions.
 
 ## Completed
 
+### A1 / A2 / A3 — ZoneRequest end to end — DONE v1.2.0
+
+`scm_zone` resource + `zones` variable + module wiring; rules order after the
+zones they reference (conditional reference, baseline zones pass through as
+strings); full security posture (protection profile, User-ID/device-ID, log
+forwarding, DoS, ACLs) with catalog validation and risk classification.
+
+Also fixed: `_load_zone_request` built its collector without catalogs, so zone
+reference names were never validated at all.
+
+Root and module object types are byte-identical, enforced per-attribute by the
+ADR-0004 contract check, so HOLE 3 cannot recur on zones.
+
+### Schema-level contract check (HOLE 3) — DONE PR #32
+
+`declared_object_attributes` parses a variable's `object({...})` type and
+`check_object_attributes` asserts every attribute the compiler emits for that key
+is declared. Wired into `run_compile`, verified by mutation: stripping the six
+ADR-0003 attributes back out of `terraform/prod-edge/variables.tf` makes the
+compile exit 2 and name all six. A repo-tree test compiles the real intents and
+asserts the same, so root and module types cannot drift apart unnoticed.
+
+Only the TOP level of an object type is inspected — a nested
+`optional(object({...}))` whose inner attributes drift is not covered.
+
+### Reject a ZoneRequest naming a baseline zone — DONE v1.1.0
+
+`check_zone_collisions`. The consistency check *unions* baseline and declared
+zones, so a ZoneRequest named `internet` looked maximally valid while Terraform
+would have created over a live zone — which, now that zones carry a protection
+profile and ACLs, would clobber them.
+
 ### T5 — Probe scm_zone field fidelity — DONE 2026-07-31, RESULT: PROVIDER IS FAITHFUL
 
 **Result:** `paloaltonetworks/scm` v1.0.11 **writes `scm_zone` fields faithfully.**
@@ -68,31 +100,6 @@ this pattern gets reused for `InterfaceRequest`, which faces the same
 provider-fidelity question for `scm_ethernet_interface`.
 
 ## Contract enforcement
-
-### Schema-level tfvars contract check (attributes, not just keys)
-
-**What:** Extend `tfcontract.check_contract` to parse
-`variable "k" { type = map(object({...})) }` and assert every ATTRIBUTE the
-compiler emits for that key is declared — not just that the top-level key exists.
-
-**Why:** This is HOLE 3, and key-name matching structurally cannot see it.
-Terraform's object-to-object conversion silently discards attributes the target
-type does not declare: no warning, no diagnostic, exit 0. It was live in v1.0 —
-`terraform/prod-edge/variables.tf` omitted the six ADR-0003 attributes while the
-module declared them and the compiler emitted them, so App-ID, profile group and
-log setting never reached the module. The instance is fixed (types are now
-identical) but nothing stops them drifting apart again, and the comment claiming
-they were "kept in sync" was already false once.
-
-**Context:** The masking + comment-stripping machinery in `tfcontract.py` already
-does the hard part. The remaining work is extracting attribute names from an
-`object({...})` type expression and comparing against the inner keys of the
-emitted payload. A cheaper interim: a test asserting the root and module
-`variables.tf` object types are byte-identical.
-
-**Effort:** M
-**Priority:** P1
-**Depends on:** None.
 
 ### Reject a malformed Terraform root instead of best-effort parsing
 
@@ -191,86 +198,6 @@ to point at whichever resource this decision lands on. Full write-up in ADR-0002
 **Depends on:** None — this is the gate on the whole Day-1 chain.
 
 ## Compiler / intent model
-
-### A3 — Zone security field model
-
-**What:** Extend `ZoneSpec` (`src/fwgitops/intent.py:128`) beyond
-`environment / zone / zone_type / interfaces` to carry `enable_user_identification`,
-`enable_device_identification`, `zone_protection_profile`, `log_setting`,
-`dos_profile`, `dos_log_setting`, `user_acl`, `device_acl`. Validate profile
-names against catalogs the way rule profiles already are, and add a
-risk-classifier check flagging a zone declared with no protection profile.
-
-**Why:** Two concrete fail-open paths. A zone with no `zone_protection_profile`
-has no flood or reconnaissance protection and nothing says so. And the rule model
-already fully supports `source_user` (`compiler.py:204`, `enrich.py:153`), but
-User-ID must be enabled *per zone* — so a user-scoped allow rule on a
-ZoneRequest-declared zone silently never matches and traffic falls through to
-whatever sits below it. This is the same shape as the gap ADR-0003 fixed for
-rules, which that ADR called "the single most important gap."
-
-**Context:** Field names and nesting verified against the v1.0.11 schema:
-`zone_protection_profile` and `log_setting` live inside the `network` nested
-object; `enable_user_identification` is top-level.
-
-**UNBLOCKED 2026-07-31 by the T5 probe (see Completed).** The provider writes
-these fields faithfully, so this is a dataclass + loader branch + tfvars mapping
-with NO enrich subsystem. SCM also reference-validates the profile names
-fail-closed, so catalog validation is defence-in-depth (earlier feedback,
-restriction to sanctioned profiles) rather than the only guard.
-
-When building the catalogs, use the verified endpoints:
-`/config/security/v1/profile-groups` and
-`/config/network/v1/zone-protection-profiles` (both need a `folder` param).
-Cross-check any SCM request shape against https://pan.dev/scm/docs/home/ before
-concluding an error means missing permissions — three "permission" and "missing
-object" conclusions during this review were all malformed requests.
-
-**Effort:** S (was M — reduced by the probe result)
-**Priority:** P2
-**Depends on:** Nothing. Ready to build.
-
-### A2 — Zone-to-rule dependency ordering
-
-**What:** In `terraform/modules/security_folder/main.tf`, replace the raw string
-zone reference (`from = each.value.from_zones`, line 76) with a conditional
-resource reference:
-`[for z in each.value.from_zones : contains(keys(var.zones), z) ? scm_zone.this[z].name : z]`.
-
-**Why:** Terraform builds ordering from references. Rules name zones as plain
-strings, so there is no edge and a rule can be created before the zone it needs,
-failing the device commit mid-apply. The predicate must read `var.zones` rather
-than the resource, because baseline zones (`local`, `internet`) exist on the
-device and are not Terraform-managed — indexing `scm_zone.this["local"]` would
-error.
-
-**Context:** Do NOT use a blanket `depends_on`. The comment at `main.tf:79-85`
-records that this exact pattern previously made every rule depend on every
-object, so `terraform destroy -target` of one address cascaded into destroying
-ALL rules. Confirm with `terraform graph` whether the edge lands instance-level
-or resource-level.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** An `scm_zone` resource existing, which depends on the probe.
-
-### Reject a ZoneRequest naming a baseline zone
-
-**What:** Fail compile when a ZoneRequest's zone name already appears in
-`env_map.baseline_zones_by_folder()`.
-
-**Why:** `check_zone_consistency` (`compiler.py:343-345`) *unions* baseline and
-declared zones, so a ZoneRequest named `internet` looks maximally valid. Terraform
-would attempt a create against an object that already exists on the device, and
-under A3 that create carries `zone_protection_profile`, `log_setting` and
-`user_acl` — clobbering a live baseline zone on the production edge folder.
-
-**Context:** Small, self-contained, and worth doing even if all other zone work
-stays deferred. Tracked as task T7 in the review's task list.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** None.
 
 ### Zone deletion path
 

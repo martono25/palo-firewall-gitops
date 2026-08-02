@@ -73,8 +73,18 @@ resource "scm_security_rule" "this" {
   name   = each.value.name
   folder = each.value.folder
 
-  from = each.value.from_zones
-  to   = each.value.to_zones
+  # Reference the scm_zone RESOURCE for zones this module manages, so Terraform
+  # orders the zone before the rule that uses it. Baseline zones (`local`,
+  # `internet`, `proxy` …) already exist on the device and are NOT
+  # Terraform-managed, so they pass through as plain strings — indexing
+  # scm_zone.this["local"] would error.
+  #
+  # The predicate reads var.zones, NOT scm_zone.this: keying off the variable
+  # keeps the branch decidable at plan time. Deliberately not a blanket
+  # `depends_on` — see the note above on the destroy-cascade that pattern caused
+  # for address objects.
+  from = [for z in each.value.from_zones : contains(keys(var.zones), z) ? scm_zone.this[z].name : z]
+  to   = [for z in each.value.to_zones : contains(keys(var.zones), z) ? scm_zone.this[z].name : z]
 
   # Reference the object RESOURCES (not raw strings from tfvars) so each rule
   # depends on ONLY the addresses/services/tags it actually uses. This replaces a
@@ -107,4 +117,24 @@ resource "scm_security_rule" "this" {
   # effect. `fwgitops enrich` sets them via the SCM API post-apply / pre-push (same
   # candidate, so the push commits skeleton + enrichment atomically). See
   # docs/adr/0003 + src/fwgitops/enrich.py.
+}
+
+# ── Zones (ZoneRequest, ADR-0001 kind #2) ─────────────────────────────────
+# scm_zone has NO `tag` attribute (unlike scm_security_rule), so zones cannot
+# carry the `gitops:` provenance markers and are invisible to drift.py's
+# tag-based detection. That is a property of the provider, not an oversight —
+# only 14 of its resources are taggable. Recorded in ADR-0001.
+resource "scm_zone" "this" {
+  for_each = var.zones
+
+  name   = each.value.name
+  folder = each.value.folder
+
+  network                      = each.value.network
+  enable_user_identification   = each.value.enable_user_identification
+  enable_device_identification = each.value.enable_device_identification
+  dos_profile                  = each.value.dos_profile
+  dos_log_setting              = each.value.dos_log_setting
+  user_acl                     = each.value.user_acl
+  device_acl                   = each.value.device_acl
 }
