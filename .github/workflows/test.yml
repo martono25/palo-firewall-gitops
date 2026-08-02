@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────
+# Unit tests. Runs on EVERY pull request — no path filter, no credentials.
+#
+# Why this is separate from pr-validate: that workflow needs AWS OIDC + SCM
+# credentials and runs a real terraform plan, so it is deliberately scoped to
+# paths that can change the desired state (intent/, catalog/, terraform/, src/).
+# The tests need neither, and living under that filter meant a PR touching only
+# tests/ or .github/ ran NOTHING.
+#
+# That was not theoretical. The credential-redaction guard and its 12 tests were
+# added in a PR touching only .github/ and tests/ — so CI verified none of it,
+# including the test asserting every injected secret is redacted.
+# ─────────────────────────────────────────────────────────────────────────
+name: test
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - name: Run tests
+        run: python -m pytest -q

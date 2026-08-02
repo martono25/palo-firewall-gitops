@@ -27,7 +27,18 @@ provider "scm" {}
 
 variable "folder" {
   type        = string
-  description = "SCM folder to create the probe zone in. Use a scratch folder, NOT prod-edge."
+  description = "SCM folder to create the probe zone in. Use a scratch folder."
+
+  # Prose in a README is not a guard. interface-probe enforces this; zone-probe
+  # did not, which is an inconsistency between two spikes doing the same kind of
+  # thing with the same credentials.
+  #   * prod-edge   — holds the live policy and 2 real devices
+  #   * ngfw-shared — parent of prod-edge AND GitOps, so it feeds both
+  #   * All         — root of the hierarchy
+  validation {
+    condition     = !contains(["prod-edge", "ngfw-shared", "All"], var.folder)
+    error_message = "Refusing to probe in a folder that feeds production devices. Use GitOps."
+  }
 }
 
 variable "zone_name" {

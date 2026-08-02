@@ -5,6 +5,10 @@
 # ─────────────────────────────────────────────────────────────────────────
 name: pr-validate
 
+# This workflow needs AWS OIDC + SCM credentials and runs a real plan, so it
+# stays scoped to paths that can actually change the desired state. The unit
+# tests are NOT here — they run unfiltered in test.yml, because filtering them
+# meant a PR touching only tests/ or .github/ ran nothing at all.
 on:
   workflow_dispatch: {}
   pull_request:
@@ -35,9 +39,8 @@ jobs:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
 
-      # 0. Unit tests — a PR must not regress the compiler/enrich/classifier.
-      - name: Run tests
-        run: python -m pytest -q
+      # Unit tests are NOT run here — test.yml runs them unfiltered on every
+      # PR, so duplicating them would just double the wait on any src/ change.
 
       # 1. Fail-closed intent validation. Any invalid intent fails the PR here
       #    with an actionable report — the requester sees exactly what to fix.
@@ -150,6 +153,19 @@ jobs:
             fi
             echo "::endgroup::"
           done
+
+      # Strip credential values BEFORE anything is published. GitHub masks
+      # secrets in the live log stream but NOT in artifact contents or in
+      # `gh pr comment` bodies — and both are produced from files that capture
+      # terraform's stderr while SCM_CLIENT_SECRET is in the job env. A provider
+      # or auth error echoing a credential would land somewhere durable and
+      # public while the visible log looked clean.
+      #
+      # always(): must run even when the plan step went red, because that is
+      # exactly when an error message carrying a credential is most likely.
+      - name: Redact credentials from published files
+        if: always()
+        run: python3 .github/scripts/redact.py plan-*.txt enrich-*.txt
 
       # always(): the plan step can now FAIL (it used to swallow everything with
       # `|| true`). A failing plan is exactly when the reviewer needs the output,
