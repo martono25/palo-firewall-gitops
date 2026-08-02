@@ -214,9 +214,12 @@ interfaces by their `$eth-*` variable names, CONFIGURING an existing interface
    snapshot via `classify --zones-snapshot`.
 3. ~~per-attribute contract check covers `layer3`, a nested object~~
    **DONE v1.4.0** — the HOLE 3 check now recurses, comparing dotted paths.
-4. run the `scm_ethernet_interface` fidelity probe against a folder-scope
-   interface. **OPEN** — the one prerequisite that needs a write to
-   `ngfw-shared`, which is why it is still deferred.
+4. ~~run the `scm_ethernet_interface` fidelity probe~~ **DONE 2026-08-02** —
+   the provider is FAITHFUL, including nested `layer3.ip`, so no enrich
+   subsystem is needed. Run safely in `GitOps` (zero devices, new name), not
+   `ngfw-shared`; kit at `spike/interface-probe/`.
+
+**All four prerequisites are met. `InterfaceRequest` is ready to build.**
 
 **Why:** the interfaces exist on both devices and neither has an IP —
 `layer3` is `{}` at every scope. Configuring that through Git is the first link
@@ -231,8 +234,7 @@ ready to point at `scm_ethernet_interface` when prerequisite 4 is taken.
 
 **Effort:** L
 **Priority:** P1
-**Depends on:** prerequisite 4 above — the fidelity probe, which needs a
-write to `ngfw-shared`.
+**Depends on:** nothing — all four prerequisites are met.
 
 ## Compiler / intent model
 
