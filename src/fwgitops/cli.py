@@ -24,7 +24,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fwgitops.compiler import (
     CompileError,
@@ -40,7 +40,7 @@ from fwgitops.compiler import (
 from fwgitops.intent import IntentError, load_intent
 from fwgitops.io import discover_intents, read_yaml
 from fwgitops.resolve import EnvMap, ResolveError
-from fwgitops.tfcontract import check_contract, is_terraform_root
+from fwgitops.tfcontract import check_contract, check_object_attributes, is_terraform_root
 
 OUTPUT_FILENAME = "rules.auto.tfvars.json"
 ZONES_FILENAME = "zones.auto.tfvars.json"
@@ -138,17 +138,17 @@ def run_compile(
     # Build each payload ONCE. `to_tfvars` / `zone_tfvars` are not pure lookups —
     # they raise on duplicate keys — so calling them twice per folder would run
     # that check (and any future side effect) twice.
-    planned: List[Tuple[Path, str, List[str]]] = []  # (target, payload, tfvars keys)
+    planned: List[Tuple[Path, str, Dict[str, Any]]] = []  # (target, json, payload)
     try:
         for folder, folder_changes in sorted(_group_by_folder(changes).items()):
             payload = to_tfvars(folder_changes)
             target = out_root / folder / OUTPUT_FILENAME
-            planned.append((target, dumps_payload(payload), sorted(payload)))
+            planned.append((target, dumps_payload(payload), payload))
         # ZoneRequest -> zones.auto.tfvars.json per folder (terraform auto-loads both).
         for folder, folder_zones in sorted(zones_by_folder.items()):
             payload = zone_tfvars(folder_zones)
             target = out_root / folder / ZONES_FILENAME
-            planned.append((target, dumps_payload(payload), sorted(payload)))
+            planned.append((target, dumps_payload(payload), payload))
     except CompileError as e:
         # Duplicate zone key / object-name collision. These already fail closed
         # (nothing is written), but escaped as a raw traceback and exit 1 —
@@ -171,10 +171,16 @@ def run_compile(
     # down, config never reaching the device. Callers that genuinely target a
     # scratch directory opt out explicitly via require_terraform_root=False.
     contract_problems: List[str] = []
-    for target, _payload, keys in planned:
+    for target, _json, payload in planned:
         module_dir = target.parent
         if require_terraform_root or is_terraform_root(module_dir):
-            contract_problems.extend(check_contract(module_dir, keys))
+            contract_problems.extend(check_contract(module_dir, sorted(payload)))
+        if is_terraform_root(module_dir):
+            # HOLE 3: the key can be declared and wired while the object TYPE
+            # omits attributes the compiler emits. Terraform discards those
+            # silently, so the module falls back to its own defaults.
+            for key, value in sorted(payload.items()):
+                contract_problems.extend(check_object_attributes(module_dir, key, value))
     if contract_problems:
         print(
             f"REJECTED — {len(contract_problems)} Terraform contract problem(s); "
@@ -186,10 +192,10 @@ def run_compile(
         return 2
 
     written: List[Path] = []
-    for target, payload, _keys in planned:
+    for target, payload_json, _payload in planned:
         if write:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(payload, encoding="utf-8")
+            target.write_text(payload_json, encoding="utf-8")
         written.append(target)
 
     verb = "wrote" if write else "would write"

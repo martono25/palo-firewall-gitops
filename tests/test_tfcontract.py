@@ -489,3 +489,165 @@ def test_allow_missing_root_opts_out_explicitly(tmp_path):
 
     assert rc == 0
     assert (out / "prod-edge" / "zones.auto.tfvars.json").exists()
+
+
+# ── HOLE 3: object ATTRIBUTES, not just top-level keys ────────────────────
+V1_NARROW_ROOT = '''
+variable "security_rules" {
+  type = map(object({
+    name    = string
+    folder  = string
+    action  = string
+    log_end = bool
+    tags    = list(string)
+  }))
+  default = {}
+}
+module "m" {
+  source         = "../modules/security_folder"
+  security_rules = var.security_rules
+}
+'''
+
+RULE_PAYLOAD = {"r1": {
+    "name": "x", "folder": "f", "action": "allow", "log_end": True, "tags": [],
+    "application": ["ssl"], "profile_group": "best-practice", "log_setting": "log-best",
+    "rulebase": "pre", "relative_position": "bottom", "target_rule": None,
+}}
+
+
+def test_hole_3_undeclared_object_attributes_are_caught(tmp_path):
+    """THE v1.0 BUG. The root type omitted the six ADR-0003 attributes while the
+    module declared them and the compiler emitted them. Terraform DISCARDS
+    undeclared object attributes silently — no warning, exit 0 — so rules were
+    built with application=["any"] instead of the intent's App-ID.
+
+    Invisible to the key-level check: `security_rules` is declared AND wired.
+    """
+    from fwgitops.tfcontract import check_object_attributes
+    d = _root(tmp_path, V1_NARROW_ROOT)
+    assert check_contract(d, ["security_rules"]) == [], "key-level check cannot see this"
+    problems = check_object_attributes(d, "security_rules", RULE_PAYLOAD)
+    assert len(problems) == 1
+    for attr in ("application", "profile_group", "log_setting",
+                 "rulebase", "relative_position", "target_rule"):
+        assert attr in problems[0]
+
+
+def test_a_matching_object_type_has_no_attribute_violations(tmp_path):
+    from fwgitops.tfcontract import check_object_attributes
+    body = V1_NARROW_ROOT.replace(
+        "    tags    = list(string)",
+        """    tags    = list(string)
+    application       = optional(list(string), ["any"])
+    profile_group     = optional(string)
+    log_setting       = optional(string)
+    rulebase          = optional(string, "pre")
+    relative_position = optional(string, "bottom")
+    target_rule       = optional(string)""",
+    )
+    assert check_object_attributes(_root(tmp_path, body), "security_rules", RULE_PAYLOAD) == []
+
+
+def test_nested_object_attributes_do_not_leak_into_the_parent(tmp_path):
+    """`optional(object({...}))` nests — its attribute names belong to the
+    nested type, not the one being checked."""
+    from fwgitops.tfcontract import declared_object_attributes
+    d = _root(tmp_path, '''
+variable "zones" {
+  type = map(object({
+    name   = string
+    folder = string
+    network = optional(object({
+      layer3     = optional(list(string))
+      must_not_count = optional(string)
+    }))
+  }))
+}
+''')
+    assert declared_object_attributes(d, "zones") == {"name", "folder", "network"}
+
+
+@pytest.mark.parametrize("body,var", [
+    ('variable "folder" { type = string }', "folder"),
+    ('variable "z" { type = any }', "z"),
+    ('variable "m" { type = map(string) }', "m"),
+    ('variable "other" { type = string }', "absent"),
+])
+def test_non_object_or_absent_variables_have_no_attribute_contract(tmp_path, body, var):
+    from fwgitops.tfcontract import declared_object_attributes
+    assert declared_object_attributes(_root(tmp_path, body), var) is None
+
+
+def test_a_variable_name_is_found_even_though_masking_blanks_quotes(tmp_path):
+    """Regression on the lookup itself: the variable NAME lives inside quotes,
+    which the mask blanks, so the declaration must be located in unmasked text
+    while brace-matching runs on the masked view."""
+    from fwgitops.tfcontract import declared_object_attributes
+    d = _root(tmp_path, 'variable "security_rules" {\n'
+                        '  type = map(object({\n    name = string\n  }))\n}\n')
+    assert declared_object_attributes(d, "security_rules") == {"name"}
+
+
+def test_compile_rejects_a_root_whose_object_type_drops_emitted_attributes(tmp_path, capsys):
+    """End-to-end: HOLE 3 must fail the compile, not just the helper."""
+    intent_dir = tmp_path / "intent" / "prod"
+    intent_dir.mkdir(parents=True)
+    (intent_dir / "ZONE.yaml").write_text(ZONE_INTENT, encoding="utf-8")
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP, encoding="utf-8")
+
+    folder_dir = tmp_path / "terraform" / "prod-edge"
+    folder_dir.mkdir(parents=True)
+    # `zones` is declared and wired, but its object type omits `network`.
+    (folder_dir / "main.tf").write_text('''
+variable "zones" {
+  type = map(object({
+    name   = string
+    folder = string
+  }))
+}
+module "m" {
+  source = "../modules/security_folder"
+  zones  = var.zones
+}
+''', encoding="utf-8")
+
+    rc = main([
+        "compile", str(tmp_path / "intent"),
+        "--env-map", str(env_map), "--out", str(tmp_path / "terraform"),
+    ])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "does not declare attribute(s)" in err and "network" in err
+    assert not (folder_dir / "zones.auto.tfvars.json").exists()
+
+
+def test_this_repos_root_object_types_accept_everything_the_compiler_emits():
+    """Guards the real tree against the root and module types drifting apart —
+    which is exactly what happened in v1.0, under a comment claiming they were
+    'kept in sync with compiler.py'.
+    """
+    import json
+    import tempfile
+
+    from fwgitops.cli import run_compile
+    from fwgitops.tfcontract import check_object_attributes
+
+    out = Path(tempfile.mkdtemp())
+    rc = run_compile(REPO_ROOT / "intent", REPO_ROOT / "catalog" / "environments.yaml",
+                     out, write=True, require_terraform_root=False,
+                     out=open("/dev/null", "w"))
+    assert rc == 0
+
+    for emitted in out.rglob("*.auto.tfvars.json"):
+        folder = emitted.parent.name
+        root = REPO_ROOT / "terraform" / folder
+        if not root.is_dir():
+            continue
+        payload = json.loads(emitted.read_text())
+        for key, value in payload.items():
+            assert check_object_attributes(root, key, value) == [], (
+                f"{folder}: root variable {key!r} does not declare everything the "
+                f"compiler emits — Terraform would discard it silently"
+            )

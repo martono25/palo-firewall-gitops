@@ -1,7 +1,7 @@
 """The compiler → Terraform data contract, checked in Python.
 
 The compiler emits `*.auto.tfvars.json`; a Terraform root module is supposed to
-consume it. Nothing enforced that, and there are TWO ways it silently fails:
+consume it. Nothing enforced that, and there are THREE ways it silently fails:
 
     intent -> compile -> *.auto.tfvars.json
                               |
@@ -11,15 +11,22 @@ consume it. Nothing enforced that, and there are TWO ways it silently fails:
                     HOLE 2: variable declared but never referenced
                             -> NO diagnostic at all. Ignored.
                               |
+                    HOLE 3: object TYPE omits an emitted attribute
+                            -> Terraform DISCARDS it silently. Ignored.
+                              |
                          module -> resource -> SCM -> device
 
 Hole 1 shipped a whole release: `zones.auto.tfvars.json` was written on every
 compile, plan and apply stayed green, and the zone never reached the firewall.
-Hole 2 is quieter still — Terraform says nothing whatsoever.
+Hole 2 is quieter still — Terraform says nothing whatsoever. Hole 3 was ALSO
+live in v1.0 and is the sneakiest: the key is declared and wired, so a
+key-level check reports green, while `application`, `profile_group` and
+`log_setting` were dropped at the root boundary and rules were built with
+`["any"]` instead of the intent's App-ID.
 
-Both are cheap to check without a Terraform binary or cloud credentials, so they
-are checked here: at compile time (fail-closed, see `cli.py`) and in the test
-suite (`tests/test_tfcontract.py`).
+All three are cheap to check without a Terraform binary or cloud credentials, so
+they are checked here: at compile time (fail-closed, see `cli.py`) and in the
+test suite (`tests/test_tfcontract.py`).
 
 Deliberately a small regex parser rather than a full HCL parser: the inputs are
 this repo's own hand-written root modules, and adding an HCL dependency to catch
@@ -46,7 +53,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Iterable, List, Set
+from typing import Any, Iterable, List, Optional, Set
 
 #: `variable "name" {`
 _VARIABLE_RE = re.compile(r'^\s*variable\s+"([^"]+)"\s*\{', re.MULTILINE)
@@ -213,6 +220,106 @@ def module_arguments(module_dir: Path) -> Set[str]:
             depth += line.count("{") + line.count("[")
             depth -= line.count("}") + line.count("]")
     return args
+
+
+def _matching_brace(text: str, open_idx: int) -> int:
+    """Index of the `}` / `)` closing the bracket at `open_idx`, or -1."""
+    pairs = {"{": "}", "(": ")"}
+    closer = pairs[text[open_idx]]
+    depth = 0
+    for i in range(open_idx, len(text)):
+        if text[i] == text[open_idx]:
+            depth += 1
+        elif text[i] == closer:
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def declared_object_attributes(module_dir: Path, variable: str) -> Optional[Set[str]]:
+    """Attribute names of a variable's `object({...})` type, or None.
+
+    Returns None when the variable is absent or its type is not object-shaped
+    (`string`, `bool`, `any`, a bare `map(string)`), which means there is no
+    attribute contract to enforce.
+
+    This is HOLE 3. Terraform's object-to-object conversion SILENTLY DISCARDS
+    attributes the target type does not declare — no warning, no diagnostic,
+    exit 0. A root variable typed more narrowly than the module it feeds drops
+    the extra fields and the module falls back to its own `optional(...)`
+    defaults. Key-level checking cannot see it: the key is declared and wired.
+
+    Live example: the root's `security_rules` omitted the six ADR-0003
+    attributes, so `application`, `profile_group` and `log_setting` never
+    reached the module and rules were built with `["any"]` instead of the
+    intent's App-ID.
+    """
+    # The variable NAME lives inside quotes, which masking blanks — so locate the
+    # declaration in the unmasked text, then do every structural scan on the
+    # masked view. `_mask_strings` is a 1:1 character map over the same
+    # comment-stripped source, so the two are index-aligned.
+    text = _read_tf(module_dir)
+    masked = _mask_strings(text)
+    decl = re.search(r'^\s*variable\s+"' + re.escape(variable) + r'"\s*\{', text, re.MULTILINE)
+    if decl is None:
+        return None
+    end = _matching_brace(masked, decl.end() - 1)
+    block = masked[decl.end() - 1: end if end != -1 else len(masked)]
+
+    obj = re.search(r"\bobject\s*\(", block)
+    if obj is None:
+        return None
+    paren_close = _matching_brace(block, obj.end() - 1)
+    inner = block[obj.end(): paren_close if paren_close != -1 else len(block)]
+    brace = inner.find("{")
+    if brace == -1:
+        return None
+    body = inner[brace + 1: _matching_brace(inner, brace)]
+
+    # Depth-1 lines only: `optional(object({...}))` nests, and those inner
+    # attribute names belong to the nested type, not this one.
+    attrs: Set[str] = set()
+    depth = 0
+    for line in body.splitlines():
+        if depth == 0:
+            found = _ARG_RE.match(line)
+            if found:
+                attrs.add(found.group(1))
+        depth += line.count("{") + line.count("(") + line.count("[")
+        depth -= line.count("}") + line.count(")") + line.count("]")
+    return attrs or None
+
+
+def check_object_attributes(module_dir: Path, key: str, payload: Any) -> List[str]:
+    """Every attribute the compiler emits for `key` must be declared. HOLE 3.
+
+    `payload` is the emitted value for that tfvars key. For the map-of-object
+    shape the compiler produces, the attributes are the union of the inner
+    dicts' keys.
+    """
+    declared = declared_object_attributes(module_dir, key)
+    if declared is None:
+        return []
+    if isinstance(payload, dict):
+        values = [v for v in payload.values() if isinstance(v, dict)]
+    elif isinstance(payload, list):
+        values = [v for v in payload if isinstance(v, dict)]
+    else:
+        return []
+    emitted: Set[str] = set()
+    for v in values:
+        emitted |= set(v)
+
+    missing = sorted(emitted - declared)
+    if not missing:
+        return []
+    return [
+        f"{module_dir}: `variable \"{key}\"` does not declare attribute(s) {missing}, "
+        f"but the compiler emits them — Terraform DISCARDS undeclared object "
+        f"attributes silently (no warning, exit 0) and the module falls back to "
+        f"its own defaults. Add them to the object type in variables.tf."
+    ]
 
 
 def check_contract(module_dir: Path, emitted_keys: Iterable[str]) -> List[str]:

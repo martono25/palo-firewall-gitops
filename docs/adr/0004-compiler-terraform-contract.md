@@ -32,6 +32,24 @@ diagnostic at all**. `terraform/prod-edge/main.tf` passes four arguments; adding
 a fifth variable without wiring it would be silently ignored with not even a
 warning to grep for.
 
+A **third hole**, found by the ship red-team pass, was also live in v1.0 and is
+the sneakiest of the three. Terraform's object-to-object conversion **silently
+discards attributes the target type does not declare**. The root's
+`security_rules` type omitted the six ADR-0003 attributes the module declares and
+the compiler emits, so `application`, `profile_group`, `log_setting`, `rulebase`,
+`relative_position` and `target_rule` never crossed the root boundary and rules
+were built with the module's `["any"]` default instead of the intent's App-ID.
+
+Hole 3 is invisible to a key-level check: the key `security_rules` is both
+declared and wired. The file's own comment claimed the types were "kept in sync
+with `src/fwgitops/compiler.py`" — they were not, and nothing enforced it.
+
+| Hole | Terraform's signal |
+|---|---|
+| 1 — tfvars key with no matching `variable` | warning, **exit 0** |
+| 2 — `variable` declared but never referenced | **no diagnostic at all** |
+| 3 — object type omits an emitted attribute | **silently discarded** |
+
 Two further defects surfaced while verifying the above:
 
 - `.github/workflows/pr-validate.yml` piped `terraform plan` through `tee` and
@@ -49,14 +67,22 @@ Two further defects surfaced while verifying the above:
 **Enforce the contract in code, at both ends, rather than fixing the one
 instance.**
 
-1. **`tfcontract.py`** — pure-Python checks for both holes. No Terraform binary,
-   no cloud credentials, runs in milliseconds. Hole 1: every emitted top-level
-   tfvars key must have a matching `variable` declaration. Hole 2: that variable
-   must also be passed to a `module` block.
+1. **`tfcontract.py`** — pure-Python checks for all three holes. No Terraform
+   binary, no cloud credentials, runs in milliseconds. Hole 1: every emitted
+   top-level tfvars key must have a matching `variable` declaration. Hole 2:
+   `var.<key>` must actually be referenced somewhere in the root (broader than
+   "a module argument of that name", so a differently-named argument or a bare
+   `resource` still counts). Hole 3: `declared_object_attributes` parses the
+   variable's `object({...})` type and asserts every attribute the compiler
+   emits for that key is declared.
 2. **Compile fails closed.** `run_compile` plans every output file, checks the
    contract, and writes nothing if it is violated (exit 2) — preserving the
-   existing all-or-nothing guarantee. Enforced only where a Terraform root
-   actually exists, so scratch directories remain usable.
+   all-or-nothing guarantee across folders, not just within one. A **missing**
+   Terraform root is itself a violation: gating the check on "does a Terraform
+   root exist" made the check that catches missing Terraform skip exactly when
+   Terraform was missing, and both CI loops then skipped the folder too
+   (`[ -f "$dir/main.tf" ] || continue`), so the plan and its grep never ran
+   either. Scratch use opts out by name via `--allow-missing-root`.
 3. **CI fails on the warning.** The plan step captures the plan's own exit
    status (treating `2` = changes present as normal for a PR) and fails the job
    if the output contains `Value for undeclared variable`.
@@ -79,14 +105,24 @@ forgot the zones variable" — it is "forgetting is invisible."
 **Positive**
 - A kind wired into the compiler but not into Terraform now fails loudly at
   compile time and in CI, instead of passing green forever.
-- Both silent holes are covered, including the one with no diagnostic.
+- All three silent holes are covered, including the one with no diagnostic and
+  the one where the key looks perfectly wired.
+- The root and module object types can no longer drift apart unnoticed — a
+  repo-tree test compiles the real intents and asserts every emitted attribute
+  is declared, which is what the "kept in sync" comment only claimed.
 - A real plan failure now fails the PR — previously it never did.
 - Rules may reference any zone that genuinely exists.
 
 **Negative / cost**
 - `tfcontract.py` is a small regex + brace parser, not a full HCL parser. It is
   adequate for this repo's hand-written root modules and would need revisiting
-  if they grew generated or dynamic module blocks.
+  if they grew generated or dynamic module blocks. String literals are masked
+  before any structural scan (a `}` inside a string once collapsed brace depth;
+  a `//` inside a URL once ate a closing brace), and line-break characters are
+  never masked, because the comment pass zips the masked and original text line
+  by line.
+- Hole 3's check only inspects the TOP level of an `object({...})` type. A
+  nested `optional(object({...}))` whose inner attributes drift is not covered.
 - The compile-time check reads `.tf` files, a new coupling between the compiler
   and the Terraform layout.
 
@@ -105,6 +141,27 @@ then destroyed:
   was rejected at create with `API_I00013 … type:INVALID_REFERENCE`.
 - **Fidelity varies per resource type.** It cannot be generalised — re-run the
   probe against `scm_ethernet_interface` before scoping `InterfaceRequest`.
+
+### Read-only findings that reshape `InterfaceRequest` (2026-08-02)
+
+Discovery against the live tenant, before any write:
+
+- **This tenant does not name interfaces literally.** The zones `local` and
+  `internet` reference `$eth-local` / `$eth-internet` — SCM **variables**, each
+  an object with a `default_value` (e.g. `ethernet1/3`) defined in the parent
+  folder `ngfw-shared` and inherited down. So `ZoneSpec.interfaces` values like
+  `ethernet1/2` (used in our fixtures) are the wrong shape here.
+- **This changes A4's premise.** Validating interface names against a device's
+  *physical* interfaces validates the wrong vocabulary; the real one is the
+  inherited `$eth-*` variable set, which lives in an ancestor folder. Any
+  interface catalog must understand folder inheritance.
+- **Four of the seven zones carry no interfaces at all** (`layer3: []`), and
+  `proxy` has no `network` block. That is the concrete "zone that carries no
+  traffic" state, on the live tenant.
+- **`scm_ethernet_interface` has no `tag` attribute either**, like `scm_zone`.
+  Only 14 of the provider's resources are taggable, so the tag-based drift model
+  in `drift.py` structurally covers a minority of object types — this is not a
+  zone-specific quirk.
 
 Useful endpoints (several earlier `403`/`400` results were malformed requests,
 not permissions — most SCM config endpoints require a `folder` param):
