@@ -136,11 +136,13 @@ Consequences for the wider design:
   structurally covers a minority of object types. That is a general limit, not a
   zone-specific quirk.
 
-**Do this before scoping `InterfaceRequest`:** decide what it manages (the
-shared-folder variable, a local override, or nothing because bootstrap owns it),
-and only then probe that resource's provider fidelity. Probing
-`scm_ethernet_interface` first was deliberately skipped — fidelity of a resource
-the design may not use is not the blocker.
+**RESOLVED by ADR-0005 (2026-08-02).** `InterfaceRequest` targets FOLDER scope
+via the `$eth-*` names and CONFIGURES an existing interface (sets `layer3`)
+rather than creating one — `$eth-local` and `ethernet1/4` turned out to be the
+same object under two names, with `layer3` empty on both devices. The intent in
+the chain above is right; read it as "configure interface addressing", not
+"create an interface". The `scm_ethernet_interface` fidelity probe remains unrun
+by design; run it against a folder-scope interface when this is built.
 
 ## Related
 - ADR-0001 (multi-kind intent model) — the enabling mechanism.
