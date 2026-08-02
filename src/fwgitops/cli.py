@@ -32,12 +32,15 @@ from fwgitops.compiler import (
     CompiledZone,
     check_zone_collisions,
     check_zone_consistency,
-    compile_any,
     dumps_payload,
-    to_tfvars,
-    zone_tfvars,
 )
 from fwgitops.intent import IntentError, load_intent
+from fwgitops.kinds import (
+    REGISTRY,
+    compile_any,
+    group_by_kind_and_folder,
+    of_kind,
+)
 from fwgitops.io import discover_intents, read_yaml
 from fwgitops.resolve import EnvMap, ResolveError
 from fwgitops.tfcontract import check_contract, check_object_attributes, is_terraform_root
@@ -110,8 +113,8 @@ def run_compile(
             print(f"  - {p}", file=err)
         return 2
 
-    changes = [c for c in compiled if isinstance(c, CompiledChange)]
-    zones = [c for c in compiled if isinstance(c, CompiledZone)]
+    changes = of_kind(compiled, "AccessRequest")
+    zones = of_kind(compiled, "ZoneRequest")
 
     # Cross-kind check (ADR-0001): a rule may only use a zone declared by the env
     # map or a ZoneRequest — caught here, not at the firewall's device commit.
@@ -131,23 +134,20 @@ def run_compile(
 
     # Plan every file BEFORE writing any, so the contract check below can reject
     # the whole compile without leaving a half-written terraform/ directory.
-    zones_by_folder: Dict[str, List[CompiledZone]] = {}
-    for z in zones:
-        zones_by_folder.setdefault(z.folder, []).append(z)
-
-    # Build each payload ONCE. `to_tfvars` / `zone_tfvars` are not pure lookups —
-    # they raise on duplicate keys — so calling them twice per folder would run
-    # that check (and any future side effect) twice.
+    #
+    # ONE loop for every kind (ADR-0001). This used to be a hand-written block
+    # per kind — the shape that let ZoneRequest ship with no Terraform behind it.
+    # A new kind adds a REGISTRY entry and is emitted here automatically; if its
+    # Terraform side is missing, the contract check below rejects the compile.
+    #
+    # Each payload is built ONCE: `tfvars` is not a pure lookup (it raises on
+    # duplicate keys), so calling it twice per folder would run that check twice.
     planned: List[Tuple[Path, str, Dict[str, Any]]] = []  # (target, json, payload)
     try:
-        for folder, folder_changes in sorted(_group_by_folder(changes).items()):
-            payload = to_tfvars(folder_changes)
-            target = out_root / folder / OUTPUT_FILENAME
-            planned.append((target, dumps_payload(payload), payload))
-        # ZoneRequest -> zones.auto.tfvars.json per folder (terraform auto-loads both).
-        for folder, folder_zones in sorted(zones_by_folder.items()):
-            payload = zone_tfvars(folder_zones)
-            target = out_root / folder / ZONES_FILENAME
+        for (kind, folder), objs in sorted(group_by_kind_and_folder(compiled).items()):
+            handler = REGISTRY[kind]
+            payload = handler.tfvars(objs)
+            target = out_root / folder / handler.tfvars_filename
             planned.append((target, dumps_payload(payload), payload))
     except CompileError as e:
         # Duplicate zone key / object-name collision. These already fail closed
@@ -346,7 +346,7 @@ def run_classify(
     HIGH/CRITICAL changes need an explicit human override, not silent auto-apply.
     Exit codes:  0 ok · 1 usage/IO error · 2 invalid intent · 3 gate exceeded.
     """
-    from fwgitops.classify import TIERS, PolicyContext, classify, classify_zone
+    from fwgitops.classify import TIERS, PolicyContext
 
     # Folder hierarchy (optional). A change scoped to a folder WITH CHILDREN
     # reaches every one of them — the largest blast radius this platform can
@@ -399,8 +399,7 @@ def run_classify(
         print(f"no intent files found under {intent_root}", file=out)
         return 0
 
-    changes: List[CompiledChange] = []
-    zones: List[CompiledZone] = []
+    compiled: List[Any] = []
     problems: List[str] = []
     for path in intents:
         rel = _display_path(path)
@@ -411,10 +410,7 @@ def run_classify(
             continue
         try:
             c = compile_any(load_intent(doc, **cats), env_map)
-            if isinstance(c, CompiledZone):
-                zones.append(c)
-            if isinstance(c, CompiledChange):
-                changes.append(c)
+            compiled.append(c)
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
         except ResolveError as e:
@@ -428,6 +424,8 @@ def run_classify(
 
     # The rest of the declared policy — each change is classified against it
     # (GitOps = source of truth), enabling stateful checks (novel zone-pair, etc.).
+    changes = of_kind(compiled, "AccessRequest")
+    zones = of_kind(compiled, "ZoneRequest")
     policy = PolicyContext.from_changes(changes)
     tiers = {"LOW": 0, "HIGH": 0, "CRITICAL": 0}
     exceeded: List[str] = []
@@ -437,7 +435,7 @@ def run_classify(
     # profile has no flood/recon protection, and User-ID off silently breaks any
     # rule matching on source_user — both are findings, not defaults.
     for z in sorted(zones, key=lambda z: (z.folder, z.name)):
-        v = classify_zone(z, hierarchy=hierarchy, current=current)
+        v = REGISTRY["ZoneRequest"].classify(z, hierarchy=hierarchy, current=current)
         tiers[v.tier] = tiers.get(v.tier, 0) + 1
         checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
         print(f"  zone/{z.name:11} {v.tier:9} {checks}", file=out)
@@ -445,7 +443,7 @@ def run_classify(
             exceeded.append(f"zone/{z.name}={v.tier}")
 
     for ch in sorted(changes, key=lambda c: c.rule.name):
-        v = classify(ch, policy=policy, hierarchy=hierarchy)
+        v = REGISTRY["AccessRequest"].classify(ch, policy=policy, hierarchy=hierarchy)
         tiers[v.tier] = tiers.get(v.tier, 0) + 1
         checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
         print(f"  {ch.rule.name:16} {v.tier:9} {checks}", file=out)
@@ -496,7 +494,9 @@ def _compile_intents(intent_root, env_map_path, cats, err):
         try:
             ar = load_intent(doc, **cats)
             ch = compile_any(ar, env_map)
-            if isinstance(ch, CompiledChange):  # rules only (zones are infra)
+            if REGISTRY["AccessRequest"].has_evidence and isinstance(
+                ch, REGISTRY["AccessRequest"].compiled_type
+            ):
                 items.append((path, ar, ch))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -571,7 +571,7 @@ def run_drift(
             ))
         env_map = EnvMap.from_dict(read_yaml(env_map_path))
         report = detect_object_drift(
-            declared_zone_state([z for _, _, z in items if isinstance(z, CompiledZone)]),
+            declared_zone_state(of_kind([z for _, _, z in items], "ZoneRequest")),
             zones_actual,
             baseline=env_map.baseline_zones_by_folder(),
         )
@@ -602,7 +602,7 @@ def run_drift(
                                   tags=tuple(x.get("tags", []) or [])))
 
     report = detect_drift(
-        [ch for _, _, ch in items if isinstance(ch, CompiledChange)], actual
+        of_kind([ch for _, _, ch in items], "AccessRequest"), actual
     )
     print(report.summary(), file=out)
     return 0 if (report.is_clean and not drifted) else 3
@@ -735,7 +735,10 @@ def run_evidence(
         try:
             ar = load_intent(doc, **cats)
             ch = compile_any(ar, env_map)
-            if isinstance(ch, CompiledChange):  # evidence covers policy; zones are infra (follow-up)
+            # Evidence bundles are rule-shaped: build_bundle takes a rule's
+            # request AND its compiled change. `has_evidence` records which
+            # kinds that is true for, rather than an unexplained isinstance.
+            if isinstance(ch, REGISTRY["AccessRequest"].compiled_type):
                 items.append((path, ar, ch))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -854,7 +857,8 @@ def run_enrich(
     if items is None:
         return code
     changes = [ch for _, _, ch in items
-               if isinstance(ch, CompiledChange) and ch.rule.folder == folder]
+               if isinstance(ch, REGISTRY["AccessRequest"].compiled_type)
+               and ch.rule.folder == folder]
     if not changes:
         print(f"no managed rules for folder {folder!r} — nothing to enrich", file=out)
         return 0

@@ -115,18 +115,11 @@ class CompiledZone:
         return bool(self.protection_profile)
 
 
-def compile_any(request: Any, env_map: EnvMap, section: "Section" = None) -> Any:
-    """Dispatch a typed request to its kind's compiler (ADR-0001).
-
-    Returns a CompiledChange (AccessRequest) or CompiledZone (ZoneRequest). The
-    downstream stages handle the type they care about (policy stages take
-    CompiledChange; the zone tfvars takes CompiledZone).
-    """
-    if isinstance(request, AccessRequest):
-        return compile_request(request, env_map, section or Section.SPECIFIC_ALLOW)
-    if isinstance(request, ZoneRequest):
-        return _compile_zone(request, env_map)
-    raise CompileError(f"no compiler registered for request type {type(request).__name__}")
+# NOTE: dispatch lives in `fwgitops.kinds`, not here. This module owns the
+# per-kind compile FUNCTIONS (`compile_request`, `_compile_zone`); the registry
+# owns choosing between them. Keeping an isinstance chain here as well would be
+# a second place to update when adding a kind, which is the whole problem
+# ADR-0001's registry exists to remove.
 
 
 def _address_for(ep: Endpoint, folder: str) -> AddressObject:

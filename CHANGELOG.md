@@ -3,6 +3,44 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-08-02
+
+**ADR-0001's registry promise, finally kept.** Adding an intent kind is now one
+registry entry instead of ~8 hand-edited sites.
+
+### `fwgitops.kinds.REGISTRY`
+Each kind registers a `KindHandler` carrying its compile function, tfvars
+filename and emitter, folder/name accessors and classifier. Replaces:
+
+- `compile_any`'s isinstance chain (moved out of `compiler.py`, which now owns
+  the per-kind compile *functions* while the registry owns choosing between them)
+- **eleven** isinstance filters in `cli.py`
+- a hand-written tfvars emission block per kind — now one loop over the registry
+
+If a kind's Terraform side is missing, the compile fails closed (ADR-0004)
+instead of emitting data nothing reads. That is the failure `ZoneRequest` shipped
+with for an entire release.
+
+### What it deliberately does NOT unify
+A protocol with optional members for stages a kind cannot support would be an
+interface with holes. Two stages are genuinely not uniform, so capability is
+**declared**:
+
+| Field | Why |
+|---|---|
+| `drift_engine` | `"tag"` for rules (they carry `gitops:` provenance), `"state"` for zones (`scm_zone` has no `tag` attribute). Same word, different mechanism. |
+| `has_evidence` | `build_bundle` is rule-shaped; there is no kind-agnostic bundle today. |
+
+### Tests
+New `tests/test_kinds.py` asserts the registry is **complete and
+self-consistent**, not merely that dispatch works: every handler fully populated,
+kinds matching the intent loaders exactly, tfvars filenames unique, every
+filename covered by the gitignore glob, compiled types distinct and
+non-overlapping. Verified by mutation — registering a kind under the wrong name
+fails five of them.
+
+**Tests: 442 → 458.**
+
 ## [1.5.0] — 2026-08-02
 
 ADR-0005's prerequisite 2, generalised beyond interfaces and shipped exercised

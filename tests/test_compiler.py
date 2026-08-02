@@ -153,7 +153,8 @@ def _zone_doc():
 
 
 def test_compile_any_dispatches_zone_request():
-    from fwgitops.compiler import CompiledZone, compile_any
+    from fwgitops.compiler import CompiledZone
+    from fwgitops.kinds import compile_any
     cz = compile_any(load_intent(_zone_doc()), env_map())
     assert isinstance(cz, CompiledZone)
     assert cz.folder == "prod-edge" and cz.name == "dmz"
@@ -213,8 +214,10 @@ def test_compiled_zone_knows_whether_it_has_protection():
 
 
 def test_compile_any_unknown_request_type_raises():
-    from fwgitops.compiler import CompileError, compile_any
-    with pytest.raises(CompileError, match="no compiler"):
+    from fwgitops.compiler import CompileError
+    from fwgitops.kinds import compile_any
+    # The message names WHERE to register, not just that dispatch failed.
+    with pytest.raises(CompileError, match="no kind registered.*REGISTRY"):
         compile_any(object(), env_map())
 
 
