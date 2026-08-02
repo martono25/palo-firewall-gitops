@@ -1,0 +1,181 @@
+"""How a Day-1 intent says WHERE it lands.
+
+`AccessRequest` is authored by app teams and targets an `environment:`, which
+the platform maps to a folder — they should never need to know SCM topology.
+The Day-1 kinds are authored by network engineers, for whom the folder IS the
+intent, and `environment` resolves 1:1 so it cannot name a DEVICE folder at all.
+So those kinds take `folder:` directly.
+
+That field is only safe because of the catalog check: unknown or non-targetable
+is REJECTED at compile time, not tiered up. HIGH is approvable, and a write to a
+shared parent should not be one rubber-stamp away from every device at once.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from fwgitops.catalog import FolderHierarchy, RouterCatalog  # noqa: E402
+from fwgitops.compiler import compile_request  # noqa: E402
+from fwgitops.intent import IntentError, load_intent  # noqa: E402
+from fwgitops.kinds import compile_any  # noqa: E402
+from fwgitops.resolve import EnvMap  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEVICE = "007955000894453"
+
+
+def _hierarchy():
+    return FolderHierarchy.from_dict(
+        yaml.safe_load((REPO_ROOT / "catalog" / "folders.yaml").read_text()))
+
+
+def _env():
+    return EnvMap.from_dict(
+        {"prod": {"folder": "prod-edge", "from_zone": "local", "to_zone": "internet"}})
+
+
+def _routers():
+    return RouterCatalog.from_dict({"routers": {
+        "prod-edge": {"default": {"vrfs": {"default": {"interfaces": ["$eth-local"]}}}},
+        DEVICE: {"default": {"vrfs": {"default": {"interfaces": ["$eth-local"]}}}},
+    }})
+
+
+def _iface(**spec):
+    base = {"interface": "$eth-local", "ip": ["10.20.0.1/24"]}
+    base.update(spec)
+    return {
+        "apiVersion": "fw-intent/v1", "kind": "InterfaceRequest",
+        "metadata": {"id": "IF-1", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "x", "requested": "2026-08-02"},
+        "spec": base,
+    }
+
+
+def _load(doc, hierarchy=True, **kw):
+    return load_intent(
+        doc,
+        env_map=_env(),
+        router_catalog=_routers(),
+        folder_hierarchy=_hierarchy() if hierarchy else None,
+        **kw,
+    )
+
+
+# ── the folder: form ──────────────────────────────────────────────────────
+def test_a_device_folder_can_be_targeted_directly():
+    """The case `environment:` cannot express at all: one specific firewall."""
+    sp = _load(_iface(folder=DEVICE)).spec
+    assert sp.folder == DEVICE and sp.environment is None
+    assert compile_any(_load(_iface(folder=DEVICE)), env_map=_env()).folder == DEVICE
+
+
+def test_the_environment_form_still_works():
+    sp = _load(_iface(environment="prod")).spec
+    assert sp.environment == "prod" and sp.folder is None
+    assert compile_any(_load(_iface(environment="prod")), env_map=_env()).folder == "prod-edge"
+
+
+def test_exactly_one_target_is_required():
+    with pytest.raises(IntentError, match="exactly one target"):
+        _load(_iface(folder=DEVICE, environment="prod"))
+    with pytest.raises(IntentError, match="set a target"):
+        _load(_iface())
+
+
+# ── the guardrail ─────────────────────────────────────────────────────────
+def test_a_shared_parent_is_refused_at_compile_time():
+    """`ngfw-shared` parents production AND the sandbox. Refused outright rather
+    than tiered up — HIGH is approvable, and this should not be."""
+    with pytest.raises(IntentError) as e:
+        _load(_iface(folder="ngfw-shared"))
+    msg = " ".join(str(p) for p in e.value.problems)
+    assert "not targetable" in msg
+    # The message must say WHY and what is allowed instead.
+    assert "prod-edge" in msg and "GitOps" in msg
+
+
+def test_an_undeclared_folder_is_refused():
+    """Fail closed: a typo'd or newly created folder must not inherit permission
+    by default. Declaring it is the only way in."""
+    with pytest.raises(IntentError, match="not declared in catalog/folders.yaml"):
+        _load(_iface(folder="prod-edge-2"))
+
+
+def test_folder_is_unusable_without_the_catalog_rather_than_unchecked():
+    """The dangerous failure would be treating a missing catalog as "no check
+    needed" and letting any folder through."""
+    with pytest.raises(IntentError, match="Refusing to target an unchecked folder"):
+        _load(_iface(folder=DEVICE), hierarchy=False)
+
+
+def test_the_environment_path_is_unaffected_by_targetability():
+    """`catalog/environments.yaml` is reviewed platform config, not requester
+    input, so it is not subject to the requester-facing guardrail. The threat
+    model is the field a requester writes."""
+    env = EnvMap.from_dict(
+        {"shared": {"folder": "ngfw-shared", "from_zone": "local", "to_zone": "internet"}})
+    req = load_intent(_iface(environment="shared"), env_map=env,
+                      folder_hierarchy=_hierarchy(), router_catalog=_routers())
+    assert compile_any(req, env_map=env).folder == "ngfw-shared"
+
+
+# ── AccessRequest keeps app-language addressing ───────────────────────────
+def _access(**spec):
+    base = {"environment": "prod", "action": "allow",
+            "source": [{"cidr": "10.20.0.0/24"}],
+            "destination": [{"cidr": "10.30.0.0/24"}],
+            "service": [{"protocol": "tcp", "port": "443"}]}
+    base.update(spec)
+    return {
+        "apiVersion": "fw-intent/v1", "kind": "AccessRequest",
+        "metadata": {"id": "AR-1", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "x", "requested": "2026-08-02"},
+        "spec": base,
+    }
+
+
+def test_an_access_request_naming_a_folder_is_rejected_not_ignored():
+    """Regression. `folder:` was silently ignored here, so an AccessRequest that
+    copied it from a Day-1 example landed in whatever `environment` resolved to
+    while its author believed otherwise — a silently wrong target."""
+    with pytest.raises(IntentError) as e:
+        _load(_access(folder=DEVICE))
+    assert any("environment" in str(p) for p in e.value.problems)
+
+
+def test_a_plain_access_request_is_unaffected():
+    req = _load(_access())
+    assert req.spec.environment == "prod"
+    assert compile_request(req, _env()).rule.folder == "prod-edge"
+
+
+# ── routers.yaml is keyed by the resolved folder ──────────────────────────
+def _route(**spec):
+    base = {"destination": "0.0.0.0/0", "nexthop": "10.20.0.254"}
+    base.update(spec)
+    return {
+        "apiVersion": "fw-intent/v1", "kind": "RouteRequest",
+        "metadata": {"id": "RT-1", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "x", "requested": "2026-08-02"},
+        "spec": base,
+    }
+
+
+def test_router_membership_is_looked_up_under_the_targeted_folder():
+    """Both addressing forms must reach the same catalog lookup, or a route
+    targeted by folder would aggregate without its VRF interface membership."""
+    assert _load(_route(folder=DEVICE)).spec.vrf_interfaces == ("$eth-local",)
+    assert _load(_route(environment="prod")).spec.vrf_interfaces == ("$eth-local",)
+
+
+def test_a_folder_with_no_declared_router_is_rejected():
+    with pytest.raises(IntentError, match="not declared for folder 'GitOps'"):
+        _load(_route(folder="GitOps"))

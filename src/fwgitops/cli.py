@@ -346,12 +346,27 @@ def _load_catalogs(
                                       kind="zone-protection profile", key="profiles", err=err)
     if not ok:
         return None, False
+    # Folder hierarchy — validates a Day-1 kind's explicit `folder:` target.
+    # Loaded here (not only in run_classify) because targetability is a LOAD-time
+    # check: an intent naming a non-targetable folder must be rejected before it
+    # compiles, not merely tiered up. Its absence makes `folder:` unusable rather
+    # than unchecked — see `_load_target`.
+    folders = None
+    folders_path = catalog_dir / "folders.yaml"
+    if folders_path.is_file():
+        from fwgitops.catalog import FolderHierarchy
+        try:
+            folders = FolderHierarchy.from_dict(read_yaml(folders_path))
+        except CatalogError as e:
+            print(f"error: invalid folder hierarchy {folders_path}: {e}", file=err)
+            return None, False
     return {
         "service_catalog": svc, "app_catalog": app, "profile_catalog": prof,
         "application_catalog": appid, "log_forwarding_catalog": logf,
         "zone_protection_catalog": zoneprot,
         "interface_profile_catalog": ifprof,
         "router_catalog": routers,
+        "folder_hierarchy": folders,
     }, True
 
 
