@@ -3,6 +3,85 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-08-02
+
+Closes a class of bug where the compiler produced config that **silently never
+reached the firewall** while every check stayed green. Four distinct instances
+were found and fixed; three of them were invisible to the 327-test v1.0 suite by
+construction, because every test asserted the compiler wrote the right JSON and
+stopped exactly where the failure began.
+
+### ⚠ Behaviour change
+`fwgitops compile` now **rejects** (exit 2, nothing written) when it would emit
+into a folder that has no Terraform root. This previously succeeded silently.
+Pass `--allow-missing-root` if you genuinely mean a scratch or scaffold
+directory.
+
+### The silent-drop holes
+
+| # | Hole | Terraform's signal |
+|---|---|---|
+| 1 | tfvars key with no matching `variable` | warning, **exit 0** |
+| 2 | `variable` declared but never referenced | **no diagnostic at all** |
+| 3 | object attribute the target type omits | **silently discarded** |
+
+**Hole 1** shipped for a full release: `zones.auto.tfvars.json` was written on
+every compile while `terraform/prod-edge` declared no `zones` variable and the
+module had no `scm_zone` resource. Compile, plan, apply and CI all green; the
+zone never reached the device.
+
+**Hole 3** was live in v1.0. The root module's `security_rules` type omitted the
+six ADR-0003 attributes the module declares and the compiler emits —
+`application`, `profile_group`, `log_setting`, `rulebase`, `relative_position`,
+`target_rule` — so the module received its own defaults instead of the intent's
+App-ID and profile. Root and module types are now identical.
+
+### New — `fwgitops.tfcontract`
+Checks holes 1 and 2 in pure Python, with no Terraform binary and no cloud
+credentials, at compile time (fail-closed) and in CI. Hole 3 needs a
+schema-level check; tracked in `TODOS.md`.
+
+The parser is string-literal aware, which is load-bearing: a `}` inside a string
+used to collapse brace depth and let an unwired variable pass, and a `//` inside
+a URL was read as a comment and falsely rejected a valid module. Line breaks are
+never masked — dropping one desynced the comment pass and truncated
+`module "n" {` to `mo`.
+
+### Fixed — CI guards that were not guarding
+- `pr-validate` piped `terraform plan` through `tee` and appended `|| true`, so
+  **every** plan failure was swallowed and `-detailed-exitcode` was meaningless.
+  Exit 2 (changes present) is correctly treated as normal for a PR.
+- `apply.yml` had no undeclared-variable check at all — the backstop guarded the
+  preview but not the path that touches the device.
+- Both workflows now fail when a folder has emitted tfvars but no Terraform root,
+  instead of `continue`-ing past it.
+- Plan artifacts upload with `if: always()`, so they survive the failure that
+  makes them worth reading.
+
+### Fixed — zone handling
+- `catalog/environments.yaml` gains an optional `baseline_zones` list. It
+  declared two baseline zones while the folder carries seven, so a rule
+  referencing a real zone such as `proxy` was **rejected at compile time as
+  undeclared** — fail-closed machinery producing a false negative.
+- A `ZoneRequest` naming a zone that already exists on the device is rejected.
+  The consistency check unions baseline and declared zones, so such a request
+  looked maximally valid while Terraform would have created over a live zone.
+- A valueless `baseline_zones:` key no longer errors — commenting out the list
+  under its comment block is the natural edit and it used to brick compile.
+
+### Security
+`ScmCredentials.client_secret` is `repr=False`; the dataclass `__repr__`
+rendered the live tenant secret in cleartext.
+
+### Verified live (provider v1.0.11)
+`scm_zone` writes its fields **faithfully** — the computed-attribute drop that
+breaks `scm_security_rule` (ADR-0003) does not apply, so zones need no `enrich`
+workaround. SCM also reference-validates zone fields fail-closed. Probe
+committed at `spike/zone-probe/`; fidelity varies per resource type, so re-run it
+before scoping `InterfaceRequest`.
+
+**Tests: 327 → 382.** See [ADR-0004](docs/adr/0004-compiler-terraform-contract.md).
+
 ## [1.0.0] — 2026-07-29
 
 First production release. **Day-2 security-rule provisioning is complete and

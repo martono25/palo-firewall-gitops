@@ -67,6 +67,98 @@ session scratchpad. Worth promoting into the repo (e.g. `spike/zone-probe/`) if
 this pattern gets reused for `InterfaceRequest`, which faces the same
 provider-fidelity question for `scm_ethernet_interface`.
 
+## Contract enforcement
+
+### Schema-level tfvars contract check (attributes, not just keys)
+
+**What:** Extend `tfcontract.check_contract` to parse
+`variable "k" { type = map(object({...})) }` and assert every ATTRIBUTE the
+compiler emits for that key is declared — not just that the top-level key exists.
+
+**Why:** This is HOLE 3, and key-name matching structurally cannot see it.
+Terraform's object-to-object conversion silently discards attributes the target
+type does not declare: no warning, no diagnostic, exit 0. It was live in v1.0 —
+`terraform/prod-edge/variables.tf` omitted the six ADR-0003 attributes while the
+module declared them and the compiler emitted them, so App-ID, profile group and
+log setting never reached the module. The instance is fixed (types are now
+identical) but nothing stops them drifting apart again, and the comment claiming
+they were "kept in sync" was already false once.
+
+**Context:** The masking + comment-stripping machinery in `tfcontract.py` already
+does the hard part. The remaining work is extracting attribute names from an
+`object({...})` type expression and comparing against the inner keys of the
+emitted payload. A cheaper interim: a test asserting the root and module
+`variables.tf` object types are byte-identical.
+
+**Effort:** M
+**Priority:** P1
+**Depends on:** None.
+
+### Reject a malformed Terraform root instead of best-effort parsing
+
+**What:** `module_arguments` scans to EOF when a module block's closing brace is
+missing, so `body` becomes the rest of the file and later blocks' arguments get
+attributed to it. Track whether depth returned to 0 and signal malformed input.
+
+**Why:** Impact is bounded today — `check_contract` uses `wired_variables`, not
+`module_arguments` — but the docstring promises brace-matched top-level
+arguments and that does not hold. It is the natural function to reach for if
+someone tightens HOLE 2 from `var.<name>` references to real module arguments.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None.
+
+### Normalise zone names in `baseline_zones`
+
+**What:** Whitespace-padded (`" proxy "`) and duplicate entries pass through
+unnormalised into the declared set.
+
+**Why:** A padded name silently fails to match the zone it names, producing the
+same false-negative rejection `baseline_zones` was added to fix.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None.
+
+## CI / security
+
+### Keep terraform stderr out of published artifacts and PR comments
+
+**What:** `pr-validate` folds stderr into `plan-$folder.txt` (`2>&1 | tee`),
+which is uploaded as an artifact and pasted into a PR comment. The job env holds
+`SCM_CLIENT_SECRET`.
+
+**Why:** GitHub's secret masking applies to the log stream, not to artifact file
+contents or `gh pr comment` bodies. Any provider or auth error that echoes a
+credential would reach a durable artifact and a public PR comment unredacted
+while the visible log looked clean. Not observed — the risk is structural.
+
+**Context:** Options are dropping `2>&1`, tee-ing stderr to a separate
+unpublished file, or scrubbing (`sed "s/${SCM_CLIENT_SECRET}/***/g"`) before the
+tee. The artifact is genuinely useful for debugging a failed plan, so prefer
+scrubbing over dropping.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None.
+
+### Guard the zone probe against pointing at production
+
+**What:** `spike/zone-probe/main.tf`'s `folder` variable has no validation, so
+`-var 'folder=prod-edge'` creates a real object in the production folder against
+live credentials. The only guard is prose in the README.
+
+**Why:** A copy-paste or shell-history recall is all it takes, and the probe runs
+with write-capable SCM credentials.
+
+**Context:** A `validation` block rejecting known production folders (or an
+allowlist of scratch folders) is a few lines.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None.
+
 ## Provisioning
 
 ### Verify scm_ethernet_interface field fidelity before InterfaceRequest
