@@ -199,7 +199,7 @@ def test_compile_succeeds_when_the_module_consumes_zones(tmp_path):
 
     assert rc == 0
     payload = json.loads((folder_dir / "zones.auto.tfvars.json").read_text())
-    assert payload["zones"]["dmz"]["network"] == {"layer3": ["ethernet1/2"]}
+    assert payload["zones"]["dmz"]["network"]["layer3"] == ["ethernet1/2"]
 
 
 # ── live repo contract ────────────────────────────────────────────────────

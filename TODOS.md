@@ -21,6 +21,20 @@ a cross-model challenge invalidated two of its load-bearing assumptions.
 
 ## Completed
 
+### A1 / A2 / A3 — ZoneRequest end to end — DONE v1.2.0
+
+`scm_zone` resource + `zones` variable + module wiring; rules order after the
+zones they reference (conditional reference, baseline zones pass through as
+strings); full security posture (protection profile, User-ID/device-ID, log
+forwarding, DoS, ACLs) with catalog validation and risk classification.
+
+Also fixed: `_load_zone_request` built its collector without catalogs, so zone
+reference names were never validated at all.
+
+Root and module object types are byte-identical, enforced per-attribute by the
+ADR-0004 contract check, so HOLE 3 cannot recur on zones.
+
+
 ### T5 — Probe scm_zone field fidelity — DONE 2026-07-31, RESULT: PROVIDER IS FAITHFUL
 
 **Result:** `paloaltonetworks/scm` v1.0.11 **writes `scm_zone` fields faithfully.**
@@ -192,67 +206,7 @@ to point at whichever resource this decision lands on. Full write-up in ADR-0002
 
 ## Compiler / intent model
 
-### A3 — Zone security field model
 
-**What:** Extend `ZoneSpec` (`src/fwgitops/intent.py:128`) beyond
-`environment / zone / zone_type / interfaces` to carry `enable_user_identification`,
-`enable_device_identification`, `zone_protection_profile`, `log_setting`,
-`dos_profile`, `dos_log_setting`, `user_acl`, `device_acl`. Validate profile
-names against catalogs the way rule profiles already are, and add a
-risk-classifier check flagging a zone declared with no protection profile.
-
-**Why:** Two concrete fail-open paths. A zone with no `zone_protection_profile`
-has no flood or reconnaissance protection and nothing says so. And the rule model
-already fully supports `source_user` (`compiler.py:204`, `enrich.py:153`), but
-User-ID must be enabled *per zone* — so a user-scoped allow rule on a
-ZoneRequest-declared zone silently never matches and traffic falls through to
-whatever sits below it. This is the same shape as the gap ADR-0003 fixed for
-rules, which that ADR called "the single most important gap."
-
-**Context:** Field names and nesting verified against the v1.0.11 schema:
-`zone_protection_profile` and `log_setting` live inside the `network` nested
-object; `enable_user_identification` is top-level.
-
-**UNBLOCKED 2026-07-31 by the T5 probe (see Completed).** The provider writes
-these fields faithfully, so this is a dataclass + loader branch + tfvars mapping
-with NO enrich subsystem. SCM also reference-validates the profile names
-fail-closed, so catalog validation is defence-in-depth (earlier feedback,
-restriction to sanctioned profiles) rather than the only guard.
-
-When building the catalogs, use the verified endpoints:
-`/config/security/v1/profile-groups` and
-`/config/network/v1/zone-protection-profiles` (both need a `folder` param).
-Cross-check any SCM request shape against https://pan.dev/scm/docs/home/ before
-concluding an error means missing permissions — three "permission" and "missing
-object" conclusions during this review were all malformed requests.
-
-**Effort:** S (was M — reduced by the probe result)
-**Priority:** P2
-**Depends on:** Nothing. Ready to build.
-
-### A2 — Zone-to-rule dependency ordering
-
-**What:** In `terraform/modules/security_folder/main.tf`, replace the raw string
-zone reference (`from = each.value.from_zones`, line 76) with a conditional
-resource reference:
-`[for z in each.value.from_zones : contains(keys(var.zones), z) ? scm_zone.this[z].name : z]`.
-
-**Why:** Terraform builds ordering from references. Rules name zones as plain
-strings, so there is no edge and a rule can be created before the zone it needs,
-failing the device commit mid-apply. The predicate must read `var.zones` rather
-than the resource, because baseline zones (`local`, `internet`) exist on the
-device and are not Terraform-managed — indexing `scm_zone.this["local"]` would
-error.
-
-**Context:** Do NOT use a blanket `depends_on`. The comment at `main.tf:79-85`
-records that this exact pattern previously made every rule depend on every
-object, so `terraform destroy -target` of one address cascaded into destroying
-ALL rules. Confirm with `terraform graph` whether the edge lands instance-level
-or resource-level.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** An `scm_zone` resource existing, which depends on the probe.
 
 ### Reject a ZoneRequest naming a baseline zone
 

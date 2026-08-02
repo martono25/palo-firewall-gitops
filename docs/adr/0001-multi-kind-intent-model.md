@@ -39,9 +39,17 @@ kind-agnostic:
 
 ## Implementation status (2026-07-31)
 
-Built (PRs #18–#20): the intent-loader registry (`_KIND_LOADERS` in
-`intent.py`), `ZoneRequest` as kind #2, and the cross-kind zone-consistency
-check. `AccessRequest` remains the only kind proven end-to-end on hardware.
+Built (PRs #18–#20, completed v1.2.0): the intent-loader registry
+(`_KIND_LOADERS` in `intent.py`), `ZoneRequest` as kind #2 — now compiling to a
+real `scm_zone` with its full security posture, catalog-validated and
+risk-classified — and the cross-kind zone-consistency check. `AccessRequest`
+remains the only kind proven end-to-end on live hardware; `ZoneRequest` is
+proven to the SCM API by the ADR-0004 probe but has not been pushed to a device.
+
+Note the classifier gained `classify_zone` as a SEPARATE entry point rather than
+a branch inside `classify`. The rule classifier's vocabulary (address sets, port
+spans, shadowing) is meaningless for a zone. One small function per kind is
+honest; the registry refactor below would replace both with one dispatch.
 
 **Not built — the registry is a registry in name only.** Only the intent loader
 is genuinely registered. Everything downstream branches on Python type:

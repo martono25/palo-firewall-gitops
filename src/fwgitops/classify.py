@@ -28,7 +28,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
-from fwgitops.compiler import AddressObject, CompiledChange, SecurityRule
+from fwgitops.compiler import AddressObject, CompiledChange, CompiledZone, SecurityRule
 from fwgitops.evidence import RiskVerdict
 
 CLASSIFIER_VERSION = "1.0"
@@ -376,5 +376,55 @@ def classify(
         tier=tier,
         classifier_version=CLASSIFIER_VERSION,
         thresholds_version=thresholds.version,
+        checks_fired=tuple(fired),
+    )
+
+
+def classify_zone(zone: CompiledZone) -> RiskVerdict:
+    """Risk-classify a ZoneRequest (ADR-0001 kind #2). Fail-closed.
+
+    Deliberately a separate entry point rather than a branch inside `classify`:
+    the rule classifier's whole vocabulary (address sets, service port spans,
+    shadowing) is meaningless for a zone, and ADR-0001's registry refactor —
+    which would give every kind one dispatch — is still deferred. One small
+    function per kind is honest; pretending zones fit the rule model is not.
+
+    Checks:
+
+    * `zone_without_protection` (HIGH) — no zone-protection profile means NO
+      flood, reconnaissance or packet-based-attack protection on that zone. This
+      is the ADR-0003 `allow_without_inspection` lesson applied to zones: the
+      absence of a security control is a finding, not a default.
+    * `user_id_disabled_on_zone` (LOW note) — User-ID is off, so any rule that
+      matches on `source_user` will never match traffic in this zone. The rule
+      model has supported `source_user` since v1.0, and the failure is silent:
+      the rule is simply skipped, and traffic falls through to whatever is next.
+    """
+    fired: List[Dict[str, str]] = []
+
+    if not zone.has_protection:
+        fired.append({
+            "check": "zone_without_protection",
+            "tier": "HIGH",
+            "reason": (f"zone {zone.name!r} declares no protection profile — no flood, "
+                       f"reconnaissance or packet-based-attack protection"),
+        })
+
+    if zone.user_id is not True:
+        fired.append({
+            "check": "user_id_disabled_on_zone",
+            "tier": "LOW",
+            "reason": (f"User-ID is not enabled on zone {zone.name!r}; any rule matching "
+                       f"on source_user will silently never match traffic here"),
+        })
+
+    tier = "LOW"
+    for f in fired:
+        tier = _worst(tier, f["tier"])
+
+    return RiskVerdict(
+        tier=tier,
+        classifier_version=CLASSIFIER_VERSION,
+        thresholds_version=DEFAULT_THRESHOLDS.version,
         checks_fired=tuple(fired),
     )

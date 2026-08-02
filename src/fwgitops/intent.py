@@ -125,11 +125,40 @@ class AccessRequest:
 
 
 @dataclass(frozen=True)
+class ZoneAcl:
+    """User-ID / device-ID include+exclude lists for a zone."""
+
+    include: List[str] = field(default_factory=list)
+    exclude: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ZoneSpec:
     environment: str
     zone: str
     zone_type: str          # layer3 | layer2 | virtual-wire | tap | external | tunnel
     interfaces: List[str]    # member interfaces (may be empty — an empty zone is valid)
+
+    # ── Security posture. The ADR-0003 lesson applied to zones ────────────
+    # A zone is not just a name and a port list. Verified live 2026-07-31 that
+    # the scm provider writes all of these faithfully (unlike security rules,
+    # which need `enrich`) and that SCM reference-validates the profile names.
+    #
+    #: Zone PROTECTION profile (flood / reconnaissance / packet-based attacks).
+    #: Distinct from a rule's `profile`, which is a security profile GROUP.
+    #: Absent means the zone has no such protection at all — the classifier
+    #: flags that rather than treating it as fine.
+    protection_profile: Optional[str] = None
+    #: Log-forwarding profile. Same vocabulary as a rule's `log_forwarding`.
+    log_forwarding: Optional[str] = None
+    #: User-ID must be on PER ZONE or a rule matching `source_user` never
+    #: matches — silently, because the rule is simply skipped.
+    user_id: Optional[bool] = None
+    device_id: Optional[bool] = None
+    dos_profile: Optional[str] = None
+    dos_log_forwarding: Optional[str] = None
+    user_acl: Optional[ZoneAcl] = None
+    device_acl: Optional[ZoneAcl] = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +178,7 @@ class _Collector:
         profile_catalog: Any = None,
         application_catalog: Any = None,
         log_forwarding_catalog: Any = None,
+        zone_protection_catalog: Any = None,
     ) -> None:
         self.problems: List[Problem] = []
         #: Optional ServiceCatalog (Phase 2). Enables the `service: name:` form.
@@ -161,6 +191,8 @@ class _Collector:
         self.profile_catalog = profile_catalog
         self.application_catalog = application_catalog
         self.log_forwarding_catalog = log_forwarding_catalog
+        #: Zone PROTECTION profiles (ZoneRequest) — flood/recon protection.
+        self.zone_protection_catalog = zone_protection_catalog
 
     def add(self, path: str, message: str) -> None:
         self.problems.append(Problem(path, message))
@@ -174,6 +206,7 @@ def load_intent(
     profile_catalog: Any = None,
     application_catalog: Any = None,
     log_forwarding_catalog: Any = None,
+    zone_protection_catalog: Any = None,
 ) -> AccessRequest:
     """Parse + validate an intent dict, dispatching on `kind` (ADR-0001).
 
@@ -196,6 +229,7 @@ def load_intent(
         service_catalog=service_catalog, app_catalog=app_catalog,
         profile_catalog=profile_catalog, application_catalog=application_catalog,
         log_forwarding_catalog=log_forwarding_catalog,
+        zone_protection_catalog=zone_protection_catalog,
     )
     kind = data.get("kind")
     loader = _KIND_LOADERS.get(kind)
@@ -249,14 +283,41 @@ def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
     ):
         c.add(f"{path}.interfaces", "must be a list of interface names (strings)")
         interfaces = None
+    protection_profile, ok_pp = _opt_str(sp, "protection_profile", path, c)
+    log_forwarding, ok_lf = _opt_str(sp, "log_forwarding", path, c)
+    dos_profile, ok_dp = _opt_str(sp, "dos_profile", path, c)
+    dos_log_forwarding, ok_dlf = _opt_str(sp, "dos_log_forwarding", path, c)
+    user_id, ok_ui = _opt_bool(sp, "user_id", path, c)
+    device_id, ok_di = _opt_bool(sp, "device_id", path, c)
+    user_acl, ok_ua = _opt_acl(sp, "user_acl", path, c)
+    device_acl, ok_da = _opt_acl(sp, "device_acl", path, c)
+
+    # Reference names must exist on the firewall, same as a rule's profile /
+    # log_forwarding (ADR-0003): a typo fails at PR time, not at device commit.
+    _validate_name(protection_profile, c.zone_protection_catalog, f"{path}.protection_profile", c)
+    _validate_name(log_forwarding, c.log_forwarding_catalog, f"{path}.log_forwarding", c)
+    _validate_name(dos_log_forwarding, c.log_forwarding_catalog, f"{path}.dos_log_forwarding", c)
+
     if environment is None or zone is None or ztype is None or interfaces is None:
         return None
-    return ZoneSpec(environment=environment, zone=zone, zone_type=ztype, interfaces=list(interfaces))
+    if not all((ok_pp, ok_lf, ok_dp, ok_dlf, ok_ui, ok_di, ok_ua, ok_da)):
+        return None
+    return ZoneSpec(
+        environment=environment, zone=zone, zone_type=ztype, interfaces=list(interfaces),
+        protection_profile=protection_profile, log_forwarding=log_forwarding,
+        user_id=user_id, device_id=device_id,
+        dos_profile=dos_profile, dos_log_forwarding=dos_log_forwarding,
+        user_acl=user_acl, device_acl=device_acl,
+    )
 
 
 def _load_zone_request(data: dict, **catalogs: Any) -> ZoneRequest:
-    """Loader for `kind: ZoneRequest` (kind #2). Catalogs are unused (no names)."""
-    c = _Collector()
+    """Loader for `kind: ZoneRequest` (kind #2).
+
+    Catalogs ARE used: a zone carries reference names (protection profile,
+    log-forwarding) that must exist on the firewall, exactly like a rule's.
+    """
+    c = _Collector(**catalogs)
     if data.get("apiVersion") != API_VERSION:
         c.add("apiVersion", f"must be {API_VERSION!r}, got {data.get('apiVersion')!r}")
     metadata = _load_metadata(data.get("metadata"), c)
@@ -408,6 +469,39 @@ def _opt_str(obj: dict, key: str, path: str, c: _Collector):
         c.add(f"{path}.{key}", "must be a non-empty string when set")
         return None, False
     return val.strip(), True
+
+
+def _opt_bool(obj: dict, key: str, path: str, c: _Collector):
+    """An optional boolean field: (value|None, ok). None+ok means 'omitted'."""
+    val = obj.get(key)
+    if val is None:
+        return None, True
+    if not isinstance(val, bool):
+        c.add(f"{path}.{key}", f"must be true or false when set, got {val!r}")
+        return None, False
+    return val, True
+
+
+def _opt_acl(obj: dict, key: str, path: str, c: _Collector):
+    """An optional {include: [...], exclude: [...]} ACL: (ZoneAcl|None, ok)."""
+    raw = obj.get(key)
+    if raw is None:
+        return None, True
+    if not isinstance(raw, dict):
+        c.add(f"{path}.{key}", "must be a mapping with `include` and/or `exclude` lists")
+        return None, False
+    unknown = sorted(set(raw) - {"include", "exclude"})
+    if unknown:
+        c.add(f"{path}.{key}", f"unknown field(s) {unknown}; expected `include` / `exclude`")
+        return None, False
+    out = {}
+    for side in ("include", "exclude"):
+        vals = raw.get(side, [])
+        if not isinstance(vals, list) or not all(isinstance(x, str) and x.strip() for x in vals):
+            c.add(f"{path}.{key}.{side}", "must be a list of non-empty strings")
+            return None, False
+        out[side] = [x.strip() for x in vals]
+    return ZoneAcl(include=out["include"], exclude=out["exclude"]), True
 
 
 def _validate_name(value: Optional[str], catalog: Any, path: str, c: _Collector) -> None:

@@ -288,3 +288,39 @@ def test_not_shadowed_across_zone_pairs():
                     from_zones=("local",), to_zones=("internet",), name="B")  # different to-zone
     policy = PolicyContext.from_changes([inside, broad])
     assert "shadowed_by" not in _fired(classify(inside, policy=policy))  # zones not a superset
+
+
+# ── ZoneRequest classification (ADR-0001 kind #2) ──────────────────────────
+def _zone(**kw):
+    from fwgitops.compiler import CompiledZone
+    base = dict(folder="prod-edge", name="dmz", zone_type="layer3", interfaces=[])
+    base.update(kw)
+    return CompiledZone(**base)
+
+
+def test_zone_without_a_protection_profile_is_high():
+    """The ADR-0003 `allow_without_inspection` lesson, applied to zones: the
+    ABSENCE of a security control is a finding, not a default."""
+    from fwgitops.classify import classify_zone
+    v = classify_zone(_zone())
+    assert v.tier == "HIGH"
+    assert "zone_without_protection" in [c["check"] for c in v.checks_fired]
+
+
+def test_user_id_off_is_flagged_because_source_user_rules_silently_never_match():
+    from fwgitops.classify import classify_zone
+    checks = [c["check"] for c in classify_zone(_zone(protection_profile="best-practice")).checks_fired]
+    assert checks == ["user_id_disabled_on_zone"]
+
+
+def test_a_fully_configured_zone_is_low_with_no_findings():
+    from fwgitops.classify import classify_zone
+    v = classify_zone(_zone(protection_profile="best-practice", user_id=True))
+    assert v.tier == "LOW" and v.checks_fired == ()
+
+
+def test_zone_verdict_carries_classifier_provenance():
+    """The verdict feeds the evidence bundle, so it must be attributable."""
+    from fwgitops.classify import classify_zone
+    v = classify_zone(_zone())
+    assert v.classifier_version and v.thresholds_version

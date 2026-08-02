@@ -161,11 +161,55 @@ def test_compile_any_dispatches_zone_request():
 
 
 def test_zone_tfvars_shape():
+    """Mirrors the scm_zone provider schema exactly, with every key present
+    (null when unset) so the JSON is byte-stable across compiles."""
     from fwgitops.compiler import CompiledZone, zone_tfvars
     z = CompiledZone(folder="prod-edge", name="dmz", zone_type="layer3", interfaces=["e1/2"])
     assert zone_tfvars([z]) == {
-        "zones": {"dmz": {"name": "dmz", "folder": "prod-edge", "network": {"layer3": ["e1/2"]}}}
+        "zones": {"dmz": {
+            "name": "dmz",
+            "folder": "prod-edge",
+            "network": {
+                "layer3": ["e1/2"],
+                "zone_protection_profile": None,
+                "log_setting": None,
+            },
+            "enable_user_identification": None,
+            "enable_device_identification": None,
+            "dos_profile": None,
+            "dos_log_setting": None,
+            "user_acl": None,
+            "device_acl": None,
+        }}
     }
+
+
+def test_zone_tfvars_carries_the_security_posture():
+    """The ADR-0003 lesson for zones: protection profile and User-ID must reach
+    Terraform, in the provider's own shape (profile inside `network`, the
+    identification toggles top-level)."""
+    from fwgitops.compiler import CompiledZone, zone_tfvars
+    z = CompiledZone(
+        folder="prod-edge", name="dmz", zone_type="layer3", interfaces=[],
+        protection_profile="best-practice", log_forwarding="log-best",
+        user_id=True, device_id=False,
+        user_acl={"include_list": ["corp\\\\jane"], "exclude_list": []},
+    )
+    got = zone_tfvars([z])["zones"]["dmz"]
+    assert got["network"]["zone_protection_profile"] == "best-practice"
+    assert got["network"]["log_setting"] == "log-best"
+    assert got["enable_user_identification"] is True
+    assert got["enable_device_identification"] is False
+    assert got["user_acl"] == {"include_list": ["corp\\\\jane"], "exclude_list": []}
+    assert got["device_acl"] is None
+
+
+def test_compiled_zone_knows_whether_it_has_protection():
+    from fwgitops.compiler import CompiledZone
+    bare = CompiledZone(folder="f", name="z", zone_type="layer3", interfaces=[])
+    armed = CompiledZone(folder="f", name="z", zone_type="layer3", interfaces=[],
+                         protection_profile="best-practice")
+    assert not bare.has_protection and armed.has_protection
 
 
 def test_compile_any_unknown_request_type_raises():

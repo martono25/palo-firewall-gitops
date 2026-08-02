@@ -71,10 +71,15 @@ bootstrap bucket, IAM, init-cfg), plus `provision.py`, `onboard.py` and
 `admin_password.py`. A VM-Series has been booted, onboarded and proven on live
 hardware.
 
-**Not built — the data-plane half.** None of `InterfaceRequest`, `RouteRequest`
-or `NatRequest` exists. `ZoneRequest` exists but does not reach the firewall
-(ADR-0004). Cross-kind dependency ordering — named above as "the real
-engineering" — is not built either.
+**Not built — most of the data-plane half.** None of `InterfaceRequest`,
+`RouteRequest` or `NatRequest` exists. Cross-kind dependency ordering — named
+above as "the real engineering" — is not built either.
+
+**`ZoneRequest` is now complete** (v1.2.0): it compiles to `scm_zone`, reaches
+the device, carries the full security posture (zone-protection profile,
+User-ID/device-ID, log forwarding, DoS, ACLs), is catalog-validated at PR time
+and risk-classified. Rules order after the zones they reference. It had existed
+since #18 but never reached the firewall (ADR-0004).
 
 **Consequence worth stating plainly.** The ordered chain above is
 `InterfaceRequest → ZoneRequest → RouteRequest → AccessRequest`. Zones bind

@@ -475,3 +475,62 @@ def test_all_problems_collected_not_just_first():
     paths = problems(doc)
     # Envelope, metadata, and spec problems all surface in one IntentError.
     assert {"apiVersion", "metadata.ticket", "spec.action", "spec.source"} <= set(paths)
+
+
+# ── ZoneRequest security fields ───────────────────────────────────────────
+def _zone_sec_doc(**spec):
+    base = {"environment": "prod", "zone": "dmz", "type": "layer3", "interfaces": []}
+    base.update(spec)
+    return {
+        "apiVersion": "fw-intent/v1", "kind": "ZoneRequest",
+        "metadata": {"id": "Z1", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "x", "requested": "2026-08-02"},
+        "spec": base,
+    }
+
+
+def test_zone_security_fields_load():
+    from fwgitops.intent import load_intent
+    sp = load_intent(_zone_sec_doc(
+        protection_profile="best-practice", log_forwarding="log-best",
+        user_id=True, device_id=False, dos_profile="dp", dos_log_forwarding="dl",
+        user_acl={"include": ["corp\\jane"], "exclude": ["corp\\bob"]},
+    )).spec
+    assert sp.protection_profile == "best-practice" and sp.log_forwarding == "log-best"
+    assert sp.user_id is True and sp.device_id is False
+    assert sp.dos_profile == "dp" and sp.dos_log_forwarding == "dl"
+    assert sp.user_acl.include == ["corp\\jane"] and sp.user_acl.exclude == ["corp\\bob"]
+    assert sp.device_acl is None
+
+
+def test_zone_security_fields_are_all_optional():
+    from fwgitops.intent import load_intent
+    sp = load_intent(_zone_sec_doc()).spec
+    assert sp.protection_profile is None and sp.user_id is None and sp.user_acl is None
+
+
+@pytest.mark.parametrize("spec,frag", [
+    ({"user_id": "yes"}, "must be true or false"),
+    ({"protection_profile": ""}, "non-empty string"),
+    ({"user_acl": ["nope"]}, "must be a mapping"),
+    ({"user_acl": {"includ": []}}, "unknown field"),
+    ({"user_acl": {"include": [""]}}, "non-empty strings"),
+])
+def test_zone_security_field_bad_shapes_are_rejected(spec, frag):
+    from fwgitops.intent import IntentError, load_intent
+    with pytest.raises(IntentError) as e:
+        load_intent(_zone_sec_doc(**spec))
+    assert any(frag in str(p) for p in e.value.problems)
+
+
+def test_zone_reference_names_are_catalog_validated():
+    """A typo'd profile must fail at PR time, not at the device commit —
+    the ADR-0003 rule for rules, now applied to zones. The loader used to build
+    its collector WITHOUT catalogs, so nothing was ever checked."""
+    from fwgitops.catalog import NameCatalog
+    from fwgitops.intent import IntentError, load_intent
+    cat = NameCatalog(kind="zone-protection profile", names=frozenset({"best-practice"}))
+    load_intent(_zone_sec_doc(protection_profile="best-practice"), zone_protection_catalog=cat)
+    with pytest.raises(IntentError) as e:
+        load_intent(_zone_sec_doc(protection_profile="typo"), zone_protection_catalog=cat)
+    assert any("zone-protection profile 'typo'" in str(p) for p in e.value.problems)
