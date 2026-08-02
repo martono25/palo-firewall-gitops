@@ -1,6 +1,7 @@
 # ADR-0006 — Day-1 kinds name their `folder:`; `AccessRequest` keeps `environment:`
 
-- **Status:** Accepted — **built** (v1.11.0)
+- **Status:** Accepted — **built** (v1.11.0), **corrected** (v1.11.1 — see the
+  correction note; the device-folder premise below was wrong)
 - **Date:** 2026-08-02
 - **Deciders:** Martono, Claude
 
@@ -23,10 +24,13 @@ no home in the model.
 
 Three things were wrong:
 
-1. **`environment` resolves 1:1, so it cannot name a device folder at all.** SCM
-   parents a folder under `prod-edge` for each onboarded device
-   (`007955000894453`, `007955000893662`). That is the tightest scope which still
-   reaches real hardware, and the model could not express it.
+1. **`environment` resolves 1:1, so a second folder cannot be addressed without
+   editing platform config.** Every new target meant a new entry in
+   `catalog/environments.yaml`.
+
+   *(This point originally read "…cannot name a device folder at all," citing
+   per-device folders under `prod-edge`. That was wrong — see the correction
+   note. The decision below does not depend on it.)*
 2. **The author is different.** An `InterfaceRequest` or `RouteRequest` is
    written by a network engineer, for whom the folder IS the intent. Abstracting
    it away serves nobody.
@@ -81,25 +85,72 @@ message naming `environment:`.
 ## Consequences
 
 **Positive**
-- The device folder is addressable, so the Day-1 chain can be proven on one
-  firewall without touching the other.
 - Targeting a folder is an intent PR, reviewed like any other change — not an
   edit to platform config.
+- The sandbox folder `GitOps` is addressable directly, so Day-1 kinds can be
+  exercised end to end without a platform-config edit.
 - The blast-radius footgun needs a deliberate `targetable: true` in a reviewed
   catalog PR to unlock.
 
 **Negative / accepted**
 - Two addressing forms in one intent model. Justified by different authors and
   different purposes, but it is more surface to document and explain.
-- `catalog/folders.yaml` must track device onboarding. It was **already stale** —
-  it declared `prod-edge: children: []` while SCM had two device folders under
-  it, so the classifier scored changes to the production folder as reaching no
-  descendants when they in fact reach both firewalls. Understating blast radius
-  on the production folder is the worst direction to be wrong in. Verifying the
-  hierarchy against live SCM belongs in the drift work.
+- `catalog/folders.yaml` must be kept in step with SCM by hand. Verifying it
+  against live SCM belongs in the drift work — including the `type` check
+  described in the correction note, which would have caught the mistake below.
 
 **Follow-on**
 - `catalog/routers.yaml` is keyed by folder, so targeting a device folder needs a
   router entry for it — correctly fail-closed today, and part of the Day-1 apply.
 - A device folder needs its own Terraform root before anything can be applied
   there; the missing-root guard already refuses to emit without one.
+
+## Correction (2026-08-02, v1.11.1)
+
+**The device-folder premise in this ADR was wrong, and v1.11.0 shipped it.**
+
+`GET /config/setup/v1/folders` returns two kinds of entry, distinguished by
+`type`:
+
+```
+{"name": "prod-edge",       "type": "container"}                      <- a folder
+{"name": "007955000894453", "type": "on-prem",
+ "serial_number": "007955000894453", "model": "PA-VM"}                <- a DEVICE
+```
+
+Reading that listing, I took the two `on-prem` entries parented to `prod-edge`
+for per-device folders, wrote them into `catalog/folders.yaml` as children of
+`prod-edge`, and marked them `targetable: true`. They are not folders:
+
+* `GET /config/network/v1/zones?folder=007955000894453` → **400 API_I00013,
+  "Folder 007955000894453 doesn't exist"**
+* the same serial as `device=007955000894453` works, returning `ethernet1/3`
+  and `ethernet1/4`
+* pan.dev documents `folder`, `snippet` and `device` as three separate query
+  parameters, and the Terraform provider states "exactly one of `device`,
+  `folder`, `snippet`" on every resource
+
+An intent naming a serial would have **compiled clean and failed only at apply**.
+
+Two knock-on corrections:
+
+* v1.11.0's claim to have *fixed* an understated blast radius was itself the
+  error. `prod-edge: children: []` was right — it has no child containers. Its
+  two firewalls are devices attached to it, and a change to `prod-edge` reaching
+  both of them is that folder's purpose, not a hidden fan-out. The catalog and
+  its test are back to `children: []`.
+* **Targeting a single firewall remains unsolved.** It needs a `device:` scope,
+  which the resources support (`scm_zone`, `scm_ethernet_interface` and
+  `scm_logical_router` all take `folder` / `snippet` / `device`) but this
+  platform does not implement. That is a design decision, not a catalog entry.
+
+The rest of this ADR stands: `folder:` on the Day-1 kinds, `environment:` on
+`AccessRequest`, exactly one of the two, and targetability enforced at compile
+time. Only the claim that a device is a folder was wrong.
+
+**Process note.** Three independent sources agreed once I checked — the live API,
+the provider schema, and the docs. I checked none of them before writing the
+premise into an ADR, a catalog and a test; the folder listing *looked*
+unambiguous. The standing rule is to verify against pan.dev before asserting how
+SCM behaves, and it applies to confirming a belief, not only to diagnosing a
+failure.
