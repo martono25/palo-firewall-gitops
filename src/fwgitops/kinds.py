@@ -46,6 +46,7 @@ from fwgitops.compiler import (
     compile_request,
     interface_tfvars,
     route_tfvars,
+    scope_of as scope_of_compiled,
     to_tfvars,
     zone_tfvars,
 )
@@ -65,7 +66,10 @@ class KindHandler:
     compile: Callable[[Any, Any], Any]          # (request, env_map) -> compiled
     tfvars_filename: str                        # per-folder output file
     tfvars: Callable[[List[Any]], Dict[str, Any]]   # compiled[] -> tfvars payload
-    folder_of: Callable[[Any], str]             # compiled -> SCM folder
+    #: compiled -> Scope (an SCM folder, or a single firewall). Not a bare
+    #: folder string: a firewall is the last level of the SCM hierarchy but is
+    #: addressed `device=`, never `folder=`, so the scope carries which.
+    scope_of: Callable[[Any], Any]
     name_of: Callable[[Any], str]               # compiled -> human name (reports)
     classify: Callable[..., Any]                # compiled -> RiskVerdict
     #: Prefix for report lines, so `dmz` (a zone) is not mistaken for a rule.
@@ -121,7 +125,7 @@ REGISTRY: Dict[str, KindHandler] = {
         compile=lambda req, env_map: compile_request(req, env_map),
         tfvars_filename="rules.auto.tfvars.json",
         tfvars=to_tfvars,
-        folder_of=lambda c: c.rule.folder,
+        scope_of=lambda c: scope_of_compiled(c.rule),
         name_of=lambda c: c.rule.name,
         classify=_rule_classify,
         report_prefix="",
@@ -136,7 +140,7 @@ REGISTRY: Dict[str, KindHandler] = {
         compile=_compile_interface_impl,
         tfvars_filename="interfaces.auto.tfvars.json",
         tfvars=interface_tfvars,
-        folder_of=lambda c: c.folder,
+        scope_of=scope_of_compiled,
         name_of=lambda c: c.name,
         classify=_interface_classify,
         report_prefix="interface/",
@@ -151,7 +155,7 @@ REGISTRY: Dict[str, KindHandler] = {
         compile=_compile_route_impl,
         tfvars_filename="routers.auto.tfvars.json",
         tfvars=route_tfvars,
-        folder_of=lambda c: c.folder,
+        scope_of=scope_of_compiled,
         # Routes AGGREGATE — many share one router object — so the report name
         # is the route's own id, not the router's.
         name_of=lambda c: c.name,
@@ -168,7 +172,7 @@ REGISTRY: Dict[str, KindHandler] = {
         compile=_compile_zone_impl,
         tfvars_filename="zones.auto.tfvars.json",
         tfvars=zone_tfvars,
-        folder_of=lambda c: c.folder,
+        scope_of=scope_of_compiled,
         name_of=lambda c: c.name,
         classify=_zone_classify,
         report_prefix="zone/",
@@ -209,14 +213,19 @@ def compile_any(request: Any, env_map: Any, section: Any = None) -> Any:
     return handler.compile(request, env_map)
 
 
-def group_by_kind_and_folder(
+def group_by_kind_and_scope(
     compiled: List[Any],
-) -> Dict[Tuple[str, str], List[Any]]:
-    """(kind, folder) -> compiled objects. The one grouping the CLI needs."""
-    out: Dict[Tuple[str, str], List[Any]] = {}
+) -> Dict[Tuple[str, Any], List[Any]]:
+    """(kind, Scope) -> compiled objects. The one grouping the CLI needs.
+
+    Keyed by Scope, not folder: a firewall-scoped change and its folder's are
+    different objects in SCM (a device write creates a per-device override), so
+    they must not be merged into one group or one Terraform state.
+    """
+    out: Dict[Tuple[str, Any], List[Any]] = {}
     for obj in compiled:
         handler = handler_for_compiled(obj)
-        out.setdefault((handler.kind, handler.folder_of(obj)), []).append(obj)
+        out.setdefault((handler.kind, handler.scope_of(obj)), []).append(obj)
     return out
 
 

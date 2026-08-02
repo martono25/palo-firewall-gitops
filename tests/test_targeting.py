@@ -82,13 +82,17 @@ def test_a_folder_can_be_targeted_directly():
     assert compile_any(_load(_iface(folder=SANDBOX)), env_map=_env()).folder == SANDBOX
 
 
-def test_a_device_serial_is_refused_because_a_device_is_not_a_folder():
-    """v1.11.0 listed the two `on-prem` entries from GET /config/setup/v1/folders
-    as targetable child folders. `folder=<serial>` returns 400 "Folder doesn't
-    exist" — the serial is a `device=` scope. Such an intent compiled clean and
-    would have failed only at apply."""
-    with pytest.raises(IntentError, match="not declared in catalog/folders.yaml"):
+def test_a_serial_in_the_folder_field_is_redirected_to_device():
+    """v1.11.0 listed the two firewalls as targetable child FOLDERS.
+    `folder=<serial>` returns 400 "Folder doesn't exist" — a firewall is the last
+    level of the hierarchy but is addressed `device=`. Such an intent compiled
+    clean and would have failed only at apply. Now it is caught at the
+    requester's door, and the message names the fix."""
+    with pytest.raises(IntentError) as e:
         _load(_iface(folder=DEVICE))
+    msg = " ".join(str(p) for p in e.value.problems)
+    assert "is a FIREWALL, not a folder" in msg
+    assert f"device: {DEVICE}" in msg
 
 
 def test_the_environment_form_still_works():
@@ -126,7 +130,7 @@ def test_an_undeclared_folder_is_refused():
 def test_folder_is_unusable_without_the_catalog_rather_than_unchecked():
     """The dangerous failure would be treating a missing catalog as "no check
     needed" and letting any folder through."""
-    with pytest.raises(IntentError, match="Refusing to target an unchecked folder"):
+    with pytest.raises(IntentError, match="Refusing to target an unchecked scope"):
         _load(_iface(folder=SANDBOX), hierarchy=False)
 
 

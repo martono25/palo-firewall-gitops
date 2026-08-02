@@ -3,6 +3,45 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] — 2026-08-02
+
+`device:` targeting — a Day-1 intent can name **one firewall**. ADR-0006
+addendum.
+
+### The firewall is the last level of the hierarchy, addressed differently
+In SCM config inherits `All → ngfw-shared → prod-edge → <firewall>`, so a
+firewall IS a hierarchy member — but it is addressed `device=<serial>`, never
+`folder=<serial>`. v1.11.0 conflated the two; v1.11.1 over-corrected by deleting
+firewalls from the hierarchy. Both halves are now modelled: `catalog/folders.yaml`
+lists firewalls under `devices:` beneath their folder, and the Day-1 kinds take
+**exactly one** of `folder:` / `device:` / `environment:`.
+
+Putting a serial in `folder:` — or a folder in `device:` — is rejected with a
+message naming the right field, so the v1.11.0 mistake is caught at the
+requester's door rather than at apply.
+
+### A firewall gets its own Terraform root
+Probed, not assumed (`spike/device-override-probe`): a device-scope write to an
+inherited object creates a **per-device override** with its own id, leaving the
+shared object and the other firewall untouched. Two objects means two states, so
+a `device:` intent compiles to `terraform/device-<serial>/`. Sharing a root would
+let one scope's plan destroy the other's overrides.
+
+Compiled objects now carry a `Scope` (folder **or** device) rather than a bare
+folder string; grouping, the output path, drift keys and `routers.yaml` keys all
+follow it.
+
+### `tests/test_tfroots.py`
+Every Terraform root is checked against the module: same variables, declared
+**structurally** identically (attribute paths via `declared_object_attributes`,
+so comments may differ but types may not), and every variable wired into the
+module call. The roots are copies, and that duplication is where HOLE 3 returns —
+`prod-edge`'s own `security_rules` block carries a comment recording exactly that
+happening. Mutation-proven against both a dropped attribute and an unwired
+variable, and it covers a new root the moment one exists.
+
+549 tests.
+
 ## [1.11.1] — 2026-08-02
 
 **Corrects a wrong claim shipped in v1.11.0.** A device is not a folder.

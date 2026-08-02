@@ -127,8 +127,11 @@ resource "scm_security_rule" "this" {
 resource "scm_zone" "this" {
   for_each = var.zones
 
-  name   = each.value.name
+  name = each.value.name
+
+  # Exactly one is non-null. See the `zones` variable.
   folder = each.value.folder
+  device = each.value.device
 
   network                      = each.value.network
   enable_user_identification   = each.value.enable_user_identification
@@ -146,8 +149,13 @@ resource "scm_zone" "this" {
 resource "scm_ethernet_interface" "this" {
   for_each = var.interfaces
 
-  name   = each.value.name
+  name = each.value.name
+
+  # Exactly one is non-null. A device-scope write to an interface inherited from
+  # a parent folder creates a per-device OVERRIDE, leaving the shared object and
+  # the other firewall untouched (spike/device-override-probe).
   folder = each.value.folder
+  device = each.value.device
 
   comment = each.value.comment
   layer3  = each.value.layer3
@@ -160,7 +168,10 @@ resource "scm_ethernet_interface" "this" {
 resource "scm_logical_router" "this" {
   for_each = var.routers
 
-  name   = each.value.name
+  name = each.value.name
+
+  # Exactly one is non-null. See the `routers` variable.
   folder = each.value.folder
+  device = each.value.device
   vrf    = each.value.vrf
 }

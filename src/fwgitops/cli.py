@@ -40,7 +40,7 @@ from fwgitops.kinds import (
     kinds_with_drift_engine,
     kinds_with_state_api,
     compile_any,
-    group_by_kind_and_folder,
+    group_by_kind_and_scope,
     of_kind,
 )
 from fwgitops.io import discover_intents, read_yaml
@@ -146,10 +146,16 @@ def run_compile(
     # duplicate keys), so calling it twice per folder would run that check twice.
     planned: List[Tuple[Path, str, Dict[str, Any]]] = []  # (target, json, payload)
     try:
-        for (kind, folder), objs in sorted(group_by_kind_and_folder(compiled).items()):
+        # Sorted by the scope KEY so output order is stable regardless of how
+        # the scope is addressed.
+        for (kind, scope), objs in sorted(group_by_kind_and_scope(compiled).items(),
+                                          key=lambda kv: (kv[0][0], kv[0][1].key)):
             handler = REGISTRY[kind]
             payload = handler.tfvars(objs)
-            target = out_root / folder / handler.tfvars_filename
+            # One root == one state (design Arch-2). A firewall's state must not
+            # share a root with its folder's — a device write is a per-device
+            # OVERRIDE of a different object, not an edit of the folder's.
+            target = out_root / scope.dirname / handler.tfvars_filename
             planned.append((target, dumps_payload(payload), payload))
     except CompileError as e:
         # Duplicate zone key / object-name collision. These already fail closed
@@ -489,7 +495,7 @@ def run_classify(
     for kind in sorted(REGISTRY):
         handler = REGISTRY[kind]
         for obj in sorted(of_kind(compiled, kind),
-                          key=lambda o, h=handler: (h.folder_of(o), h.name_of(o))):
+                          key=lambda o, h=handler: (h.scope_of(o).key, h.name_of(o))):
             v = handler.classify(obj, policy=policy, hierarchy=hierarchy, current=current)
             tiers[v.tier] = tiers.get(v.tier, 0) + 1
             checks = ", ".join(f["check"] for f in v.checks_fired) or "-"

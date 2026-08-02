@@ -284,10 +284,10 @@ def declared_state(handler: Any, objs: Iterable[Any]) -> Dict[Tuple[str, str], D
     """
     out: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for obj in objs:
-        folder = handler.folder_of(obj)
+        scope = handler.scope_of(obj).key
         name = handler.name_of(obj)
         payload = handler.tfvars([obj])
         # tfvars is {"<key>": {name: fields}} — take the one object back out.
         inner = next(iter(payload.values()))
-        out[(folder, name)] = inner[name]
+        out[(scope, name)] = inner[name]
     return out
