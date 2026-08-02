@@ -483,8 +483,9 @@ def _compile_intents(intent_root, env_map_path, cats, err):
 def run_drift(
     intent_root: Path,
     env_map_path: Path,
-    snapshot_path: Path,
+    snapshot_path: Optional[Path] = None,
     *,
+    zones_snapshot_path: Optional[Path] = None,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
@@ -497,7 +498,13 @@ def run_drift(
     no longer declared), and MALFORMED rules. Exit: 0 clean · 1 usage · 2 invalid
     intent · 3 drift found.
     """
-    from fwgitops.drift import ActualRule, detect_drift
+    from fwgitops.drift import (
+        ActualObject,
+        ActualRule,
+        declared_zone_state,
+        detect_drift,
+        detect_object_drift,
+    )
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
@@ -507,6 +514,42 @@ def run_drift(
     items, code = _compile_intents(intent_root, env_map_path, cats, err)
     if items is None:
         return code
+
+    if snapshot_path is None and zones_snapshot_path is None:
+        print("error: pass --snapshot (rules) and/or --zones-snapshot (zones)", file=err)
+        return 1
+
+    drifted = False
+
+    # ── State-based drift for zones (they carry no tags) ──────────────────
+    if zones_snapshot_path is not None:
+        rows, code = _read_snapshot_rows(zones_snapshot_path, err)
+        if rows is None:
+            return code
+        zones_actual = []
+        for i, x in enumerate(rows):
+            if not isinstance(x, dict) or "folder" not in x or "name" not in x:
+                print(f"error: zones snapshot[{i}] must have 'folder' and 'name'", file=err)
+                return 1
+            fields = {k: v for k, v in x.items() if k not in ("id", "tfid", "scope")}
+            zones_actual.append(ActualObject(
+                kind="zone", folder=str(x["folder"]), name=str(x["name"]),
+                fields=fields,
+                # SCM returns the DEFINING folder; `scope` records which folder
+                # was queried. They differ for an inherited object.
+                scope=str(x["scope"]) if x.get("scope") else None,
+            ))
+        env_map = EnvMap.from_dict(read_yaml(env_map_path))
+        report = detect_object_drift(
+            declared_zone_state([z for _, _, z in items if isinstance(z, CompiledZone)]),
+            zones_actual,
+            baseline=env_map.baseline_zones_by_folder(),
+        )
+        print(report.summary(), file=out)
+        drifted = drifted or not report.is_clean
+
+    if snapshot_path is None:
+        return 3 if drifted else 0
 
     if not snapshot_path.is_file():
         print(f"error: SCM snapshot not found: {snapshot_path}", file=err)
@@ -528,9 +571,28 @@ def run_drift(
         actual.append(ActualRule(folder=str(x["folder"]), name=str(x["name"]),
                                   tags=tuple(x.get("tags", []) or [])))
 
-    report = detect_drift([ch for _, _, ch in items], actual)
+    report = detect_drift(
+        [ch for _, _, ch in items if isinstance(ch, CompiledChange)], actual
+    )
     print(report.summary(), file=out)
-    return 0 if report.is_clean else 3
+    return 0 if (report.is_clean and not drifted) else 3
+
+
+def _read_snapshot_rows(path: Path, err):
+    """Read a JSON/YAML snapshot into a list of dicts. Returns (rows, exit_code)."""
+    if not path.is_file():
+        print(f"error: SCM snapshot not found: {path}", file=err)
+        return None, 1
+    try:
+        raw = read_yaml(path)
+    except Exception as e:  # noqa: BLE001
+        print(f"error: could not read snapshot {path}: {e}", file=err)
+        return None, 1
+    rows = raw.get("data") if isinstance(raw, dict) else raw
+    if not isinstance(rows, list):
+        print(f"error: snapshot {path} must be a list of objects", file=err)
+        return None, 1
+    return rows, 0
 
 
 def run_evidence(
@@ -948,8 +1010,12 @@ def build_parser() -> argparse.ArgumentParser:
     dr = sub.add_parser("drift", help="detect drift: declared intents vs an SCM rule snapshot (Phase 2)")
     dr.add_argument("intent_root", nargs="?", default="intent", type=Path)
     dr.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path)
-    dr.add_argument("--snapshot", required=True, type=Path,
-                    help="JSON/YAML list of the folder's actual rules {folder, name, tags}")
+    dr.add_argument("--snapshot", type=Path,
+                    help="JSON/YAML list of the folder's actual rules {folder, name, tags} "
+                         "(tag-based drift)")
+    dr.add_argument("--zones-snapshot", type=Path,
+                    help="JSON/YAML list of the folder's actual zones as SCM returns them "
+                         "(state-based drift — zones carry no tags)")
     dr.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     dr.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
 
@@ -1020,6 +1086,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "drift":
         return run_drift(
             args.intent_root, args.env_map, args.snapshot,
+            zones_snapshot_path=args.zones_snapshot,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "push":

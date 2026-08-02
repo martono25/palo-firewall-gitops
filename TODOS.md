@@ -128,6 +128,48 @@ same false-negative rejection `baseline_zones` was added to fix.
 **Priority:** P3
 **Depends on:** None.
 
+## Drift
+
+### Wire the zones snapshot into the scheduled drift workflow
+
+**What:** `fwgitops drift --zones-snapshot` exists and is tested, but nothing
+produces the snapshot in CI. `.github/workflows/drift-detect.yml` currently runs
+`terraform plan` only, and its own comment says the tag-based engine should be
+wired "once the SCM rules-list read lands" — the same is now true for zones.
+
+**Why:** State-based drift is the ONLY thing that can see a zone added by hand,
+and it is not running anywhere. `terraform plan` cannot see additions, and zones
+carry no tags. Until this is wired, the capability exists but detects nothing.
+
+**Context:** The snapshot is one read —
+`GET /config/network/v1/zones?folder=<f>&limit=200` — and MUST record the folder
+that was queried as `scope`, because SCM returns the folder the object is
+DEFINED in. Getting that wrong produced 7 false positives against the live
+tenant (every zone is defined in the shared parent). See `detect_object_drift`.
+
+**Effort:** S
+**Priority:** P1
+**Depends on:** None.
+
+### State-based drift cannot tell an orphan from a hand-added object
+
+**What:** `UNEXPECTED` collapses two causes that the tag-based engine keeps
+apart: "we created it and the intent was later deleted" (orphaned) and "someone
+created it by hand" (unmanaged).
+
+**Why:** Not fixable without a provenance marker, and `scm_zone` has no `tag`
+attribute. The alternative is deriving ownership from Terraform state, which
+would work but couples drift detection to state-file availability — the thing
+drift exists to be independent of.
+
+**Context:** Documented in `drift.py` and surfaced in the report wording, which
+deliberately does not claim to know the cause. Revisit if the provider ever
+gains tags on these types, or if reading TF state proves acceptable.
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** None.
+
 ## CI / security
 
 ### Keep terraform stderr out of published artifacts and PR comments
