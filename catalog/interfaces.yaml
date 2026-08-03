@@ -17,6 +17,22 @@
 # membership. The compiler stays pure and the requester never types a physical
 # port.
 #
+# ── WHERE EACH NAME COMES FROM ────────────────────────────────────────────
+# `$eth-local` and `$eth-internet` are SCM DEFAULTS. They are defined once in
+# `ngfw-shared` and INHERITED by every firewall beneath it — this platform does
+# not create them and should not rename them.
+#
+# The device-scope value below MIRRORS the SCM variable's `default_value`; it is
+# not a name we choose. Verified live 2026-08-03:
+#
+#   GET /config/network/v1/ethernet-interfaces?folder=ngfw-shared
+#     $eth-internet  default_value: ethernet1/3
+#     $eth-local     default_value: ethernet1/4
+#
+# So SCM owns the mapping and this file restates it, because the classifier and
+# compiler are PURE and cannot read SCM. If someone changes a `default_value` in
+# SCM, change it here in the same PR — a stale entry here writes the wrong port.
+#
 # ── THE PHYSICAL NAME IS NOT FREE ─────────────────────────────────────────
 # On AWS a VM-Series interface exists only when an ENI sits at the matching
 # device index (eth0=mgmt, ethN=ethernet1/N), and the ENI limit scales with
