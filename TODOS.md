@@ -213,6 +213,31 @@ because a *different* error was returned).
 **Effort:** M
 **Priority:** P2
 
+### Pilot firewall: mgmt plane exposed, and no ENI behind the data interfaces
+
+Two findings from reading the device directly on 2026-08-03 (SSH + `show`).
+
+**1. Management plane is internet-facing.** Security group
+`sg-0b9a1d2428028e4b9` allows **443 from `0.0.0.0/0`** — the PAN-OS web UI and
+API, the interface that owns the device. Port 22 is correctly limited to
+RFC1918. The firewall reported **98 failed admin logins since last successful
+login**, so this is being probed, not merely exposed. Narrow 443 to known egress.
+**Priority: P1.**
+
+**2. The data interfaces have no physical backing.** `show interface hardware`
+reports only `ethernet1/3` and `ethernet1/4`, both `down` with MAC
+`00:00:00:00:00:00`. The EC2 instance has two ENIs — index 0 `10.100.0.51`
+(mgmt) and index 1 `10.100.1.37` — and neither shows up as an up PAN-OS
+dataplane interface.
+
+So `REQ-2026-0801` is genuinely live in the running config
+(`ethernet1/4 … 10.20.0.1/24`, zone `local`, `lr:default`) but sits on an
+interface that **cannot pass traffic**. The GitOps chain is proven; the lab
+topology is not wired. Attaching ENIs, or re-mapping the `$eth-*` folder
+variables to an interface that has one, is a prerequisite for any traffic-level
+test. **Priority: P2** (does not block the GitOps work, does block proving
+traffic).
+
 ## Contract enforcement
 
 ### Reject a malformed Terraform root instead of best-effort parsing
