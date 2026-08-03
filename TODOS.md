@@ -248,6 +248,44 @@ variables to an interface that has one, is a prerequisite for any traffic-level
 test. **Priority: P2** (does not block the GitOps work, does block proving
 traffic).
 
+### prod-edge apply would rewrite 5 live security rules — BLOCKS the apply path
+
+**Found 2026-08-04** while adding the first RouteRequest. `terraform plan` in
+`terraform/prod-edge` reports `0 to add, 5 to change, 0 to destroy` with NO
+pending intent change — the drift is pre-existing and unrelated to the route.
+Provider unchanged at 1.0.11.
+
+Per rule, the plan wants to:
+
+```
+~ category    = [ - "any", ]        <- REMOVED from a live rule
+- source_user = [ - "any", ]        <- REMOVED from a live rule
+~ log_setting = "Cortex Data Lake" -> (known after apply)
++ profile_setting / security_settings / ... = (known after apply)
+```
+
+**Mechanism.** `category` and `source_user` are not emitted by the compiler, not
+in the `security_rules` object type, and not set by the module — but the provider
+models them as **optional, not computed**, so "absent from config" means
+"remove", not "leave alone". `log_setting` is emitted and declared but
+deliberately unwired (ADR-0003 gives it to `enrich`), so Terraform recomputes it.
+
+**Why it matters.** Any apply against prod-edge — including one whose intent is a
+single route — silently edits five production security rules, stripping their
+match-any category and user. That is a policy change nobody requested, arriving
+as a side effect. It also means the ADR-0003 truce between `enrich` and Terraform
+is not holding as documented.
+
+**Direction:** decide per attribute whether Terraform owns it or `enrich` does,
+and make that explicit rather than implicit-by-omission. Attributes `enrich` owns
+need `lifecycle { ignore_changes = [...] }` on the resource, or the module must
+set them from the compiler. Absent config meaning "delete" is the trap — the same
+silent-discard family as HOLE 3, in the opposite direction.
+
+**Effort:** M
+**Priority:** P1 — the apply pipeline for the production folder is not safe to
+run until this is settled.
+
 ## Contract enforcement
 
 ### Reject a malformed Terraform root instead of best-effort parsing
