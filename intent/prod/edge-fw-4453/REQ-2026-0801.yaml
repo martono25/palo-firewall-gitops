@@ -12,9 +12,14 @@
 # which has already changed once. catalog/interfaces.yaml resolves the role for
 # whichever scope this intent targets.
 #
-# This interface currently has `layer3: {}` — no addressing anywhere in the
-# tenant — so this adds addressing rather than changing it. Nothing is passing
-# traffic through it today.
+# ADDRESS MUST MATCH THE ENI. On AWS the firewall only receives traffic on an
+# interface configured with the private IP AWS assigned to its ENI — anything
+# else is configured but silent. The `trust` ENI (device index 4, subnet
+# 10.100.3.0/24) holds 10.100.3.125, so that is the address here.
+#
+# This first shipped as 10.20.0.1/24, which matched no subnet in the VPC. It was
+# a valid proof of the GitOps chain — it reached the running config — but it
+# could never have passed a packet.
 apiVersion: fw-intent/v1
 kind: InterfaceRequest
 
@@ -32,6 +37,6 @@ spec:
   device: "007955000894453"     # fw-prod-edge-4453, PA-VM, connected
   interface: local              # role — resolved via catalog/interfaces.yaml
   ip:
-    - 10.20.0.1/24
+    - 10.100.3.125/24
   mtu: 1500
   comment: "Internal — managed by fwgitops"
