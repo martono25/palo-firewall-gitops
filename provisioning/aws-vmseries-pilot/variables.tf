@@ -36,10 +36,24 @@ variable "instance_type" {
   #   m5.4xlarge 16 vCPU   8 ENIs   -> ethernet1/4 reachable
   #
   # No 4-vCPU type in ap-southeast-1 offers more than 4 ENIs, so backing
-  # ethernet1/4 costs a 16-vCPU instance. The licence is `VM-SERIES-4`
-  # (vm-cpu-count: 4), so PAN-OS uses 4 cores whatever the instance provides —
-  # the extra 12 vCPU are paid for and idle. That is the deliberate trade, not
-  # an oversight: the purchase is ENI slots.
+  # ethernet1/4 costs a 16-vCPU instance.
+  #
+  # THE LICENCE FOLLOWS THE INSTANCE. On resize, PAN-OS did NOT stay capped at
+  # the old tier — it auto-scaled `vm-license: VM-SERIES-4 -> VM-SERIES-16`
+  # (vm-cap-tier T3-64GB), verified live 2026-08-03. Under flexible VM-Series
+  # licensing the tier drives CREDIT CONSUMPTION, so this instance now draws
+  # roughly 4x the credits. That recurring cost is larger than the EC2 delta and
+  # is the real price of `ethernet1/4`.
+  #
+  # THIS SIZE IS DEV/TEST ONLY. A production firewall here is 1 mgmt + 2
+  # dataplane interfaces = 3 ENIs, which m5.xlarge (4 ENIs, 4 vCPU) covers with
+  # room to spare. The ONLY reason this pilot needs 16 vCPU is that the SCM
+  # folder variables name ethernet1/3 and ethernet1/4 — device indexes 3 and 4,
+  # forcing a 5th ENI. Point them at ethernet1/1 and ethernet1/2 and the whole
+  # requirement disappears.
+  #
+  # So: do not carry this instance_type into a production build. Carry the
+  # interface NAMING decision instead — that is what sets the floor.
 }
 
 variable "ssh_key_name" {
