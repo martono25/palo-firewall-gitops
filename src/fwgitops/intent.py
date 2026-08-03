@@ -540,7 +540,7 @@ def _load_interface_spec(sp: Any, c: "_Collector") -> Optional[InterfaceSpec]:
 
 
 def _load_target(
-    sp: dict, path: str, c: "_Collector"
+    sp: dict, path: str, c: "_Collector", *, allow_device: bool = True,
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve a Day-1 kind's target. Returns `(folder, device, environment)`.
 
@@ -621,6 +621,21 @@ def _load_target(
                   f"Targetable folders: {', '.join(h.targetable_folders()) or '(none)'}.")
             return None, None, None
 
+    if device and not allow_device:
+        # Verified against the live API 2026-08-04: SCM accepts `device=` on GET
+        # for logical routers but REJECTS it on POST —
+        #   400 API_I00013 "Device 007955000894453 doesn't exist"
+        # — while the same scope creates ethernet interfaces happily. The message
+        # is misleading; the device exists. Logical routers are folder-scope only.
+        #
+        # Caught here because the alternative is the failure mode this platform
+        # keeps hitting: an intent that compiles clean and dies at apply.
+        c.add(f"{path}.device",
+              "a route cannot target a firewall — SCM creates logical routers at "
+              "FOLDER scope only (device= is accepted on read and rejected on write). "
+              "Target the folder the firewall inherits from, e.g. `folder: prod-edge`.")
+        return None, None, None
+
     if device:
         if h.known(device):
             c.add(f"{path}.device",
@@ -673,7 +688,8 @@ def _load_route_spec(sp: Any, c: "_Collector") -> Optional[RouteSpec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
-    folder, device, environment = _load_target(sp, path, c)
+    # allow_device=False: routers are folder-scope only in SCM (see _load_target).
+    folder, device, environment = _load_target(sp, path, c, allow_device=False)
     destination = _req_str(sp, "destination", path, c)
     if destination is not None and not _CIDR_RE.match(destination):
         c.add(f"{path}.destination", f"must be CIDR (address/prefix), got {destination!r}")
