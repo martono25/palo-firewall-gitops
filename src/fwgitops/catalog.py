@@ -392,6 +392,98 @@ class FolderHierarchy:
 
 
 @dataclass(frozen=True)
+class InterfaceCatalog:
+    """Logical interface ROLE -> the object name at each scope.
+
+    The same interface has two names in SCM and which is correct depends on the
+    scope being written (ADR-0005): `$eth-local` at folder scope, `ethernet1/4`
+    at device scope, one object. An intent that hardcodes either is wrong
+    somewhere — and the physical name is a property of the AWS topology, which
+    has already changed once here.
+
+    So intents name the role and this resolves it, at LOAD time, like
+    RouterCatalog supplies VRF membership. Fail closed: an unknown role, or a
+    role with no mapping for the target firewall, is an error rather than a
+    guessed port.
+    """
+
+    #: role -> name at folder scope
+    folder_names: Dict[str, str]
+    #: role -> {serial -> physical name}
+    device_names: Dict[str, Dict[str, str]]
+
+    def roles(self) -> List[str]:
+        return sorted(self.folder_names)
+
+    def known(self, role: str) -> bool:
+        return role in self.folder_names
+
+    def resolve(self, role: str, *, device: Optional[str]) -> str:
+        """The object name to write for `role` at this scope.
+
+        `device=None` means folder scope. Raises CatalogError, which the loader
+        turns into an intent problem — never returns a fallback.
+        """
+        if role not in self.folder_names:
+            raise CatalogError(
+                f"unknown interface role {role!r}; known: {', '.join(self.roles()) or '(none)'}"
+            )
+        if device is None:
+            return self.folder_names[role]
+        by_device = self.device_names.get(role, {})
+        name = by_device.get(device)
+        if name is None:
+            raise CatalogError(
+                f"interface role {role!r} has no mapping for firewall {device!r} in "
+                f"catalog/interfaces.yaml; mapped firewalls: "
+                f"{', '.join(sorted(by_device)) or '(none)'}"
+            )
+        return name
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "InterfaceCatalog":
+        if not isinstance(data, dict):
+            raise CatalogError("interface catalog must be a mapping")
+        roles = data.get("interfaces", data)
+        if not isinstance(roles, dict):
+            raise CatalogError("interface catalog: `interfaces` must be a mapping")
+        folder_names: Dict[str, str] = {}
+        device_names: Dict[str, Dict[str, str]] = {}
+        for role, spec in roles.items():
+            if not isinstance(role, str) or not role.strip():
+                raise CatalogError(f"interface catalog: bad role name {role!r}")
+            role = role.strip()
+            if not isinstance(spec, dict):
+                raise CatalogError(f"interface catalog: {role!r} must be a mapping")
+            fname = spec.get("folder")
+            if not isinstance(fname, str) or not fname.strip():
+                raise CatalogError(
+                    f"interface catalog: {role!r}.folder must be the folder-scope name "
+                    f"(e.g. $eth-local)")
+            folder_names[role] = fname.strip()
+            devs = spec.get("devices", {}) or {}
+            if not isinstance(devs, dict):
+                raise CatalogError(
+                    f"interface catalog: {role!r}.devices must be a mapping of "
+                    f"serial -> physical name")
+            out: Dict[str, str] = {}
+            for serial, phys in devs.items():
+                if isinstance(serial, int):
+                    raise CatalogError(
+                        f"interface catalog: device serial {serial!r} parsed as a number — "
+                        f'quote it ("{serial}").')
+                if not isinstance(serial, str) or not serial.strip():
+                    raise CatalogError(f"interface catalog: bad device serial {serial!r}")
+                if not isinstance(phys, str) or not phys.strip():
+                    raise CatalogError(
+                        f"interface catalog: {role}/{serial} must map to a physical "
+                        f"interface name (e.g. ethernet1/4)")
+                out[serial.strip()] = phys.strip()
+            device_names[role] = out
+        return cls(folder_names=folder_names, device_names=device_names)
+
+
+@dataclass(frozen=True)
 class RouterCatalog:
     """Logical router / VRF topology, including interface membership.
 

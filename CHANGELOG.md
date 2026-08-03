@@ -3,6 +3,47 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] — 2026-08-03
+
+`interface:` names a ROLE, resolved per scope by `catalog/interfaces.yaml`.
+
+### A port number does not belong in an intent
+The same interface has two names in SCM and which is correct depends on the
+scope being written (ADR-0005):
+
+```
+folder=ngfw-shared   $eth-local (default_value: ethernet1/4)   35479f59-…
+device=<serial>      ethernet1/4                               35479f59-…
+```
+
+An intent hardcoding either is wrong somewhere: `ethernet1/4` breaks when it
+targets a folder, `$eth-local` breaks when it targets a firewall. Worse, the
+physical name is a property of the AWS topology — it changed during this
+release and would have silently invalidated every intent naming it.
+
+So an intent now says `interface: local` and the catalog resolves the role for
+whichever scope it targets, at LOAD time, exactly as `catalog/routers.yaml`
+supplies VRF membership. The compiler stays pure and the requester never types
+a port.
+
+Fail closed throughout: an unknown role is rejected with the known ones listed,
+a role with no mapping for the target firewall is rejected rather than guessed,
+and a **missing** catalog makes `interface:` unusable rather than falling back
+to the literal — that fallback would have been the hardcoded-port problem
+wearing a catalog.
+
+### The mapping is the cost driver
+Recorded in the catalog itself. Naming `ethernet1/3` and `ethernet1/4` forces
+ENIs at device index 3 and 4, hence a 5th ENI, hence a 16-vCPU instance — which
+also auto-scaled the licence from `VM-SERIES-4` to `VM-SERIES-16`. Mapping the
+same roles to `ethernet1/1` / `ethernet1/2` would fit 1 mgmt + 2 dataplane on
+`m5.xlarge`, which is what a production firewall here actually needs.
+
+Changing that is now a catalog edit rather than a rewrite of every intent —
+which is the point.
+
+564 tests.
+
 ## [1.13.0] — 2026-08-03
 
 `fwgitops push --device <serial>` — and the **first GitOps-managed data-plane
