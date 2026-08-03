@@ -248,43 +248,72 @@ variables to an interface that has one, is a prerequisite for any traffic-level
 test. **Priority: P2** (does not block the GitOps work, does block proving
 traffic).
 
-### prod-edge apply would rewrite 5 live security rules — BLOCKS the apply path
+### prod-edge apply would CLEAR profile_setting on REQ-2026-07302 — P1
 
-**Found 2026-08-04** while adding the first RouteRequest. `terraform plan` in
-`terraform/prod-edge` reports `0 to add, 5 to change, 0 to destroy` with NO
-pending intent change — the drift is pre-existing and unrelated to the route.
-Provider unchanged at 1.0.11.
+**Corrected 2026-08-04.** The first version of this entry claimed an untargeted
+apply would strip `category` and `source_user` from five live rules. That was
+wrong, and partly a misreading of my own truncated plan output. Tested rather
+than reasoned:
 
-Per rule, the plan wants to:
+| attribute | computed? | omitted from config → |
+|---|---|---|
+| `log_setting` | yes | **survives** (verified on 1.0.11 AND 1.0.12-beta.4) |
+| `profile_setting` | yes | **CLEARED** (verified on both) |
+| `category` | yes | survives — plan reads `-> (known after apply)` |
+| `source_user` | **no** | set to `null`, but PAN-OS treats absent as `any`, so behaviour is unchanged |
+
+`computed` does NOT mean "preserved" — it means Terraform records whatever comes
+back. Two fields, both computed, opposite behaviour on omission. The only way to
+know was to write it and read it back.
+
+**The real risk is one rule.** Live in prod-edge:
 
 ```
-~ category    = [ - "any", ]        <- REMOVED from a live rule
-- source_user = [ - "any", ]        <- REMOVED from a live rule
-~ log_setting = "Cortex Data Lake" -> (known after apply)
-+ profile_setting / security_settings / ... = (known after apply)
+REQ-2026-0725/0726/0727/0730   profile_setting=None          <- nothing to lose
+REQ-2026-07302                 profile_setting={'group': ['best-practice']}
 ```
 
-**Mechanism.** `category` and `source_user` are not emitted by the compiler, not
-in the `security_rules` object type, and not set by the module — but the provider
-models them as **optional, not computed**, so "absent from config" means
-"remove", not "leave alone". `log_setting` is emitted and declared but
-deliberately unwired (ADR-0003 gives it to `enrich`), so Terraform recomputes it.
+An untargeted apply clears `profile_setting` on **REQ-2026-07302**, silently
+removing its security profile group — the rule keeps allowing traffic and stops
+inspecting it. A security regression that no plan line calls out as one, because
+it reads `(known after apply)`.
 
-**Why it matters.** Any apply against prod-edge — including one whose intent is a
-single route — silently edits five production security rules, stripping their
-match-any category and user. That is a policy change nobody requested, arriving
-as a side effect. It also means the ADR-0003 truce between `enrich` and Terraform
-is not holding as documented.
+**This is exactly the ADR-0003 conflict:** `enrich` set the field over REST, the
+module does not manage it, and Terraform's write drops it.
 
-**Direction:** decide per attribute whether Terraform owns it or `enrich` does,
-and make that explicit rather than implicit-by-omission. Attributes `enrich` owns
-need `lifecycle { ignore_changes = [...] }` on the resource, or the module must
-set them from the compiler. Absent config meaning "delete" is the trap — the same
-silent-discard family as HOLE 3, in the opposite direction.
+**Direction, now that 1.0.12-beta.4 writes these fields** (see
+`spike/provider-beta4`): let the compiler own `profile_setting` and `log_setting`
+directly and retire that part of `enrich`, which removes the conflict at its
+root. Until then, apply prod-edge with `-target`, or add
+`lifecycle { ignore_changes = [profile_setting] }`.
 
 **Effort:** M
-**Priority:** P1 — the apply pipeline for the production folder is not safe to
-run until this is settled.
+**Priority:** P1 — one live rule loses threat inspection on the next untargeted
+apply.
+
+### `fwgitops enrich` may be retirable — 1.0.12-beta.4 writes what 1.0.11 drops
+
+ADR-0003 exists because the provider ACCEPTS `application`, `profile_setting`
+and `log_setting`, reports success, and never writes them — confirmed on v1.0.11
+and v1.0.12-beta.3. **v1.0.12-beta.4 writes all three**, verified in `GitOps`
+(`spike/provider-beta4`):
+
+```
+WRITTEN  application:     ['web-browsing']
+WRITTEN  log_setting:     'Cortex Data Lake'
+WRITTEN  profile_setting: {'group': ['best-practice']}
+```
+
+So the workaround `src/fwgitops/enrich.py` embodies may no longer be needed, and
+the compiler could own these fields — which also fixes the P1 above at its root.
+
+**Before acting:** beta.4 is a PRE-RELEASE. Ordering (`rulebase` /
+`relative_position` / `target_rule`) was part of the same ADR-0003 finding and
+was NOT probed here — do that before retiring any of `enrich`. Schema flags are
+identical between the versions, so the change is in write behaviour only.
+
+**Effort:** L
+**Priority:** P2
 
 ## Contract enforcement
 
