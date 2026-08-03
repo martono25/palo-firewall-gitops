@@ -5,6 +5,8 @@
 # --- access ---
 ssh_key_name      = "your-ec2-keypair-name"   # an EXISTING key pair in ap-southeast-1
 mgmt_allowed_cidr = "YOUR.PUBLIC.IP/32"        # lock mgmt to your IP (get it: curl ifconfig.me)
+                                              # 0.0.0.0/0 is REJECTED by a validation block —
+                                              # this is a firewall management plane.
 
 # --- BYOL AMI (from your AWS Marketplace subscription, ap-southeast-1) ---
 vmseries_ami_id = "ami-xxxxxxxxxxxxxxxxx"

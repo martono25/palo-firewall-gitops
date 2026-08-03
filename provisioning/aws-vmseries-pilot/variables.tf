@@ -37,6 +37,22 @@ variable "mgmt_allowed_cidr" {
   description = "CIDR allowed to reach the firewall mgmt interface (HTTPS/SSH). Lock to your IP."
   type        = string
   # no default — you must set this so mgmt is not world-open
+
+  # "No default" was not enough: the pilot ran with 0.0.0.0/0 anyway, and on
+  # 2026-08-03 the firewall logged 106 failed `admin` logins brute-forced from
+  # 147.185.135.0/24. A comment cannot stop that; a validation can.
+  #
+  # This is the MANAGEMENT plane of a firewall — the interface that owns the
+  # device. There is no lab justification for exposing it to the internet, so
+  # the escape hatch is deliberately absent: narrow the CIDR, or use a bastion.
+  validation {
+    condition     = !contains(["0.0.0.0/0", "::/0"], var.mgmt_allowed_cidr)
+    error_message = "Refusing to expose the firewall management plane to the internet. Set mgmt_allowed_cidr to your egress IP (e.g. 203.0.113.4/32)."
+  }
+  validation {
+    condition     = can(cidrhost(var.mgmt_allowed_cidr, 0))
+    error_message = "mgmt_allowed_cidr must be a valid CIDR, e.g. 203.0.113.4/32."
+  }
 }
 
 # ── SCM onboarding (prerequisites you provide) ────────────────────────────
