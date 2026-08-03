@@ -366,7 +366,19 @@ def _load_catalogs(
         except CatalogError as e:
             print(f"error: invalid folder hierarchy {folders_path}: {e}", file=err)
             return None, False
+    # Interface ROLE -> object name per scope ($eth-local at folder scope,
+    # ethernet1/4 at device scope — one object, two names, ADR-0005).
+    ifaces = None
+    ifaces_path = catalog_dir / "interfaces.yaml"
+    if ifaces_path.is_file():
+        from fwgitops.catalog import InterfaceCatalog
+        try:
+            ifaces = InterfaceCatalog.from_dict(read_yaml(ifaces_path))
+        except CatalogError as e:
+            print(f"error: invalid interface catalog {ifaces_path}: {e}", file=err)
+            return None, False
     return {
+        "interface_catalog": ifaces,
         "service_catalog": svc, "app_catalog": app, "profile_catalog": prof,
         "application_catalog": appid, "log_forwarding_catalog": logf,
         "zone_protection_catalog": zoneprot,

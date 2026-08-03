@@ -1,0 +1,51 @@
+# Logical interface ROLE -> the object name at each scope.
+#
+# WHY THIS EXISTS. The same interface has two names in SCM, and which one is
+# correct depends on the scope you are writing to (ADR-0005):
+#
+#   folder=ngfw-shared   $eth-local (default_value: ethernet1/4)   35479f59-…
+#   device=<serial>      ethernet1/4                               35479f59-…
+#
+# An intent that hardcodes either one is wrong somewhere. `interface:
+# ethernet1/4` breaks the moment it targets a folder; `interface: $eth-local`
+# breaks the moment it targets a firewall. Worse, the physical name is a
+# property of the AWS topology — it changed once already in this project's
+# lifetime and would have silently invalidated every intent naming it.
+#
+# So an intent names the ROLE (`local`, `internet`) and this catalog resolves it
+# per scope, at LOAD time, the same way catalog/routers.yaml supplies VRF
+# membership. The compiler stays pure and the requester never types a physical
+# port.
+#
+# ── THE PHYSICAL NAME IS NOT FREE ─────────────────────────────────────────
+# On AWS a VM-Series interface exists only when an ENI sits at the matching
+# device index (eth0=mgmt, ethN=ethernet1/N), and the ENI limit scales with
+# instance SIZE. Naming ethernet1/3 and ethernet1/4 therefore forces a 5th ENI
+# and a 16-vCPU instance — which also auto-scaled the licence tier from
+# VM-SERIES-4 to VM-SERIES-16 (verified 2026-08-03), roughly 4x the credits.
+#
+# A production firewall here is 1 mgmt + 2 dataplane = 3 ENIs, which fits
+# m5.xlarge / VM-SERIES-4. Mapping the roles to ethernet1/1 and ethernet1/2
+# would remove the oversize entirely. THE MAPPING BELOW IS THE COST DRIVER —
+# keep that in view when editing it.
+#
+# Verified live 2026-08-03 (`show interface all`, device scope):
+#   ethernet1/3  up  06:e5:9a:8b:d8:c9  zone internet
+#   ethernet1/4  up  06:ca:54:97:6c:b7  zone local
+interfaces:
+  local:
+    description: Inside / trust segment.
+    # Name at FOLDER scope — the SCM folder variable.
+    folder: $eth-local
+    # Name at DEVICE scope, per firewall. A firewall absent here cannot be
+    # targeted for this role: fail closed rather than guess a port.
+    devices:
+      "007955000894453": ethernet1/4
+      "007955000893662": ethernet1/4
+
+  internet:
+    description: Outside / untrust segment.
+    folder: $eth-internet
+    devices:
+      "007955000894453": ethernet1/3
+      "007955000893662": ethernet1/3

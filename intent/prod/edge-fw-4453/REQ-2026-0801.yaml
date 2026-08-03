@@ -6,11 +6,11 @@
 # id, leaving the shared object, the other firewall (007955000893662) and the
 # parent folders untouched. Deleting it reverts to inheritance.
 #
-# WHY ethernet1/4 AND NOT $eth-local. They are the same object seen at two
-# scopes: `$eth-local` is the folder-scope variable in ngfw-shared, whose
-# per-device `default_value` is ethernet1/4. At DEVICE scope the object is named
-# by its physical name. Confirmed by the probe, which wrote ethernet1/4 at
-# device scope successfully.
+# `interface:` names a ROLE, not a port. The same interface is `$eth-local` at
+# folder scope and `ethernet1/4` at device scope (ADR-0005), so no literal is
+# correct for both — and the physical name is a property of the AWS topology,
+# which has already changed once. catalog/interfaces.yaml resolves the role for
+# whichever scope this intent targets.
 #
 # This interface currently has `layer3: {}` — no addressing anywhere in the
 # tenant — so this adds addressing rather than changing it. Nothing is passing
@@ -30,7 +30,7 @@ metadata:
 
 spec:
   device: "007955000894453"     # fw-prod-edge-4453, PA-VM, connected
-  interface: ethernet1/4        # $eth-local at folder scope
+  interface: local              # role — resolved via catalog/interfaces.yaml
   ip:
     - 10.20.0.1/24
   mtu: 1500

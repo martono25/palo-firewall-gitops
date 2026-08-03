@@ -24,7 +24,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from fwgitops.catalog import FolderHierarchy, RouterCatalog  # noqa: E402
+from fwgitops.catalog import FolderHierarchy, InterfaceCatalog, RouterCatalog  # noqa: E402
 from fwgitops.compiler import compile_request  # noqa: E402
 from fwgitops.intent import IntentError, load_intent  # noqa: E402
 from fwgitops.kinds import compile_any  # noqa: E402
@@ -52,8 +52,16 @@ def _routers():
     }})
 
 
+def _ifcat():
+    """`interface:` is a ROLE. `local` resolves to `$eth-local` at folder scope
+    and to the physical port at device scope — one object, two names."""
+    return InterfaceCatalog.from_dict({"interfaces": {
+        "local": {"folder": "$eth-local", "devices": {DEVICE: "ethernet1/4"}},
+    }})
+
+
 def _iface(**spec):
-    base = {"interface": "$eth-local", "ip": ["10.20.0.1/24"]}
+    base = {"interface": "local", "ip": ["10.20.0.1/24"]}
     base.update(spec)
     return {
         "apiVersion": "fw-intent/v1", "kind": "InterfaceRequest",
@@ -68,6 +76,7 @@ def _load(doc, hierarchy=True, **kw):
         doc,
         env_map=_env(),
         router_catalog=_routers(),
+        interface_catalog=_ifcat(),
         folder_hierarchy=_hierarchy() if hierarchy else None,
         **kw,
     )
@@ -141,7 +150,8 @@ def test_the_environment_path_is_unaffected_by_targetability():
     env = EnvMap.from_dict(
         {"shared": {"folder": "ngfw-shared", "from_zone": "local", "to_zone": "internet"}})
     req = load_intent(_iface(environment="shared"), env_map=env,
-                      folder_hierarchy=_hierarchy(), router_catalog=_routers())
+                      folder_hierarchy=_hierarchy(), router_catalog=_routers(),
+                      interface_catalog=_ifcat())
     assert compile_any(req, env_map=env).folder == "ngfw-shared"
 
 

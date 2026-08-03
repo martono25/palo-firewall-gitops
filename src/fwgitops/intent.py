@@ -298,6 +298,7 @@ class _Collector:
         router_catalog: Any = None,
         env_map: Any = None,
         folder_hierarchy: Any = None,
+        interface_catalog: Any = None,
     ) -> None:
         self.problems: List[Problem] = []
         #: Optional ServiceCatalog (Phase 2). Enables the `service: name:` form.
@@ -321,6 +322,10 @@ class _Collector:
         #: FolderHierarchy — validates a Day-1 kind's explicit `folder:`.
         #: Its ABSENCE makes `folder:` unusable (fail closed), not unchecked.
         self.folder_hierarchy = folder_hierarchy
+        #: InterfaceCatalog — resolves an interface ROLE to the object name at
+        #: the target scope. `$eth-local` at folder scope, `ethernet1/4` at
+        #: device scope: one object, two names (ADR-0005).
+        self.interface_catalog = interface_catalog
 
     def add(self, path: str, message: str) -> None:
         self.problems.append(Problem(path, message))
@@ -339,6 +344,7 @@ def load_intent(
     router_catalog: Any = None,
     env_map: Any = None,
     folder_hierarchy: Any = None,
+    interface_catalog: Any = None,
 ) -> AccessRequest:
     """Parse + validate an intent dict, dispatching on `kind` (ADR-0001).
 
@@ -365,6 +371,7 @@ def load_intent(
         interface_profile_catalog=interface_profile_catalog,
         router_catalog=router_catalog, env_map=env_map,
         folder_hierarchy=folder_hierarchy,
+        interface_catalog=interface_catalog,
     )
     kind = data.get("kind")
     loader = _KIND_LOADERS.get(kind)
@@ -462,7 +469,30 @@ def _load_interface_spec(sp: Any, c: "_Collector") -> Optional[InterfaceSpec]:
         c.add(path, "required mapping")
         return None
     folder, device, environment = _load_target(sp, path, c)
-    interface = _req_str(sp, "interface", path, c)
+    role = _req_str(sp, "interface", path, c)
+
+    # `interface:` names a ROLE, not a port. The same interface is `$eth-local`
+    # at folder scope and `ethernet1/4` at device scope (ADR-0005), so which
+    # literal is correct depends on the target — and the physical name is a
+    # property of the AWS topology, which has changed once already. Resolving
+    # here keeps the compiler pure, exactly as the router catalog does for VRF
+    # membership.
+    interface = None
+    if role is not None:
+        if c.interface_catalog is None:
+            # Fail closed: with no catalog there is nothing to resolve against,
+            # and guessing a port is how an intent lands on the wrong wire.
+            c.add(f"{path}.interface",
+                  "cannot resolve `interface` — no interface catalog loaded "
+                  "(catalog/interfaces.yaml). Refusing to guess a physical port.")
+        else:
+            target_device = device
+            if target_device is None and environment is None and folder is None:
+                target_device = None      # target already reported by _load_target
+            try:
+                interface = c.interface_catalog.resolve(role, device=target_device)
+            except Exception as e:  # CatalogError — reported as an intent problem
+                c.add(f"{path}.interface", str(e))
 
     ip = sp.get("ip", [])
     if not isinstance(ip, list) or not all(isinstance(x, str) and x.strip() for x in ip):
