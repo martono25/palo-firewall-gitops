@@ -205,6 +205,16 @@ for a push that changed nothing. It also means "did my push actually commit
 something?" cannot be answered from the job record — both jobs are
 byte-identical apart from the id.
 
+**It also cannot tell you the DEVICE has the change.** Measured 2026-08-03: the
+push job returned `FIN`/`OK` "Configuration committed successfully" while the
+firewall's running config still showed the previous address. The new value
+appeared **38 seconds later**. So a verification that reads the device
+immediately after a successful push reads STALE config and reports success — the
+failure mode is a false green, not an error.
+
+Anything asserting "the change is live" must poll the device until it agrees,
+not trust the job. `spike/`-style readbacks in this repo now do exactly that.
+
 **Direction:** compare the candidate before/after, or diff config versions, and
 derive noop from that rather than from an error string. Worth checking whether
 the folder path behaves the same way (it may have been noop-detected only

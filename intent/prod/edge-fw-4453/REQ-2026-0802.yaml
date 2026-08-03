@@ -1,0 +1,38 @@
+# Day-1 addressing for the OUTSIDE interface (ADR-0001 kind #3, ADR-0005).
+#
+# Completes the pair. REQ-2026-0801 addressed the inside (`local`); this is the
+# outside (`internet`), giving the shape a production firewall here actually
+# runs: 1 management + 2 dataplane interfaces.
+#
+# `interface: internet` is a ROLE. It resolves via catalog/interfaces.yaml to
+# `$eth-internet` at folder scope and to the SCM default_value `ethernet1/3` at
+# device scope — one object, two names (ADR-0005). No port is named here, so an
+# AWS topology change cannot silently invalidate this intent.
+#
+# ADDRESS MUST MATCH THE ENI. AWS only delivers traffic to an interface holding
+# the private IP it assigned. The untrust ENI (device index 3, subnet
+# 10.100.2.0/24) holds 10.100.2.142.
+#
+# The zone follows for free: `internet` is defined in ngfw-shared and already
+# references $eth-internet, and the logical router `default` already carries it
+# in the VRF. So this needs no ZoneRequest and no RouteRequest.
+apiVersion: fw-intent/v1
+kind: InterfaceRequest
+
+metadata:
+  id: REQ-2026-0802
+  requester: martono@corp
+  ticket: JIRA-903
+  justification: >-
+    Day-1 build for edge firewall fw-prod-edge-4453: address the outside
+    interface so the internet zone can carry traffic. Completes the
+    1 mgmt + 2 dataplane topology.
+  requested: "2026-08-03"
+
+spec:
+  device: "007955000894453"     # fw-prod-edge-4453, PA-VM, connected
+  interface: internet           # role — $eth-internet / ethernet1/3
+  ip:
+    - 10.100.2.142/24
+  mtu: 1500
+  comment: "Outside — managed by fwgitops"
