@@ -26,6 +26,20 @@ variable "instance_type" {
   description = "VM-Series supported instance type (min m5.xlarge = 4 vCPU)."
   type        = string
   default     = "m5.xlarge"
+
+  # SIZED FOR ENIs, NOT FOR CPU. On AWS a VM-Series interface exists only if an
+  # ENI sits at the matching device index, and the ENI limit scales with
+  # instance size, not with vCPU:
+  #
+  #   m5.xlarge   4 vCPU   4 ENIs   -> ethernet1/1 .. 1/3 at most
+  #   m5.2xlarge  8 vCPU   4 ENIs   -> no gain at all
+  #   m5.4xlarge 16 vCPU   8 ENIs   -> ethernet1/4 reachable
+  #
+  # No 4-vCPU type in ap-southeast-1 offers more than 4 ENIs, so backing
+  # ethernet1/4 costs a 16-vCPU instance. The licence is `VM-SERIES-4`
+  # (vm-cpu-count: 4), so PAN-OS uses 4 cores whatever the instance provides —
+  # the extra 12 vCPU are paid for and idle. That is the deliberate trade, not
+  # an oversight: the purchase is ENI slots.
 }
 
 variable "ssh_key_name" {
@@ -53,6 +67,18 @@ variable "mgmt_allowed_cidr" {
     condition     = can(cidrhost(var.mgmt_allowed_cidr, 0))
     error_message = "mgmt_allowed_cidr must be a valid CIDR, e.g. 203.0.113.4/32."
   }
+}
+
+variable "untrust_subnet_cidr" {
+  description = "Subnet for ethernet1/3 ($eth-internet). Internet-facing."
+  type        = string
+  default     = "10.100.2.0/24"
+}
+
+variable "trust_subnet_cidr" {
+  description = "Subnet for ethernet1/4 ($eth-local). Internal; no default route."
+  type        = string
+  default     = "10.100.3.0/24"
 }
 
 # ── SCM onboarding (prerequisites you provide) ────────────────────────────

@@ -28,6 +28,36 @@ module "vmseries" {
       security_group_ids = [aws_security_group.dataplane.id]
       source_dest_check  = false
     }
+    # ── ethernet1/2 .. ethernet1/4 ────────────────────────────────────────
+    # device_index N maps to ethernet1/N. The SCM folder variables already point
+    # $eth-internet -> ethernet1/3 and $eth-local -> ethernet1/4, so those two
+    # indexes are what make the existing config real; before this they had
+    # placeholder MACs and were link-down.
+    #
+    # source_dest_check MUST stay false on every dataplane ENI — a firewall
+    # forwards traffic it did not originate, and AWS drops that otherwise.
+    spare = {
+      # Index 2 exists only to keep the indexes contiguous (see network.tf).
+      # Unconfigured on the firewall.
+      device_index       = 2
+      subnet_id          = aws_subnet.dataplane.id
+      security_group_ids = [aws_security_group.dataplane.id]
+      source_dest_check  = false
+    }
+    untrust = {
+      # ethernet1/3 = $eth-internet
+      device_index       = 3
+      subnet_id          = aws_subnet.untrust.id
+      security_group_ids = [aws_security_group.dataplane.id]
+      source_dest_check  = false
+    }
+    trust = {
+      # ethernet1/4 = $eth-local — the interface REQ-2026-0801 addresses.
+      device_index       = 4
+      subnet_id          = aws_subnet.trust.id
+      security_group_ids = [aws_security_group.dataplane.id]
+      source_dest_check  = false
+    }
   }
 
   # Point the firewall at the S3 bootstrap package (read via the instance profile).
