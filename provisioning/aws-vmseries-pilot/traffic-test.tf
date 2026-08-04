@@ -208,13 +208,22 @@ resource "aws_instance" "trust_client" {
     # Runs long enough to observe live on the firewall (session table, rule hit
     # counts). A short burst finishes before anything can be watched, which is
     # how the first run left "did it even arrive?" unanswerable.
-    for i in $(seq 1 40); do
-      echo "--- attempt $i ---"
+    # RUNS FOREVER, on purpose. A bounded loop means re-testing requires
+    # recreating the instance, and each replacement gets a new MAC while PAN-OS
+    # holds ARP for 1800s — so the firewall keeps forwarding to a dead MAC and
+    # every subsequent result is poisoned. That cost hours in this session.
+    #
+    # An endless loop makes the harness re-usable without touching the
+    # instances: change policy, watch the next iteration. If it must be
+    # recreated, recreate the CLIENT (its ARP re-resolves when it ARPs for the
+    # firewall) and leave the TARGET alone (the firewall initiates to it, so a
+    # stale entry there persists for the full ARP lifetime).
+    while true; do
+      echo "--- $(date +%T) ---"
       echo "ping:"; ping -c 2 -W 2 10.100.2.200 2>&1 | tail -2
       echo "http:"; curl -s -m 5 -o /dev/null -w 'curl_http_code=%%{http_code}\n' http://10.100.2.200/ 2>&1
       sleep 15
     done
-    echo "=== FWGITOPS TRAFFIC TEST END ==="
   EOT
 
   tags = { Name = "${var.project}-trust-client", Project = var.project }
