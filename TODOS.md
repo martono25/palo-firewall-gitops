@@ -259,7 +259,7 @@ because a *different* error was returned).
 **Effort:** M
 **Priority:** P2
 
-### Pilot firewall: mgmt plane exposed, and no ENI behind the data interfaces
+### ~~Pilot firewall: mgmt plane exposed, and no ENI behind the data interfaces~~ — BOTH FIXED
 
 Two findings from reading the device directly on 2026-08-03 (SSH + `show`).
 
@@ -268,7 +268,11 @@ Two findings from reading the device directly on 2026-08-03 (SSH + `show`).
 API, the interface that owns the device. Port 22 is correctly limited to
 RFC1918. The firewall reported **98 failed admin logins since last successful
 login**, so this is being probed, not merely exposed. Narrow 443 to known egress.
-**Priority: P1.**
+**Priority: P1.** — **FIXED.** That SG no longer exists; the pilot now carries
+`fwgitops-pilot-mgmt-…` (`sg-0720301d5a39a397f`) with 22 AND 443 both limited to
+a single known egress `/32`. `provisioning/aws-vmseries-pilot/variables.tf` now
+validates `mgmt_allowed_cidr` and REFUSES `0.0.0.0/0`, so the exposure cannot be
+reintroduced by editing a tfvar — verified on the live SG 2026-08-04.
 
 **2. The data interfaces have no physical backing.** `show interface hardware`
 reports only `ethernet1/3` and `ethernet1/4`, both `down` with MAC
@@ -281,8 +285,16 @@ So `REQ-2026-0801` is genuinely live in the running config
 interface that **cannot pass traffic**. The GitOps chain is proven; the lab
 topology is not wired. Attaching ENIs, or re-mapping the `$eth-*` folder
 variables to an interface that has one, is a prerequisite for any traffic-level
-test. **Priority: P2** (does not block the GitOps work, does block proving
-traffic).
+test. **Priority: P2** — **FIXED.** The instance now has FIVE ENIs (indices 0-4:
+mgmt `10.100.0.51`, plus `10.100.1.37`, `10.100.1.110`, `10.100.2.142`,
+`10.100.3.125`), the dataplane SG has VPC ingress, and the firewall has since
+seen and enforced real packets. Verified on the live instance 2026-08-04.
+
+**What this does NOT close:** the traffic ROUND TRIP was never completed — the
+return leg was still failing when the test hosts were destroyed. The harness
+survives in `provisioning/aws-vmseries-pilot/traffic-test.tf` behind
+`enable_traffic_test = false`; the ARP-poisoning and SG-ingress traps that cost
+the most time are documented there.
 
 ### ~~prod-edge apply would CLEAR profile_setting on REQ-2026-07302~~ — FIXED v1.15.0
 
@@ -341,7 +353,21 @@ anchored move needs `target_rule` as the anchor's UUID, i.e.
 `scm_security_rule.this[<key>].id`, and that self-reference inside one `for_each`
 block gives `Error: Cycle`.
 
-**PROBED 2026-08-04 (`spike/ordering-existing`) — the answer is DO NOT WIRE IT.**
+Ordering itself is a separate item — see *Rule ORDERING via `relative_position`*
+below, deferred to v2.0.
+
+### Rule ORDERING via `relative_position` — DEFERRED to v2.0
+
+**What:** move before/after rule ordering out of `src/fwgitops/enrich.py` and
+into the compiler + Terraform module, so the whole rule is one declarative write.
+
+**Why deferred (decision, 2026-08-04):** it needs an INTENT-MODEL change, not a
+Terraform change, and the intent model is not the thing v1.x is stabilising.
+`enrich` orders rules correctly today, so this buys tidiness, not capability —
+and buying it wrong rewrites a live rulebase (below). It sits alongside
+`NatRequest` as v2.0's compiler work.
+
+**PROBED 2026-08-04 (`spike/ordering-existing`) — DO NOT WIRE IT AS IT STANDS.**
 A first-time add of `relative_position = "bottom"` RE-STACKS the rulebase:
 
 ```
@@ -369,8 +395,10 @@ intent explicitly asked for a position. It cannot today: `position` defaults to
 distinction has to exist in the intent model first.
 
 **Effort:** M — intent-model change, not a Terraform change.
-**Priority:** P3 — ordering works via `enrich`; this is only about moving it. (v2.0)
-**Depends on:** its own fidelity probe.
+**Priority:** P2 (v2.0) — not urgent, but it is now a scoped v2.0 item rather
+than a someday-maybe. Ordering works via `enrich` in the meantime.
+**Depends on:** an intent model that can express "unspecified" separately from
+"bottom". Its provider fidelity probe is DONE (above) and passed.
 
 ### Reject a malformed Terraform root instead of best-effort parsing
 
@@ -533,7 +561,7 @@ into this refactor. It is latent, not an active bug, and travels with this item.
 **Priority:** P3
 **Depends on:** A third intent kind; a drift story for tagless objects.
 
-### InterfaceRequest — intent kind #3
+### ~~InterfaceRequest — intent kind #3~~ — DONE v1.8.0
 
 **What:** The ADR-0002 prerequisite: declare PAN-OS interface configuration
 (layer3, addressing) through the normal intent pipeline.
@@ -549,9 +577,11 @@ the dependency is not rediscovered later. The README currently promises Day-1
 provisioning as the v2.0 target, which this is the real first step of.
 
 **Effort:** XL
-**Priority:** P2
-**Depends on:** Probe scm_zone field fidelity (same provider-fidelity question
-applies to `scm_ethernet_interface`).
+**Priority:** DONE v1.8.0 — kept for the scope reasoning, which still holds:
+zones are useless without interfaces, and that dependency is now the first link
+of the ordering chain built in v1.17.0.
+**Depends on:** Probe scm_zone field fidelity — DONE, and the
+`scm_ethernet_interface` probe it anticipated was run separately and passed.
 
 ## Performance
 
