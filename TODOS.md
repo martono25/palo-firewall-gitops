@@ -248,45 +248,72 @@ variables to an interface that has one, is a prerequisite for any traffic-level
 test. **Priority: P2** (does not block the GitOps work, does block proving
 traffic).
 
-### prod-edge apply would rewrite 5 live security rules — BLOCKS the apply path
+### ~~prod-edge apply would CLEAR profile_setting on REQ-2026-07302~~ — FIXED v1.15.0
 
-**Found 2026-08-04** while adding the first RouteRequest. `terraform plan` in
-`terraform/prod-edge` reports `0 to add, 5 to change, 0 to destroy` with NO
-pending intent change — the drift is pre-existing and unrelated to the route.
-Provider unchanged at 1.0.11.
+Fixed by adopting provider 1.0.12-beta.4 and WIRING the fields, rather than by
+`-target` or `ignore_changes`. `prod-edge` now plans `0 to change` on the rules,
+and the device confirms `best-practice` and both log profiles survived the apply
+and push.
 
-Per rule, the plan wants to:
+The fix came from the provider's own documented example, which sets
+`category = ["any"]` and `source_user = ["any"]` explicitly — omission is not
+"leave alone" for an optional-NOT-computed attribute.
+
+### `fwgitops enrich` may be retirable — 1.0.12-beta.4 writes what 1.0.11 drops
+
+ADR-0003 exists because the provider ACCEPTS `application`, `profile_setting`
+and `log_setting`, reports success, and never writes them — confirmed on v1.0.11
+and v1.0.12-beta.3. **v1.0.12-beta.4 writes all three**, verified in `GitOps`
+(`spike/provider-beta4`):
 
 ```
-~ category    = [ - "any", ]        <- REMOVED from a live rule
-- source_user = [ - "any", ]        <- REMOVED from a live rule
-~ log_setting = "Cortex Data Lake" -> (known after apply)
-+ profile_setting / security_settings / ... = (known after apply)
+WRITTEN  application:     ['web-browsing']
+WRITTEN  log_setting:     'Cortex Data Lake'
+WRITTEN  profile_setting: {'group': ['best-practice']}
 ```
 
-**Mechanism.** `category` and `source_user` are not emitted by the compiler, not
-in the `security_rules` object type, and not set by the module — but the provider
-models them as **optional, not computed**, so "absent from config" means
-"remove", not "leave alone". `log_setting` is emitted and declared but
-deliberately unwired (ADR-0003 gives it to `enrich`), so Terraform recomputes it.
+So the workaround `src/fwgitops/enrich.py` embodies may no longer be needed, and
+the compiler could own these fields — which also fixes the P1 above at its root.
 
-**Why it matters.** Any apply against prod-edge — including one whose intent is a
-single route — silently edits five production security rules, stripping their
-match-any category and user. That is a policy change nobody requested, arriving
-as a side effect. It also means the ADR-0003 truce between `enrich` and Terraform
-is not holding as documented.
+**Ordering is PROBED and also works** (`spike/beta4-ordering`). Three rules
+created in one order, requesting another:
 
-**Direction:** decide per attribute whether Terraform owns it or `enrich` does,
-and make that explicit rather than implicit-by-omission. Attributes `enrich` owns
-need `lifecycle { ignore_changes = [...] }` on the resource, or the module must
-set them from the compiler. Absent config meaning "delete" is the trap — the same
-silent-discard family as HOLE 3, in the opposite direction.
+```
+created   : alpha, bravo, charlie
+requested : bravo (top), charlie (before alpha), alpha (bottom)
+ACTUAL    : bravo, charlie, alpha        <- fully honoured
+```
+
+`top`, `bottom`, `before` + `target_rule` all land correctly, with no move
+failure and no warning.
+
+**Correction.** The first run of this probe reported `before` failing with a move
+404 ("Failed to find obj-uuid for command get") inside a green apply, and I
+attributed it to the provider. That was MY bug: I passed `target_rule` a rule
+NAME. The registry docs are explicit — *"UUID of the rule to position this rule
+relative to"* — and the error message said so plainly. With
+`target_rule = scm_security_rule.<x>.id` it works.
+
+**Implication for wiring it up:** the compiler emits `target_rule` as a rule
+KEY, so the module must resolve it to `scm_security_rule.this[<key>].id`, not
+pass the name through. A name silently produces the 404-inside-a-green-apply
+described above, so the resolution is load-bearing.
+
+**ADOPTED in v1.15.0 for the FIELDS.** `enrich` still owns before/after
+ordering, which is a Terraform limitation rather than a provider one: an
+anchored move needs `target_rule` as the anchor's UUID, i.e.
+`scm_security_rule.this[<key>].id`, and that self-reference inside one `for_each`
+block gives `Error: Cycle`.
+
+**Remaining, and it needs its own probe:** `position` / `relative_position` are
+honoured on CREATE but are not wired, because the compiler defaults every rule to
+`bottom` and wiring them would issue a move for five live rules at once. Rule
+order is policy. Probe "move an EXISTING rule" before wiring — the create-time
+result already verified does not answer it.
 
 **Effort:** M
-**Priority:** P1 — the apply pipeline for the production folder is not safe to
-run until this is settled.
-
-## Contract enforcement
+**Priority:** P2 (v2.0)
+**Depends on:** its own fidelity probe.
 
 ### Reject a malformed Terraform root instead of best-effort parsing
 
