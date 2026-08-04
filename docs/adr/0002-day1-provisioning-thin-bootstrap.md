@@ -1,7 +1,9 @@
 # ADR-0002 — Day-1 provisioning: thin bootstrap + ordered config jobs
 
-- **Status:** Accepted — **bootstrap half built**, config-job half not
-- **Date:** 2026-07-27 (status revised 2026-07-31)
+- **Status:** Accepted — bootstrap built; **every config-job kind in the chain
+  is built and proven on hardware**; the ORDERING that sequences them is not
+  (see "Implementation status (2026-08-04)")
+- **Date:** 2026-07-27 (status revised 2026-07-31, again 2026-08-04)
 - **Deciders:** Martono, Claude
 
 ## Context
@@ -77,6 +79,10 @@ remaining link in the ordered chain. **`NatRequest` is deferred to v2.0**
 (decision 2026-08-02): it is not in the chain, so it does not block Day-1.
 Cross-kind dependency ordering — named above as "the real engineering" — is not
 built either.
+
+> **Superseded 2026-08-04.** `RouteRequest` shipped and the whole chain now runs
+> on hardware. See "Implementation status (2026-08-04)" at the end of this ADR;
+> the paragraph above is kept for the record, not as current state.
 
 Worth knowing before either is scoped: `scm_logical_router` has no `tag`
 attribute (so `RouteRequest` would use state-based drift, already generic),
@@ -160,3 +166,47 @@ by design; run it against a folder-scope interface when this is built.
 - Current bootstrap: `provisioning/aws-vmseries-pilot` (init-cfg + license + IAM).
 - Admin password is set post-boot over SSH (route B), not in the bootstrap — same
   clobber-avoidance rationale.
+
+## Implementation status (2026-08-04) — the chain runs; the ordering does not
+
+Supersedes the 2026-07-31 status above. Every link is now built AND exercised
+against the live firewall, verified in the RUNNING config rather than in SCM:
+
+```
+ethernet1/3   up   10.100.2.142/24   zone internet   lr:default   <- REQ-2026-0802
+ethernet1/4   up   10.100.3.125/24   zone local      lr:default   <- REQ-2026-0801
+0.0.0.0/0     static via 10.100.2.1  ACTIVE          ethernet1/3  <- REQ-2026-0803
+5 AccessRequest rules in the pushed policy
+```
+
+and the firewall was observed evaluating real packets against a rule compiled
+from intent — HTTP allowed, ICMP denied, both logged with rule name, ports and
+end reason (`spike/`-era harness, since torn down).
+
+### What is NOT done, in the order it matters
+
+**1. The ordering is not mechanised — this is the substantive gap.** This ADR's
+proposition is a *"curated, ordered set of the same multi-kind jobs"*, and that
+does not exist. There is a cross-kind CHECK (a rule may only use a zone the
+folder declares) but no sequencing. The chain above was ordered BY HAND, one PR
+at a time. Nothing today stops a fresh run applying a route before the interface
+it depends on, or a rule before its zone. "Cross-kind dependency ordering — the
+real engineering" remains exactly that.
+
+**2. `ZoneRequest` has never reached hardware.** It is built, unit-tested and
+provider-probed, but on this tenant the zones already exist in `ngfw-shared` and
+bind to the `$eth-*` variables, so they attached themselves the moment the
+interfaces were addressed. No `ZoneRequest` was needed or written. On a firewall
+in a fresh folder it would be, and it is the one link in the chain with no live
+evidence behind it. Do not read the chain's success as evidence for this kind.
+
+**3. `NatRequest` is still deferred to v2.0**, so a firewall that needs outbound
+NAT cannot yet be built from intent alone.
+
+### The honest summary
+
+Every KIND works, proven on hardware. The WORKFLOW — provisioning a firewall as
+one ordered operation — does not exist yet; a human sequences it. That is the
+difference between "the parts are built" and "Day-1 provisioning is a thing you
+can run", and it is the last item in this ADR that is neither done nor
+deliberately deferred.
