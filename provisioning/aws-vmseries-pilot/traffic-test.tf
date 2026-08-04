@@ -48,13 +48,18 @@ resource "aws_route_table" "untrust" {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.this.id
   }
-  route {
-    # Return path. Without this the reply is routed direct and the firewall sees
-    # a one-way flow, which it drops as asymmetric — the test would fail for a
-    # reason that has nothing to do with policy.
-    cidr_block           = var.trust_subnet_cidr
-    network_interface_id = module.vmseries.interfaces["untrust"].id
-  }
+  # NO VPC-level return route here, deliberately.
+  #
+  # There was one (trust_subnet_cidr -> the firewall's untrust ENI) and it broke
+  # the FORWARD path. The firewall's untrust interface is itself in this subnet,
+  # so it uses this table: forwarding the client's SYN — source 10.100.3.200 —
+  # meant AWS saw traffic whose source subnet routed straight back to the sending
+  # ENI. The SYN left the firewall (proven in tx.pcap) and never reached the
+  # target (PassiveOpens stayed at 0 there).
+  #
+  # It was also redundant: the target carries a HOST route
+  # `10.100.3.0/24 via 10.100.2.142`, which returns traffic through the firewall
+  # without involving this table at all.
   tags = { Name = "${var.project}-untrust", Project = var.project }
 }
 
@@ -107,43 +112,60 @@ resource "aws_instance" "untrust_target" {
 
   user_data = <<-EOT
     #!/bin/bash
+    set -x
     # HOST ROUTE for the RETURN path. The firewall's untrust interface
     # (10.100.2.142) is in THIS subnet, so it is reachable by ARP and can be a
-    # next-hop directly — no VPC route table involved. Without this the reply
-    # goes back via the AWS router and the firewall sees a one-way flow.
+    # next-hop directly. Without this the reply goes back via the AWS router and
+    # the firewall sees a one-way flow, which it drops as asymmetric.
     ip route replace 10.100.3.0/24 via 10.100.2.142 dev ens5
-    ip route show > /dev/console 2>&1
 
     # Serve something identifiable so a successful fetch cannot be confused with
     # a cached or local response.
     #
-    # A systemd unit, NOT `nohup ... &` from user-data: cloud-init reaps its
-    # children when the script exits, so the backgrounded server died with it and
-    # the port was never open. curl then returned 000, which is indistinguishable
-    # from the firewall blocking the connection — and sent me looking at the
-    # firewall for a fault that was in this file.
+    # A systemd unit, NOT `nohup ... &`: cloud-init reaps its children when the
+    # script exits, so a backgrounded server dies with it and the port is never
+    # open. curl then returns 000, which is indistinguishable from the firewall
+    # blocking the connection.
     #
-    # No dnf: this host has no route to the internet (no public IP), so package
-    # installation cannot work. python3 ships with AL2023.
-    echo "FWGITOPS-TARGET-OK" > /var/www-index/index.html 2>/dev/null || {
-      mkdir -p /var/www-index && echo "FWGITOPS-TARGET-OK" > /var/www-index/index.html
-    }
-    cat > /etc/systemd/system/fwgitops-target.service <<'UNIT'
-    [Unit]
-    Description=fwgitops traffic-proof target
-    After=network-online.target
-    [Service]
-    WorkingDirectory=/var/www-index
-    ExecStart=/usr/bin/python3 -m http.server 80
-    Restart=always
-    [Install]
-    WantedBy=multi-user.target
-UNIT
-    sed -i 's/^    //' /etc/systemd/system/fwgitops-target.service
+    # Written with printf rather than a nested heredoc: this file is already
+    # inside Terraform's indented <<-EOT, and an inner heredoc gets mangled by
+    # the indentation stripping — which failed cloud-init outright
+    # ("Failed to run module scripts-user") so NOTHING ran.
+    #
+    # No dnf: this host has no route to the internet, so package installation
+    # cannot work. python3 ships with AL2023.
+    mkdir -p /var/www-index
+    echo "FWGITOPS-TARGET-OK" > /var/www-index/index.html
+    printf '%s\n' \
+      '[Unit]' \
+      'Description=fwgitops traffic-proof target' \
+      'After=network-online.target' \
+      '[Service]' \
+      'WorkingDirectory=/var/www-index' \
+      'ExecStart=/usr/bin/python3 -m http.server 80' \
+      'Restart=always' \
+      '[Install]' \
+      'WantedBy=multi-user.target' \
+      > /etc/systemd/system/fwgitops-target.service
     systemctl daemon-reload
     systemctl enable --now fwgitops-target.service
     sleep 3
-    ss -lntp | grep ':80' > /dev/console 2>&1 || echo "PORT 80 NOT LISTENING" > /dev/console
+    # Answer "is the port actually open" in the test rather than assuming it.
+    { ip route show; ss -lntp | grep ':80' || echo "PORT-80-NOT-LISTENING"; } > /dev/console 2>&1
+
+    # Does the SYN actually ARRIVE here? The firewall's capture proves it
+    # FORWARDS one and never sees a reply, which cannot distinguish "target never
+    # got it" from "target replied and the reply was lost". Only this side can.
+    #
+    # CUMULATIVE kernel counters, not `ss`: SYN_RECV lasts seconds, so a 20s poll
+    # of the socket table misses it and reports zero either way. PassiveOpens
+    # counts every SYN that reached the listener; AttemptFails/InErrs catch the
+    # rest. These only ever increase, so nothing is missed between samples.
+    nohup sh -c 'while true; do
+      awk "/^Tcp:/{h=\$0; getline; print \"TARGET-TCP \" \$6 \" passive=\" \$6 \" attemptfail=\" \$7 \" estabresets=\" \$8 \" insegs=\" \$11}" /proc/net/snmp > /dev/console 2>&1
+      sleep 20
+    done' >/dev/null 2>&1 &
+    disown
   EOT
 
   tags = { Name = "${var.project}-untrust-target", Project = var.project }
