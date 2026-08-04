@@ -37,10 +37,13 @@ from fwgitops.compiler import (
 from fwgitops.intent import IntentError, load_intent
 from fwgitops.kinds import (
     REGISTRY,
+    KindOrderError,
+    kind_apply_order,
     kinds_with_drift_engine,
     kinds_with_state_api,
     compile_any,
     group_by_kind_and_scope,
+    scopes_in_apply_order,
     of_kind,
 )
 from fwgitops.io import discover_intents, read_yaml
@@ -146,10 +149,14 @@ def run_compile(
     # duplicate keys), so calling it twice per folder would run that check twice.
     planned: List[Tuple[Path, str, Dict[str, Any]]] = []  # (target, json, payload)
     try:
-        # Sorted by the scope KEY so output order is stable regardless of how
-        # the scope is addressed.
-        for (kind, scope), objs in sorted(group_by_kind_and_scope(compiled).items(),
-                                          key=lambda kv: (kv[0][0], kv[0][1].key)):
+        # APPLY ORDER (ADR-0002), not alphabetical. Emission order does not
+        # change what Terraform does inside one root, but the plan report is how
+        # a reviewer sees the chain, and the apply pipeline consumes the same
+        # sequence — so the two must not disagree. Scope key breaks ties, so the
+        # output is stable between runs.
+        groups = group_by_kind_and_scope(compiled)
+        for kind, scope in scopes_in_apply_order(compiled):
+            objs = groups[(kind, scope)]
             handler = REGISTRY[kind]
             payload = handler.tfvars(objs)
             # One root == one state (design Arch-2). A firewall's state must not
@@ -689,6 +696,64 @@ def run_drift(
     )
     print(report.summary(), file=out)
     return 0 if (report.is_clean and not drifted) else 3
+
+
+
+def run_apply_order(out_root: Path, *, out=None, err=None) -> int:
+    """Print Terraform root directories in APPLY order (ADR-0002's chain).
+
+    The pipeline consumed `for dir in terraform/*/`, i.e. glob order. On this
+    tenant `device-<serial>` happens to sort before `prod-edge`, so interfaces
+    happened to apply before the routes and rules that depend on them — correct
+    by accident, and it would silently invert on a rename.
+
+    A root's position is the EARLIEST kind it contains: a root holding
+    interfaces must precede one holding zones. Roots with no emitted tfvars are
+    skipped, not ordered, since there is nothing to apply.
+
+    FAILS CLOSED when no total order exists. If root A holds a kind that depends
+    on a kind in root B, while B also holds a kind depending on one in A, no
+    ordering of whole-root applies can satisfy both — that needs per-kind applies
+    and is a real design change, so it is reported rather than papered over with
+    an arbitrary sequence.
+    """
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+
+    order = {k: i for i, k in enumerate(kind_apply_order())}
+    by_file = {h.tfvars_filename: h.kind for h in REGISTRY.values()}
+
+    roots: Dict[str, set] = {}
+    for d in sorted(p for p in out_root.glob("*/") if p.is_dir()):
+        if d.name in ("modules",) or d.name.startswith(("bootstrap-", "github-oidc")):
+            continue
+        kinds = {by_file[f.name] for f in d.glob("*.auto.tfvars.json") if f.name in by_file}
+        if kinds:
+            roots[d.name] = kinds
+
+    if not roots:
+        return 0
+
+    ordered = sorted(roots, key=lambda r: (min(order[k] for k in roots[r]), r))
+    pos = {r: i for i, r in enumerate(ordered)}
+
+    violations = []
+    for root, kinds in roots.items():
+        for kind in kinds:
+            for dep in REGISTRY[kind].depends_on_kinds:
+                for other, other_kinds in roots.items():
+                    if other != root and dep in other_kinds and pos[other] > pos[root]:
+                        violations.append(f"{root}/{kind} needs {dep}, which applies later in {other}")
+    if violations:
+        print("error: no whole-root apply order satisfies the kind dependencies:", file=err)
+        for v in sorted(set(violations)):
+            print(f"  - {v}", file=err)
+        print("  Kinds are interleaved across roots; this needs per-kind applies.", file=err)
+        return 2
+
+    for r in ordered:
+        print(r, file=out)
+    return 0
 
 
 def run_snapshot(
@@ -1246,6 +1311,15 @@ def build_parser() -> argparse.ArgumentParser:
     kd = sub.add_parser("kinds", help="list registered intent kinds (for scripting CI)")
     kd.add_argument("--state-drift", action="store_true",
                     help="only kinds using state-based drift (they cannot carry tags)")
+    kd.add_argument("--order", action="store_true",
+                    help="print kinds in APPLY order (ADR-0002's chain) instead of "
+                         "alphabetically. The apply pipeline consumes this so the "
+                         "sequencing lives in the registry, not in a workflow file.")
+
+    ao = sub.add_parser("apply-order",
+                        help="print Terraform roots in APPLY order (ADR-0002's ordered chain)")
+    ao.add_argument("--out", default=Path("terraform"), type=Path,
+                    help="Terraform root directory (default: terraform)")
 
     sn = sub.add_parser("snapshot",
                         help="read a folder's live objects of one kind from SCM (read-only)")
@@ -1333,11 +1407,27 @@ def main(argv: Optional[List[str]] = None) -> int:
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "kinds":
+        if args.order:
+            # Apply order is NOT sorted afterwards — sorting it would discard the
+            # very thing being asked for.
+            try:
+                ordered = kind_apply_order()
+            except KindOrderError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 1
+            if args.state_drift:
+                state = {h.kind for h in kinds_with_drift_engine("state")}
+                ordered = [k for k in ordered if k in state]
+            for name in ordered:
+                print(name)
+            return 0
         names = ([h.kind for h in kinds_with_drift_engine("state")]
                  if args.state_drift else list(REGISTRY))
         for name in sorted(names):
             print(name)
         return 0
+    if args.command == "apply-order":
+        return run_apply_order(args.out)
     if args.command == "snapshot":
         if bool(args.folder) == bool(args.device):
             print("error: give exactly one of <folder> or --device <serial> — a firewall "

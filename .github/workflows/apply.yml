@@ -127,8 +127,16 @@ jobs:
       - name: terraform apply (stage) + SCM push — per folder
         run: |
           set -euo pipefail
-          for dir in terraform/*/; do
-            folder=$(basename "$dir")
+          # APPLY ORDER comes from the registry (ADR-0002's ordered chain), not
+          # from a glob. `for dir in terraform/*/` was alphabetical: on this
+          # tenant device-<serial> sorts before prod-edge, so interfaces happened
+          # to apply before the routes and rules that depend on them — correct by
+          # accident, and it would silently invert on a rename.
+          #
+          # `apply-order` also FAILS (exit 2) when kinds are interleaved across
+          # roots such that no whole-root order works, rather than picking one.
+          for folder in $(fwgitops apply-order --out terraform); do
+            dir="terraform/$folder/"
             # Skip run-once bootstraps (local state) and the shared module dir.
             case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
             [ -f "$dir/main.tf" ] || continue

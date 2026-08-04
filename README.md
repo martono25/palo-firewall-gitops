@@ -58,7 +58,7 @@ pip install -e '.[dev]'
 fwgitops compile intent --env-map catalog/environments.yaml --out terraform
 fwgitops compile intent --check      # validate only, write nothing
 
-pytest -q                            # 561 tests
+pytest -q                            # 571 tests
 ```
 
 Fail-closed and all-or-nothing: if any intent is invalid, the compiler prints an
@@ -81,12 +81,12 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   tool in the estate), auto-apply at LOW, NIST-mapped evidence bundles, drift detect-and-alert.
 - **Phase 3 — Scale + self-service — NEXT.** Multi-folder, Panorama backend, self-service
   intake, break-glass with automated evidence.
-- **Day-1 as GitOps (ADR-0002) — KINDS PROVEN, ORDERING NOT BUILT.** Every link
-  (`InterfaceRequest` → `ZoneRequest` → `RouteRequest` → `AccessRequest`) is built, and the
-  chain has been run against a live firewall: interfaces addressed, default route active,
-  rules enforcing on real packets. What does NOT exist is the cross-kind ordering that makes
-  it one operation — the chain was sequenced by hand. `ZoneRequest` also never reached the
-  device (the tenant's zones pre-exist and self-attached). See [`TODOS.md`](TODOS.md).
+- **Day-1 as GitOps (ADR-0002) — BUILT.** The ordered chain (`InterfaceRequest` →
+  `ZoneRequest` → `RouteRequest` → `AccessRequest`) is built AND run against a live firewall:
+  interfaces addressed, default route active, rules enforcing on real packets. Ordering is
+  declared in the kind registry and consumed by the apply pipeline (`fwgitops apply-order`).
+  Caveats worth knowing: `ZoneRequest` has never reached a device (this tenant's zones
+  pre-exist and self-attach) and `NatRequest` is deferred to v2.0. See [`TODOS.md`](TODOS.md).
 
 The three questions this project opened with are answered: no commercial firewall-analysis
 tool is owned (classifier built in-house), the pilot is a greenfield SCM folder, and the form

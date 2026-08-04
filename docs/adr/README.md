@@ -6,7 +6,7 @@ the context, the decision, and its consequences at a point in time.
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-multi-kind-intent-model.md) | Multi-kind intent model | Accepted — partially built |
-| [0002](0002-day1-provisioning-thin-bootstrap.md) | Day-1 provisioning: thin bootstrap + ordered config jobs | Accepted — chain proven on hardware; ordering not built |
+| [0002](0002-day1-provisioning-thin-bootstrap.md) | Day-1 provisioning: thin bootstrap + ordered config jobs | Accepted — **built** (ordering included) |
 | [0003](0003-security-rule-component-model.md) | Security-rule component model (App-ID, profiles, forwarding, ordering) | Accepted — built, proven on hardware |
 | [0004](0004-compiler-terraform-contract.md) | The compiler → Terraform contract must be enforced | Accepted — built |
 | [0005](0005-interfacerequest-folder-scope.md) | `InterfaceRequest` targets folder scope via the `$eth-*` variables | Accepted — built |

@@ -3,6 +3,43 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] — 2026-08-04
+
+Cross-kind ordering — the last unbuilt piece of ADR-0002.
+
+### Declared in the registry, not hard-coded
+`KindHandler.depends_on_kinds` states each kind's requirements, and
+`kind_apply_order()` topologically sorts them, tie-broken alphabetically so two
+runs agree. A build that is not reproducible is not ordered, it is lucky.
+
+```
+InterfaceRequest -> ZoneRequest -> RouteRequest -> AccessRequest
+```
+
+### It exists because the chain SPANS ROOTS
+Inside one root Terraform orders by resource reference and does it better —
+`scm_security_rule` already references `scm_zone.this[z].name`. But interfaces
+are DEVICE-scoped while zones, routes and rules are FOLDER-scoped, so they live
+in separate states no single graph covers. That is the whole gap this fills.
+
+### `fwgitops apply-order`
+Prints Terraform roots in dependency order; the apply workflow consumes it.
+Previously it ran `for dir in terraform/*/` — alphabetical. On this tenant
+`device-<serial>` sorts before `prod-edge`, so interfaces happened to apply
+before what depends on them: **correct by accident**, and it would have inverted
+silently on a rename.
+
+### Fails closed, three ways
+A dependency cycle; a dependency naming an unregistered kind; and kinds
+**interleaved across roots** such that no whole-root order satisfies them — that
+last needs per-kind applies, so it exits 2 naming the conflict rather than
+picking a sequence that looks like success.
+
+`fwgitops kinds --order` exposes the chain for scripting. The default remains
+alphabetical, unchanged.
+
+571 tests (+10).
+
 ## [1.16.0] — 2026-08-04
 
 `enrich` narrows to ORDERING only. Terraform owns the fields.

@@ -85,6 +85,17 @@ class KindHandler:
     state_api_path: Optional[str]
     #: Whether `evidence.build_bundle` accepts this kind at all.
     has_evidence: bool
+    #: Kinds that must be APPLIED BEFORE this one (ADR-0002's ordered chain).
+    #: Declared per kind rather than hard-coded in the CLI, for the same reason
+    #: `drift_engine` is: a new kind states its own requirements and the
+    #: sequencing follows, instead of a list somewhere else needing an edit.
+    #:
+    #: This is NOT a substitute for Terraform's graph. Within one root Terraform
+    #: orders by resource reference and does it better. This exists because the
+    #: chain SPANS ROOTS — interfaces are device-scoped, zones/routes/rules are
+    #: folder-scoped, so they live in separate states that no single graph
+    #: covers.
+    depends_on_kinds: Tuple[str, ...] = ()
 
 
 def _rule_classify(compiled: CompiledChange, **ctx: Any) -> Any:
@@ -128,6 +139,10 @@ REGISTRY: Dict[str, KindHandler] = {
         scope_of=lambda c: scope_of_compiled(c.rule),
         name_of=lambda c: c.rule.name,
         classify=_rule_classify,
+        # Rules reference zones. Within a folder Terraform already enforces this
+        # via scm_zone.this[z].name; declared here so the CROSS-ROOT case (rules
+        # in a folder, interfaces on a device) is ordered too.
+        depends_on_kinds=("InterfaceRequest", "ZoneRequest", "RouteRequest"),
         report_prefix="",
         drift_engine="tag",
         state_api_path=None,   # rules use the tag-based engine      # rules carry gitops: provenance tags
@@ -143,6 +158,7 @@ REGISTRY: Dict[str, KindHandler] = {
         scope_of=scope_of_compiled,
         name_of=lambda c: c.name,
         classify=_interface_classify,
+        depends_on_kinds=(),                      # first link in the chain
         report_prefix="interface/",
         drift_engine="state",
         state_api_path="/config/network/v1/ethernet-interfaces",    # scm_ethernet_interface has no `tag` attribute
@@ -160,6 +176,11 @@ REGISTRY: Dict[str, KindHandler] = {
         # is the route's own id, not the router's.
         name_of=lambda c: c.name,
         classify=_route_classify,
+        # A route's VRF owns interfaces, and its next-hop is only reachable once
+        # they are addressed. Zones do not gate routing, but ADR-0002 sequences
+        # them earlier and keeping the declared chain linear is worth more than
+        # the parallelism lost.
+        depends_on_kinds=("InterfaceRequest", "ZoneRequest"),
         report_prefix="route/",
         drift_engine="state",    # scm_logical_router has no `tag` attribute
         state_api_path="/config/network/v1/logical-routers",
@@ -175,6 +196,7 @@ REGISTRY: Dict[str, KindHandler] = {
         scope_of=scope_of_compiled,
         name_of=lambda c: c.name,
         classify=_zone_classify,
+        depends_on_kinds=("InterfaceRequest",),   # a zone binds interfaces
         report_prefix="zone/",
         drift_engine="state",
         state_api_path="/config/network/v1/zones",    # scm_zone has no `tag` attribute
@@ -211,6 +233,71 @@ def compile_any(request: Any, env_map: Any, section: Any = None) -> Any:
     if handler.kind == "AccessRequest" and section is not None:
         return compile_request(request, env_map, section)
     return handler.compile(request, env_map)
+
+
+class KindOrderError(Exception):
+    """The declared kind dependencies do not form a usable order."""
+
+
+def kind_apply_order(registry: Optional[Dict[str, "KindHandler"]] = None) -> List[str]:
+    """Kinds in the order they must be APPLIED — ADR-0002's ordered chain.
+
+    Topological sort over each handler's `depends_on_kinds`, tie-broken
+    alphabetically so the order is DETERMINISTIC. Two runs of the same registry
+    must produce the same sequence, or a Day-1 build is not reproducible and the
+    ordering is decoration.
+
+    Fails closed on a cycle and on a dependency naming an unregistered kind. A
+    silently-dropped edge would order things wrongly while looking like it
+    worked, which is the failure this whole mechanism exists to prevent.
+
+    NOT a replacement for Terraform's graph. Inside one root Terraform orders by
+    resource reference and does it better. This covers what no single graph can:
+    the chain spans ROOTS, because interfaces are device-scoped while zones,
+    routes and rules are folder-scoped, so they live in separate states.
+    """
+    reg = REGISTRY if registry is None else registry
+
+    unknown = {
+        (kind, dep)
+        for kind, h in reg.items()
+        for dep in h.depends_on_kinds
+        if dep not in reg
+    }
+    if unknown:
+        detail = ", ".join(f"{k} -> {d}" for k, d in sorted(unknown))
+        raise KindOrderError(
+            f"kind dependency names an unregistered kind: {detail}. Register it, or "
+            f"the chain silently omits a step it claims to sequence."
+        )
+
+    pending = {k: set(h.depends_on_kinds) for k, h in reg.items()}
+    out: List[str] = []
+    while pending:
+        ready = sorted(k for k, deps in pending.items() if not deps)
+        if not ready:
+            stuck = ", ".join(sorted(pending))
+            raise KindOrderError(
+                f"cycle in kind dependencies among: {stuck}. No apply order exists."
+            )
+        for k in ready:
+            out.append(k)
+            del pending[k]
+        for deps in pending.values():
+            deps.difference_update(ready)
+    return out
+
+
+def scopes_in_apply_order(compiled: List[Any]) -> List[Tuple[str, Any]]:
+    """(kind, Scope) pairs ordered so dependencies apply first.
+
+    What the CLI and the apply pipeline iterate. Kinds with no ordering
+    relationship keep a stable alphabetical scope order, so a diff of two runs
+    shows real changes rather than reshuffling.
+    """
+    order = {k: i for i, k in enumerate(kind_apply_order())}
+    groups = group_by_kind_and_scope(compiled)
+    return sorted(groups, key=lambda ks: (order[ks[0]], ks[1].key))
 
 
 def group_by_kind_and_scope(

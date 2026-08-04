@@ -1,8 +1,8 @@
 # ADR-0002 — Day-1 provisioning: thin bootstrap + ordered config jobs
 
-- **Status:** Accepted — bootstrap built; **every config-job kind in the chain
-  is built and proven on hardware**; the ORDERING that sequences them is not
-  (see "Implementation status (2026-08-04)")
+- **Status:** Accepted — **BUILT**. Bootstrap, every config-job kind (proven on
+  hardware), and the cross-kind ordering that sequences them. `NatRequest`
+  remains deferred to v2.0; `ZoneRequest` has still never reached a device.
 - **Date:** 2026-07-27 (status revised 2026-07-31, again 2026-08-04)
 - **Deciders:** Martono, Claude
 
@@ -210,3 +210,41 @@ one ordered operation — does not exist yet; a human sequences it. That is the
 difference between "the parts are built" and "Day-1 provisioning is a thing you
 can run", and it is the last item in this ADR that is neither done nor
 deliberately deferred.
+
+## Ordering built (2026-08-04, v1.17.0)
+
+"Cross-kind dependency ordering — the real engineering" is now built, which
+closes the last item in this ADR that was neither done nor deferred.
+
+**Declared in the registry, not hard-coded.** Each `KindHandler` carries
+`depends_on_kinds`, so a new kind states its own requirements and the sequencing
+follows — the same reasoning that put `drift_engine` there. `kind_apply_order()`
+topologically sorts them, tie-broken alphabetically so two runs of the same
+registry produce the same sequence. A build that is not reproducible is not
+ordered, it is merely lucky.
+
+```
+InterfaceRequest -> ZoneRequest -> RouteRequest -> AccessRequest
+```
+
+**It exists because the chain SPANS ROOTS.** Inside one root Terraform orders by
+resource reference and does it better — `scm_security_rule` already references
+`scm_zone.this[z].name`. But interfaces are DEVICE-scoped while zones, routes and
+rules are FOLDER-scoped, so they live in separate states that no single graph
+covers. That is the gap this fills, and it is the whole gap.
+
+**`fwgitops apply-order`** prints Terraform roots in that order, and the apply
+workflow consumes it. It previously ran `for dir in terraform/*/` — alphabetical.
+On this tenant `device-<serial>` sorts before `prod-edge`, so interfaces happened
+to apply before what depends on them: correct by accident, and it would have
+silently inverted on a rename.
+
+**Fails closed, three ways.** A dependency cycle, a dependency naming an
+unregistered kind, and — the interesting one — kinds INTERLEAVED across roots
+such that no whole-root order can satisfy them. That last case needs per-kind
+applies and is a real design change, so it exits 2 with the conflicting pair
+named rather than picking an arbitrary sequence that looks like success.
+
+**Still true, and not addressed here:** `ZoneRequest` has never reached hardware
+(this tenant's zones pre-exist and self-attach), and `NatRequest` is deferred.
+Ordering does not change either.
