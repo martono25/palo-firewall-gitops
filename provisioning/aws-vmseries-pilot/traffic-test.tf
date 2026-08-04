@@ -116,9 +116,34 @@ resource "aws_instance" "untrust_target" {
 
     # Serve something identifiable so a successful fetch cannot be confused with
     # a cached or local response.
-    dnf install -y python3 >/dev/null 2>&1
-    echo "FWGITOPS-TARGET-OK" > /tmp/index.html
-    cd /tmp && nohup python3 -m http.server 80 >/dev/null 2>&1 &
+    #
+    # A systemd unit, NOT `nohup ... &` from user-data: cloud-init reaps its
+    # children when the script exits, so the backgrounded server died with it and
+    # the port was never open. curl then returned 000, which is indistinguishable
+    # from the firewall blocking the connection — and sent me looking at the
+    # firewall for a fault that was in this file.
+    #
+    # No dnf: this host has no route to the internet (no public IP), so package
+    # installation cannot work. python3 ships with AL2023.
+    echo "FWGITOPS-TARGET-OK" > /var/www-index/index.html 2>/dev/null || {
+      mkdir -p /var/www-index && echo "FWGITOPS-TARGET-OK" > /var/www-index/index.html
+    }
+    cat > /etc/systemd/system/fwgitops-target.service <<'UNIT'
+    [Unit]
+    Description=fwgitops traffic-proof target
+    After=network-online.target
+    [Service]
+    WorkingDirectory=/var/www-index
+    ExecStart=/usr/bin/python3 -m http.server 80
+    Restart=always
+    [Install]
+    WantedBy=multi-user.target
+UNIT
+    sed -i 's/^    //' /etc/systemd/system/fwgitops-target.service
+    systemctl daemon-reload
+    systemctl enable --now fwgitops-target.service
+    sleep 3
+    ss -lntp | grep ':80' > /dev/console 2>&1 || echo "PORT 80 NOT LISTENING" > /dev/console
   EOT
 
   tags = { Name = "${var.project}-untrust-target", Project = var.project }
