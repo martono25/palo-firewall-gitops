@@ -107,6 +107,13 @@ resource "aws_instance" "untrust_target" {
 
   user_data = <<-EOT
     #!/bin/bash
+    # HOST ROUTE for the RETURN path. The firewall's untrust interface
+    # (10.100.2.142) is in THIS subnet, so it is reachable by ARP and can be a
+    # next-hop directly — no VPC route table involved. Without this the reply
+    # goes back via the AWS router and the firewall sees a one-way flow.
+    ip route replace 10.100.3.0/24 via 10.100.2.142 dev ens5
+    ip route show > /dev/console 2>&1
+
     # Serve something identifiable so a successful fetch cannot be confused with
     # a cached or local response.
     dnf install -y python3 >/dev/null 2>&1
@@ -131,6 +138,24 @@ resource "aws_instance" "trust_client" {
   user_data = <<-EOT
     #!/bin/bash
     exec > /dev/console 2>&1
+
+    # HOST ROUTE — the point of this revision.
+    #
+    # Both hosts default to the AWS VPC router (10.100.3.1 / 10.100.2.1), so the
+    # earlier design leaned entirely on a VPC route table redirecting
+    # 10.100.2.0/24 to the firewall's ENI. That redirect never delivered: over 11
+    # attempts ethernet1/4 moved ONE packet and every rule, including
+    # interzone-default, stayed at zero hits.
+    #
+    # The firewall's trust interface (10.100.3.125) is in THIS subnet, so it can
+    # be a next-hop directly by ARP. That takes the VPC route table out of the
+    # path entirely rather than needing to understand why it did not work.
+    # source_dest_check is already false on the firewall ENIs, which is what
+    # lets it forward traffic not addressed to itself.
+    ip route replace 10.100.2.0/24 via 10.100.3.125 dev ens5
+    echo "=== ROUTES ==="; ip route show
+    echo "=== next hop for the target ==="; ip route get 10.100.2.200
+
     sleep 45
     echo "=== FWGITOPS TRAFFIC TEST: 10.100.3.200 -> 10.100.2.200 via the firewall ==="
     # Runs long enough to observe live on the firewall (session table, rule hit
