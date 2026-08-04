@@ -143,8 +143,27 @@ resource "scm_security_rule" "this" {
   # has not been tested, and it does not need to ride along with the field fix
   # below, which is what closes the profile_setting gap.
   #
-  # Wire it in its own change, after probing "move an EXISTING rule" rather than
-  # "create a rule in position".
+  # PROBED 2026-08-04 (spike/ordering-existing) and the answer is DO NOT WIRE IT.
+  # A first-time add of relative_position="bottom" RE-STACKS the rulebase:
+  #
+  #   before: charlie, bravo, alpha
+  #   after:  alpha, charlie, bravo
+  #
+  # and not into for_each order either (alphabetical would be alpha, bravo,
+  # charlie) — each move-to-bottom lands in whatever order Terraform processes
+  # the map, which is not a guaranteed stable ordering. The plan shows only
+  # `+ relative_position = "bottom"`, so policy is rewritten silently.
+  #
+  # The mechanism itself is fine: a no-change value is a no-op, and changing the
+  # value moves the rule cleanly. It is the compiler's BLANKET DEFAULT that is
+  # unsafe. Wiring this needs the compiler to emit relative_position only when
+  # the intent explicitly asked for a position, which the intent model cannot
+  # express today (`position` defaults to "bottom", so "unspecified" and
+  # "deliberately bottom" are the same value).
+  #
+  # NOTE Terraform also cannot SEE ordering drift: relative_position is a
+  # create/update instruction, not a stored property, so a rule reordered
+  # out-of-band produces `No changes` on the next plan.
 
   # `target_rule` is DELIBERATELY NOT WIRED, and cannot be from here.
   #

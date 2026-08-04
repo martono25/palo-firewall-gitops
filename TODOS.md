@@ -305,14 +305,35 @@ anchored move needs `target_rule` as the anchor's UUID, i.e.
 `scm_security_rule.this[<key>].id`, and that self-reference inside one `for_each`
 block gives `Error: Cycle`.
 
-**Remaining, and it needs its own probe:** `position` / `relative_position` are
-honoured on CREATE but are not wired, because the compiler defaults every rule to
-`bottom` and wiring them would issue a move for five live rules at once. Rule
-order is policy. Probe "move an EXISTING rule" before wiring — the create-time
-result already verified does not answer it.
+**PROBED 2026-08-04 (`spike/ordering-existing`) — the answer is DO NOT WIRE IT.**
+A first-time add of `relative_position = "bottom"` RE-STACKS the rulebase:
 
-**Effort:** M
-**Priority:** P2 (v2.0)
+```
+before: charlie, bravo, alpha
+after:  alpha, charlie, bravo
+```
+
+and not even into for_each order (alphabetical would be `alpha, bravo, charlie`).
+Each rule's move-to-bottom lands in whatever order Terraform processes the map,
+which is not a guaranteed stable ordering — two runs need not agree. The plan
+shows only `+ relative_position = "bottom"`, so policy is rewritten silently.
+
+Supporting: a NO-CHANGE value is a no-op (`No changes`, Terraform does not act),
+and changing the value DOES move the rule cleanly. So the mechanism is fine; the
+blanket default is what is unsafe.
+
+Also found: **Terraform cannot see ordering drift.** `relative_position` is a
+create/update instruction, not a stored property, so a rule moved out-of-band
+produces `No changes` on the next plan. Reordering by hand is neither detected
+nor corrected.
+
+**To wire this later**, the compiler must emit `relative_position` ONLY when the
+intent explicitly asked for a position. It cannot today: `position` defaults to
+`bottom`, so "unspecified" and "deliberately bottom" are the same value. That
+distinction has to exist in the intent model first.
+
+**Effort:** M — intent-model change, not a Terraform change.
+**Priority:** P3 — ordering works via `enrich`; this is only about moving it. (v2.0)
 **Depends on:** its own fidelity probe.
 
 ### Reject a malformed Terraform root instead of best-effort parsing
