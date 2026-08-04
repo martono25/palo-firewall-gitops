@@ -79,7 +79,14 @@ resource "aws_route_table_association" "dataplane" {
 }
 
 # untrust ($eth-internet) faces the internet, so it takes the public route.
+#
+# SUPERSEDED while the traffic test runs: a subnet may have exactly ONE route
+# table association, and the test needs untrust on its own table carrying a
+# return route to trust via the firewall. Putting that return route on the
+# SHARED public table instead would divert mgmt->trust traffic through the
+# firewall too, which is not what is under test.
 resource "aws_route_table_association" "untrust" {
+  count          = var.enable_traffic_test ? 0 : 1
   subnet_id      = aws_subnet.untrust.id
   route_table_id = aws_route_table.public.id
 }
