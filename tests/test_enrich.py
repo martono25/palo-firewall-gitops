@@ -31,28 +31,6 @@ def _rule(name="R", *, application=("any",), profile_group=None, log_setting=Non
     )
 
 
-def test_enrich_sets_v1_fields():
-    r = _rule("R", action="drop", source_user=("corp\\bob",), category=("gambling",),
-              negate_source=True, log_start=True, description="blocklist")
-    c = FakeRuleClient({"R": "id1"})
-    enrich_folder(c, "prod-edge", [_change(r)])
-    (_, body), = c.updates
-    assert body["action"] == "drop"                 # re-asserted (drop/reset guaranteed)
-    assert body["source_user"] == ["corp\\bob"]
-    assert body["category"] == ["gambling"]
-    assert body["negate_source"] is True and body["negate_destination"] is False
-    assert body["log_start"] is True
-    assert body["description"] == "blocklist"
-
-
-def test_enrich_omits_description_when_none():
-    c = FakeRuleClient({"R": "id1"}, current={"id1": {"id": "id1", "name": "R",
-                                                      "description": "existing"}})
-    enrich_folder(c, "prod-edge", [_change(_rule("R", description=None))])
-    (_, body), = c.updates
-    assert body["description"] == "existing"   # opt-in: preserved, not cleared
-
-
 def _change(rule):
     return CompiledChange(address_objects=[], service_objects=[], rule=rule)
 
@@ -80,41 +58,7 @@ class FakeRuleClient:
 
 
 # ── the four dropped fields get set ────────────────────────────────────────
-def test_enrich_sets_all_fields():
-    r = _rule("R", application=("ssl", "web-browsing"),
-              profile_group="best-practice", log_setting="log-best")
-    c = FakeRuleClient({"R": "id1"})
-    res = enrich_folder(c, "prod-edge", [_change(r)])
-    (rid, body), = c.updates
-    assert rid == "id1"
-    assert body["application"] == ["ssl", "web-browsing"]
-    assert body["profile_setting"] == {"group": ["best-practice"]}
-    assert body["log_setting"] == "log-best"
-    assert res.records[0].name == "R"
-
-
-def test_server_only_keys_stripped_from_put():
-    c = FakeRuleClient({"R": "id1"}, current={"id1": {"id": "id1", "tfid": "x", "name": "R"}})
-    enrich_folder(c, "prod-edge", [_change(_rule("R", profile_group="best-practice"))])
-    (_, body), = c.updates
-    assert "id" not in body and "tfid" not in body
-
-
 # ── opt-in fields are NON-DESTRUCTIVE when the intent omits them ────────────
-def test_omitted_optin_fields_preserve_current():
-    r = _rule("R", log_setting=None, profile_group=None)  # neither declared
-    c = FakeRuleClient({"R": "id1"}, current={"id1": {
-        "id": "id1", "name": "R",
-        "log_setting": "Cortex Data Lake",
-        "profile_setting": {"group": ["existing"]},
-    }})
-    enrich_folder(c, "prod-edge", [_change(r)])
-    (_, body), = c.updates
-    assert body["log_setting"] == "Cortex Data Lake"          # preserved, not cleared
-    assert body["profile_setting"] == {"group": ["existing"]}  # preserved
-    assert body["application"] == ["any"]                      # declared default, always set
-
-
 # ── ordering ───────────────────────────────────────────────────────────────
 def test_top_issues_move():
     c = FakeRuleClient({"R": "id1"})
@@ -155,14 +99,6 @@ def test_missing_rule_fails_closed():
 
 
 # ── idempotent ─────────────────────────────────────────────────────────────
-def test_idempotent_put_body():
-    r = _rule("R", application=("ssl",), profile_group="best-practice", log_setting="log-best")
-    c = FakeRuleClient({"R": "id1"})
-    enrich_folder(c, "prod-edge", [_change(r)])
-    enrich_folder(c, "prod-edge", [_change(r)])
-    assert c.updates[0][1] == c.updates[1][1]
-
-
 def test_evidence_shape():
     r = _rule("R", application=("ssl",), profile_group="best-practice",
               log_setting="log-best", relative_position="top")
@@ -228,3 +164,45 @@ def test_client_move_before_includes_target():
     ScmRuleClient(s).move_rule("u1", destination="before", rulebase="pre", target="u2")
     _, _, body = s.calls[-1]
     assert body["destination_rule"] == "u2"
+
+
+# ── v1.16.0: Terraform owns the FIELDS, enrich owns ORDERING ───────────────
+def test_enrich_no_longer_writes_the_fields_terraform_owns():
+    """Regression guard on a deliberate narrowing.
+
+    enrich existed because the provider accepted `application` /
+    `profile_setting` / `log_setting` / `source_user` / `category` / `negate_*` /
+    `log_start` / `description` and silently discarded them (ADR-0003). Provider
+    1.0.12-beta.4 writes them and the module wires them, so enrich writing them
+    too would make TWO writers for one field — the ambiguity that produced the
+    profile_setting P1.
+
+    A redundant write is not harmless: it would silently repair a field
+    Terraform failed to set, so the regression would never surface.
+    """
+    r = _rule("R", application=("ssl",), profile_group="best-practice",
+              log_setting="log-best", source_user=("corp\\bob",), description="x")
+    c = FakeRuleClient({"R": "id1"})
+    enrich_folder(c, "prod-edge", [_change(r)])
+    assert c.updates == [], (
+        "enrich must not PUT rule fields — Terraform owns them since v1.16.0")
+
+
+def test_enrich_still_orders():
+    """The half Terraform CANNOT do: an anchored move needs the target's UUID,
+    and `scm_security_rule.this[<key>].id` inside one for_each block is a
+    self-reference Terraform rejects with `Error: Cycle`."""
+    anchor = _rule("ANCHOR")
+    mover = _rule("MOVER", relative_position="before", target_rule="ANCHOR")
+    c = FakeRuleClient({"ANCHOR": "id1", "MOVER": "id2"})
+    res = enrich_folder(c, "prod-edge", [_change(anchor), _change(mover)])
+    assert c.moves, "enrich must still issue the move"
+    assert any(rec.name == "MOVER" and rec.moved for rec in res.records)
+
+
+def test_enrich_still_fails_closed_on_a_missing_rule():
+    """The existence check is load-bearing and survives the narrowing: enrich
+    must never run against a folder whose skeleton did not apply."""
+    c = FakeRuleClient({})           # nothing staged
+    with pytest.raises(EnrichError, match="not found in folder"):
+        enrich_folder(c, "prod-edge", [_change(_rule("R"))])

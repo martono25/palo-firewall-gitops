@@ -3,6 +3,39 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.16.0] — 2026-08-04
+
+`enrich` narrows to ORDERING only. Terraform owns the fields.
+
+### One writer per field
+v1.15.0 wired `application`, `profile_setting`, `log_setting`, `source_user`,
+`category`, `negate_*`, `log_start` and `description` into the module, on
+provider 1.0.12-beta.4. `enrich` was still writing all of them too.
+
+Two writers for one field is the ambiguity that produced the `profile_setting`
+P1 in the first place. And the redundant write is not harmless: it would
+**silently repair a field Terraform failed to set**, so a regression in the
+module would never surface — the pipeline would stay green while the mechanism
+that is supposed to be authoritative had stopped working.
+
+Pass 1 of `enrich_folder` no longer PUTs. `_merged_body` is deleted rather than
+left as authoritative-looking dead code.
+
+### What stays, and why it cannot move
+Before/after ordering. An anchored move needs the anchor's UUID —
+`scm_security_rule.this[<key>].id` — which inside a single `for_each` block is a
+self-reference Terraform rejects with `Error: Cycle`. A Terraform limitation,
+not a provider one: the SCM move endpoint works when given the UUID.
+
+`top` / `bottom` need no anchor and are honoured through `relative_position`.
+
+### Kept deliberately
+The fail-closed existence check. `enrich` must never run against a folder whose
+skeleton did not apply, and that guard is independent of what it writes.
+
+561 tests — six that asserted `enrich` PUTs those fields are replaced by three
+asserting it does NOT, that it still orders, and that it still fails closed.
+
 ## [1.15.0] — 2026-08-04
 
 Adopts scm provider **1.0.12-beta.4**, which writes the security-rule fields
