@@ -13,7 +13,7 @@ terraform {
   required_providers {
     scm = {
       source  = "PaloAltoNetworks/scm"
-      version = "~> 1.0" # 1.0.11 in the Part-A spike
+      version = "1.0.12-beta.4" # PRE-RELEASE, pinned exactly
     }
   }
 }

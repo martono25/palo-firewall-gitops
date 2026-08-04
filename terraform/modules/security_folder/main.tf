@@ -109,14 +109,61 @@ resource "scm_security_rule" "this" {
   # never reverts enrich's value.
   application = each.value.application
 
-  # The rest of the ADR-0003 enrichment — profile_setting / log_setting / ordering
-  # — is deliberately NOT wired here. The scm provider (v1.0.11 AND 1.0.12-beta.3)
-  # silently DROPS these on security rules (accepts them in config, treats them as
-  # computed, never writes them — verified live 2026-07-28). Wiring them only
-  # produced churn (e.g. a log_setting -> null clobber diff) with no on-device
-  # effect. `fwgitops enrich` sets them via the SCM API post-apply / pre-push (same
-  # candidate, so the push commits skeleton + enrichment atomically). See
-  # docs/adr/0003 + src/fwgitops/enrich.py.
+  # ── ADR-0003 enrichment, WIRED since provider 1.0.12-beta.4 ─────────────
+  # v1.0.11 and 1.0.12-beta.3 accepted these and silently dropped them, which is
+  # why `fwgitops enrich` existed. beta.4 writes them — verified in
+  # spike/provider-beta4 by writing each and reading it back from SCM.
+  #
+  # `category` and `source_user` are set EXPLICITLY, following the provider's own
+  # scm_security_rule example. Omission is not "leave alone": source_user is
+  # optional-NOT-computed, so absent config means REMOVE, which is what made
+  # every prod-edge plan want to null it.
+  description        = each.value.description
+  log_start          = each.value.log_start
+  source_user        = each.value.source_user
+  category           = each.value.category
+  negate_source      = each.value.negate_source
+  negate_destination = each.value.negate_destination
+
+  log_setting = each.value.log_setting
+
+  # The provider takes a nested object; the compiler carries a single group name.
+  profile_setting = each.value.profile_group == null ? null : {
+    group = [each.value.profile_group]
+  }
+
+  # ORDERING IS DELIBERATELY NOT WIRED YET, and not because it does not work.
+  # `position` (the rulebase, pre|post) and `relative_position` (top|bottom|
+  # before|after) are both honoured by beta.4 — verified in spike/beta4-ordering.
+  #
+  # The hazard is applying them to rules that ALREADY EXIST. The compiler
+  # defaults every rule to relative_position="bottom", so wiring it would send a
+  # move for five live rules at once, and rule order IS policy: a permissive rule
+  # above a deny is a different firewall. What that does to an existing rulebase
+  # has not been tested, and it does not need to ride along with the field fix
+  # below, which is what closes the profile_setting gap.
+  #
+  # Wire it in its own change, after probing "move an EXISTING rule" rather than
+  # "create a rule in position".
+
+  # `target_rule` is DELIBERATELY NOT WIRED, and cannot be from here.
+  #
+  # The provider wants a UUID — "UUID of the rule to position this rule relative
+  # to" — so the compiler's anchor rule KEY would have to resolve to
+  # `scm_security_rule.this[<key>].id`. That is a self-reference inside this very
+  # for_each block, and Terraform rejects it:
+  #
+  #   Error: Cycle: module.security_folder.scm_security_rule.this["REQ-..."],
+  #                 module.security_folder.scm_security_rule.this["REQ-..."], ...
+  #
+  # `top` / `bottom` need no anchor and ARE honoured through relative_position
+  # above. Only before/after ordering is affected, and it stays with
+  # `fwgitops enrich`, which resolves the anchor to a UUID over REST after apply.
+  #
+  # Do not "fix" this by passing the anchor's NAME: the move then 404s with
+  # "Failed to find obj-uuid" WHILE THE APPLY REPORTS SUCCESS, so the rule lands
+  # in the wrong position and the pipeline stays green (verified,
+  # spike/beta4-ordering).
 }
 
 # ── Zones (ZoneRequest, ADR-0001 kind #2) ─────────────────────────────────

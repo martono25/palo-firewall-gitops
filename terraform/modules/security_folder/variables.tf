@@ -52,6 +52,16 @@ variable "security_rules" {
     rulebase          = optional(string, "pre")
     relative_position = optional(string, "bottom") # top|bottom|before|after
     target_rule       = optional(string)      # anchor for before/after
+    # ── v1.0 rule completeness ──
+    # Set explicitly, per the provider's own scm_security_rule example. Omitting
+    # `category` / `source_user` is not "leave alone": the provider models
+    # source_user as optional-NOT-computed, so absent config means REMOVE.
+    description        = optional(string)
+    log_start          = optional(bool, false)
+    source_user        = optional(list(string), ["any"])
+    category           = optional(list(string), ["any"])
+    negate_source      = optional(bool, false)
+    negate_destination = optional(bool, false)
   }))
   default = {}
 }

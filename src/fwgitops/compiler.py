@@ -351,6 +351,16 @@ def _rule_dict(r: SecurityRule) -> Dict[str, Any]:
         "rulebase": r.rulebase,
         "relative_position": r.relative_position,
         "target_rule": r.target_rule,
+        # Emitted since v1.15.0 (provider 1.0.12-beta.4 writes them). The
+        # registry example for scm_security_rule sets category and source_user
+        # EXPLICITLY; leaving them out is what made Terraform want to null them
+        # on every plan against prod-edge.
+        "description": r.description,
+        "log_start": r.log_start,
+        "source_user": list(r.source_user),
+        "category": list(r.category),
+        "negate_source": r.negate_source,
+        "negate_destination": r.negate_destination,
     }
 
 

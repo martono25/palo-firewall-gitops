@@ -3,6 +3,46 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] — 2026-08-04
+
+Adopts scm provider **1.0.12-beta.4**, which writes the security-rule fields
+1.0.11 silently dropped — closing a live security gap.
+
+### The gap
+Every `prod-edge` plan wanted to change five rules with no pending intent
+change. `source_user` is optional-NOT-computed, so absent config meant REMOVE,
+and `REQ-2026-07302` carried `profile_setting={group: [best-practice]}`. An
+untargeted apply would have cleared it: the rule keeps allowing `ssl`/
+`web-browsing` outbound and **stops inspecting it**. The plan called that
+`(known after apply)`.
+
+### The fix came from the provider's own example
+It sets `category = ["any"]` and `source_user = ["any"]` EXPLICITLY. Omission is
+not "leave alone". The intent model already carried both; the compiler simply
+did not emit them.
+
+Now wired: `log_setting`, `profile_setting`, `description`, `log_start`,
+`source_user`, `category`, `negate_source`, `negate_destination`. `prod-edge`
+plans clean — `0 to change` on the rules, verified on the device that
+`best-practice` and both log profiles survived.
+
+### Pinned EXACTLY, because it is a pre-release
+`version = "1.0.12-beta.4"`, not `~> 1.0`. A floating constraint would drift off
+a pre-release in either direction without anyone choosing to.
+
+### Still with `enrich`, and why
+Before/after ordering. An anchored move needs `target_rule` as the anchor's
+UUID, which inside one `for_each` block is `scm_security_rule.this[<key>].id` —
+a self-reference Terraform rejects with `Error: Cycle`. `enrich` resolves it
+over REST after apply.
+
+`position` / `relative_position` are honoured by the provider but deliberately
+NOT wired yet: the compiler defaults every rule to `bottom`, so wiring them
+would move five live rules at once, and rule order is policy. Needs its own
+probe of "move an EXISTING rule".
+
+564 tests.
+
 ## [1.14.0] — 2026-08-03
 
 `interface:` names a ROLE, resolved per scope by `catalog/interfaces.yaml`.

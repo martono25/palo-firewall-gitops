@@ -130,3 +130,48 @@ bundle is the full audit record, not just the skeleton.
   commit-time failure the catalog exists to prevent).
 - Deferred (not in this ADR): richer `action` (drop/reset-*), User-ID
   (`source_user`), URL `category`, negation, `policy_type`, HIP, `description`.
+
+## Addendum (2026-08-04, v1.15.0) — the provider defect is fixed; `enrich` narrows
+
+The premise of this ADR was that the scm provider ACCEPTS `application`,
+`profile_setting`, `log_setting` and ordering on `scm_security_rule`, reports
+success, and never writes them — confirmed on v1.0.11 and v1.0.12-beta.3. That is
+why `src/fwgitops/enrich.py` exists.
+
+**v1.0.12-beta.4 writes them.** Verified by writing each and reading it back from
+SCM (`spike/provider-beta4`), and ordering separately (`spike/beta4-ordering`).
+The roots are pinned to that version **exactly** — it is a pre-release, so a
+floating `~> 1.0` constraint would silently move off it in either direction.
+
+The module now wires `log_setting`, `profile_setting`, `description`,
+`log_start`, `source_user`, `category`, `negate_source`, `negate_destination`.
+
+**This fixed a live security gap.** With those fields unwired, every `prod-edge`
+plan wanted to change five rules — and `source_user` is optional-NOT-computed, so
+absent config meant REMOVE. `REQ-2026-07302` carried
+`profile_setting={group: [best-practice]}`, and an untargeted apply would have
+cleared it: the rule keeps allowing `ssl`/`web-browsing` outbound and stops
+inspecting it. The plan described that only as `(known after apply)`.
+
+The fix came from the provider's own documented example, which sets
+`category = ["any"]` and `source_user = ["any"]` EXPLICITLY. Omission is not
+"leave alone". After wiring, `prod-edge` plans clean:
+`0 to add, 0 to change, 0 to destroy` for the rules.
+
+**What `enrich` still owns:** before/after ordering. `top`/`bottom` work through
+`relative_position`, but an anchored move needs `target_rule` as the anchor's
+UUID, which from inside a single `for_each` block means
+`scm_security_rule.this[<key>].id` — a self-reference Terraform rejects:
+
+```
+Error: Cycle: module.security_folder.scm_security_rule.this["REQ-..."], ...
+```
+
+`enrich` resolves the anchor over REST after apply, which has no such
+constraint.
+
+**Not yet wired, deliberately:** `position` / `relative_position` on EXISTING
+rules. Both are honoured on create, but the compiler defaults every rule to
+`bottom`, so wiring them would issue a move for five live rules at once. Rule
+order is policy. That needs its own probe — "move an existing rule", not "create
+a rule in position" — and its own change.
