@@ -112,7 +112,10 @@ resource "scm_security_rule" "charlie" {
   # documents for the real rules.
   application       = ["any"]
   relative_position = "before"
-  target_rule       = scm_security_rule.alpha.name
+  # UUID, NOT the name — the docs are explicit: "UUID of the rule to position
+  # this rule relative to". Passing a name yields a move 404 whose message
+  # ("Failed to find obj-uuid for command get") describes exactly that.
+  target_rule       = scm_security_rule.alpha.id
 
   depends_on = [scm_security_rule.bravo]
 }

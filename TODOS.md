@@ -281,11 +281,182 @@ it reads `(known after apply)`.
 **This is exactly the ADR-0003 conflict:** `enrich` set the field over REST, the
 module does not manage it, and Terraform's write drops it.
 
-**Direction, now that 1.0.12-beta.4 writes these fields** (see
-`spike/provider-beta4`): let the compiler own `profile_setting` and `log_setting`
-directly and retire that part of `enrich`, which removes the conflict at its
-root. Until then, apply prod-edge with `-target`, or add
-`lifecycle { ignore_changes = [profile_setting] }`.
+**Direction — and the provider docs give a simpler fix than either workaround.**
+The documented `scm_security_rule` example sets these EXPLICITLY:
+
+```hcl
+category    = ["any"]
+source_user = ["any"]
+position    = "pre"
+```
+
+The intent model already carries both (`Spec.category` / `Spec.source_user`,
+defaulting to `["any"]`), and the compiler simply does not emit them. Emitting
+them and wiring them removes the drift at its source — no `-target`, no
+`ignore_changes`. Do that together with letting the compiler own
+`profile_setting` / `log_setting` on beta.4.
+
+Until then, apply prod-edge with `-target`.
+
+**Effort:** M
+**Priority:** P1 — one live rule loses threat inspection on the next untargeted
+apply.
+
+### `fwgitops enrich` may be retirable — 1.0.12-beta.4 writes what 1.0.11 drops
+
+ADR-0003 exists because the provider ACCEPTS `application`, `profile_setting`
+and `log_setting`, reports success, and never writes them — confirmed on v1.0.11
+and v1.0.12-beta.3. **v1.0.12-beta.4 writes all three**, verified in `GitOps`
+(`spike/provider-beta4`):
+
+```
+WRITTEN  application:     ['web-browsing']
+WRITTEN  log_setting:     'Cortex Data Lake'
+WRITTEN  profile_setting: {'group': ['best-practice']}
+```
+
+So the workaround `src/fwgitops/enrich.py` embodies may no longer be needed, and
+the compiler could own these fields — which also fixes the P1 above at its root.
+
+**Ordering is PROBED and also works** (`spike/beta4-ordering`). Three rules
+created in one order, requesting another:
+
+```
+created   : alpha, bravo, charlie
+requested : bravo (top), charlie (before alpha), alpha (bottom)
+ACTUAL    : bravo, charlie, alpha        <- fully honoured
+```
+
+`top`, `bottom`, `before` + `target_rule` all land correctly, with no move
+failure and no warning.
+
+**Correction.** The first run of this probe reported `before` failing with a move
+404 ("Failed to find obj-uuid for command get") inside a green apply, and I
+attributed it to the provider. That was MY bug: I passed `target_rule` a rule
+NAME. The registry docs are explicit — *"UUID of the rule to position this rule
+relative to"* — and the error message said so plainly. With
+`target_rule = scm_security_rule.<x>.id` it works.
+
+**Implication for wiring it up:** the compiler emits `target_rule` as a rule
+KEY, so the module must resolve it to `scm_security_rule.this[<key>].id`, not
+pass the name through. A name silently produces the 404-inside-a-green-apply
+described above, so the resolution is load-bearing.
+
+**So beta.4 covers all four** — `application`, `log_setting`, `profile_setting`
+AND ordering — and `enrich` may be retirable outright rather than in part. It is
+still a PRE-RELEASE; that is now the only reservation, not a capability gap.
+
+**Effort:** L
+**Priority:** P2 (v2.0)
+**Depends on:** its own fidelity probe.
+
+### `push` no-op detection never fires — repeat pushes create empty commit jobs
+
+**What:** `push_folder` returns `status="noop"` when SCM says there is nothing to
+push (`_NOTHING_TO_PUSH` matches the error text). Against the live tenant on
+2026-08-03, pushing a device with **nothing staged** returned a normal job id
+(128) with `result_str=OK` and details identical to the real push (126) —
+"Configuration committed successfully" — rather than an error. So the noop path
+is unreachable on this code path and every push looks like it did work.
+
+**Why it matters:** CI that pushes on every merge will mint an empty
+CommitAndPush job each time, and the evidence bundle records `status="success"`
+for a push that changed nothing. It also means "did my push actually commit
+something?" cannot be answered from the job record — both jobs are
+byte-identical apart from the id.
+
+**It also cannot tell you the DEVICE has the change.** Measured 2026-08-03: the
+push job returned `FIN`/`OK` "Configuration committed successfully" while the
+firewall's running config still showed the previous address. The new value
+appeared **38 seconds later**. So a verification that reads the device
+immediately after a successful push reads STALE config and reports success — the
+failure mode is a false green, not an error.
+
+Anything asserting "the change is live" must poll the device until it agrees,
+not trust the job. `spike/`-style readbacks in this repo now do exactly that.
+
+**Direction:** compare the candidate before/after, or diff config versions, and
+derive noop from that rather than from an error string. Worth checking whether
+the folder path behaves the same way (it may have been noop-detected only
+because a *different* error was returned).
+
+**Effort:** M
+**Priority:** P2
+
+### Pilot firewall: mgmt plane exposed, and no ENI behind the data interfaces
+
+Two findings from reading the device directly on 2026-08-03 (SSH + `show`).
+
+**1. Management plane is internet-facing.** Security group
+`sg-0b9a1d2428028e4b9` allows **443 from `0.0.0.0/0`** — the PAN-OS web UI and
+API, the interface that owns the device. Port 22 is correctly limited to
+RFC1918. The firewall reported **98 failed admin logins since last successful
+login**, so this is being probed, not merely exposed. Narrow 443 to known egress.
+**Priority: P1.**
+
+**2. The data interfaces have no physical backing.** `show interface hardware`
+reports only `ethernet1/3` and `ethernet1/4`, both `down` with MAC
+`00:00:00:00:00:00`. The EC2 instance has two ENIs — index 0 `10.100.0.51`
+(mgmt) and index 1 `10.100.1.37` — and neither shows up as an up PAN-OS
+dataplane interface.
+
+So `REQ-2026-0801` is genuinely live in the running config
+(`ethernet1/4 … 10.20.0.1/24`, zone `local`, `lr:default`) but sits on an
+interface that **cannot pass traffic**. The GitOps chain is proven; the lab
+topology is not wired. Attaching ENIs, or re-mapping the `$eth-*` folder
+variables to an interface that has one, is a prerequisite for any traffic-level
+test. **Priority: P2** (does not block the GitOps work, does block proving
+traffic).
+
+### prod-edge apply would CLEAR profile_setting on REQ-2026-07302 — P1
+
+**Corrected 2026-08-04.** The first version of this entry claimed an untargeted
+apply would strip `category` and `source_user` from five live rules. That was
+wrong, and partly a misreading of my own truncated plan output. Tested rather
+than reasoned:
+
+| attribute | computed? | omitted from config → |
+|---|---|---|
+| `log_setting` | yes | **survives** (verified on 1.0.11 AND 1.0.12-beta.4) |
+| `profile_setting` | yes | **CLEARED** (verified on both) |
+| `category` | yes | survives — plan reads `-> (known after apply)` |
+| `source_user` | **no** | set to `null`, but PAN-OS treats absent as `any`, so behaviour is unchanged |
+
+`computed` does NOT mean "preserved" — it means Terraform records whatever comes
+back. Two fields, both computed, opposite behaviour on omission. The only way to
+know was to write it and read it back.
+
+**The real risk is one rule.** Live in prod-edge:
+
+```
+REQ-2026-0725/0726/0727/0730   profile_setting=None          <- nothing to lose
+REQ-2026-07302                 profile_setting={'group': ['best-practice']}
+```
+
+An untargeted apply clears `profile_setting` on **REQ-2026-07302**, silently
+removing its security profile group — the rule keeps allowing traffic and stops
+inspecting it. A security regression that no plan line calls out as one, because
+it reads `(known after apply)`.
+
+**This is exactly the ADR-0003 conflict:** `enrich` set the field over REST, the
+module does not manage it, and Terraform's write drops it.
+
+**Direction — and the provider docs give a simpler fix than either workaround.**
+The documented `scm_security_rule` example sets these EXPLICITLY:
+
+```hcl
+category    = ["any"]
+source_user = ["any"]
+position    = "pre"
+```
+
+The intent model already carries both (`Spec.category` / `Spec.source_user`,
+defaulting to `["any"]`), and the compiler simply does not emit them. Emitting
+them and wiring them removes the drift at its source — no `-target`, no
+`ignore_changes`. Do that together with letting the compiler own
+`profile_setting` / `log_setting` on beta.4.
+
+Until then, apply prod-edge with `-target`.
 
 **Effort:** M
 **Priority:** P1 — one live rule loses threat inspection on the next untargeted
