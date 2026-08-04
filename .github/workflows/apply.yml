@@ -155,7 +155,8 @@ jobs:
             # -parallelism=1 REQUIRED: the scm provider cannot handle concurrent
             # token acquisition (spike 2026-07-19) — serial apply only.
             terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1
-            # ADR-0003 enrich: the scm provider silently drops application /
+            # ADR-0003 enrich, NARROWED in v1.16.0 — it now applies ORDERING only.
+            # The provider silently dropped application /
             # profile_setting / log_setting / ordering on security rules (verified
             # live on v1.0.11 + 1.0.12-beta.3). This sets them via the SCM API on
             # the just-applied rules — landing in the SAME candidate, so the push

@@ -1,31 +1,38 @@
-"""SCM enrich step — writes the security-rule fields the Terraform provider drops.
+"""SCM enrich step — applies rule ORDERING, which Terraform cannot express.
 
-Live finding (2026-07-28): the `paloaltonetworks/scm` provider (v1.0.11 AND
-1.0.12-beta.3) accepts but does NOT write `application`, `profile_setting`,
-`log_setting`, or ordering on security rules — it treats them as computed and
-drops config input (a fresh create lands `["any"]` / no profile / SCM's default
-log-forwarding / bottom). The SCM REST API honors every one of them, proven by a
-live POST→GET round-trip. So, mirroring how `push` commits what the provider
-can't, `enrich` SETS what the provider can't:
+NARROWED in v1.16.0. This module used to write `application`, `profile_setting`,
+`log_setting`, `source_user`, `category`, `negate_*`, `log_start` and
+`description` as well, because the provider (v1.0.11 / 1.0.12-beta.3) accepted
+those and silently discarded them — the ADR-0003 finding.
 
-    terraform apply ──▶ rule skeleton staged (zones/addr/svc/action/tags)
-         enrich_folder() ──▶ application / profile_setting / log_setting / ordering
-             push ──▶ commit (skeleton + enrichment together, one atomic change)
+Provider **1.0.12-beta.4 writes them**, and the module wires them, so those
+fields now have exactly one writer: Terraform. Doing it here too would be worse
+than wasteful — a redundant write silently repairs a field Terraform failed to
+set, so a regression in the module would never surface. See the ADR-0003
+addendum.
 
-The seam is post-apply / pre-push: the rule already exists (so this UPDATES, never
-creates), and enrich's writes land in the SAME candidate as Terraform's, so the
-single admin-scoped push commits skeleton + enrichment together. Fail-closed: a
-missing skeleton or any API error raises BEFORE the commit.
+WHAT REMAINS, and why it cannot move to Terraform. An anchored move needs the
+anchor's UUID:
 
-Idempotent by construction (GET-modify-PUT with the desired values converges), and
-NON-DESTRUCTIVE for opt-in fields: `profile`/`log_forwarding` are written only when
-the intent declares them; when absent, the rule's existing value is preserved (an
-omitted field means "not managed", per ADR-0003 — not "clear it"). `application`
-always reflects the declared desired state (it defaults to `["any"]`), so drift is
-reconciled.
+    target_rule = scm_security_rule.this[<key>].id
 
-SCM calls sit behind the `RuleClient` protocol so the orchestration is unit-
-testable against a fake; the real client (SCM REST API) is thin glue in clients.py.
+which is a self-reference inside a single `for_each` block, and Terraform
+rejects it:
+
+    Error: Cycle: module.security_folder.scm_security_rule.this["REQ-..."], ...
+
+`top` / `bottom` need no anchor and ARE honoured through `relative_position`;
+only before/after ordering lands here. This is a Terraform limitation, not a
+provider one — the SCM move endpoint works when called with the anchor's UUID.
+
+    terraform apply ──▶ rules created WITH their fields
+         enrich_folder() ──▶ ordering (before/after moves)
+             push ──▶ commit (both together, one atomic change)
+
+The seam is post-apply / pre-push: the rules already exist, and the moves land in
+the SAME candidate as Terraform's writes, so one admin-scoped push commits them
+together. Fail-closed: a missing skeleton or any API error raises BEFORE the
+commit.
 """
 
 from __future__ import annotations
@@ -101,21 +108,34 @@ def enrich_folder(
     # Deterministic order so a run is reproducible and moves apply predictably.
     ordered = sorted(changes, key=lambda c: c.rule.name)
 
-    # Pass 1 — set the dropped FIELDS on every rule. Done first so that when Move
-    # (pass 2) references another managed rule as a before/after target, that
-    # target already exists and is fully enriched.
+    # Pass 1 — EXISTENCE ONLY, since v1.16.0. This used to PUT the dropped fields
+    # (application / profile_setting / log_setting / source_user / category /
+    # negate_* / log_start / description) on every rule, because the provider
+    # accepted and silently discarded them.
+    #
+    # Provider 1.0.12-beta.4 writes them, and the module wires them (ADR-0003
+    # addendum), so writing them again here would make TWO writers for one field.
+    # That is the ambiguity that produced the profile_setting P1 in the first
+    # place, and a redundant write is not harmless: it would silently repair a
+    # field Terraform failed to set, so the regression would never surface.
+    #
+    # Terraform owns the FIELDS. enrich owns ORDERING, which Terraform cannot do
+    # from inside a single for_each block — an anchored move needs the anchor's
+    # UUID, and `scm_security_rule.this[<key>].id` is a self-reference Terraform
+    # rejects with `Error: Cycle`.
+    #
+    # The existence check stays: enrich must never run against a folder whose
+    # skeleton did not apply.
     for ch in ordered:
         r = ch.rule
-        rule_id = ids.get(r.name)
-        if rule_id is None:
+        if ids.get(r.name) is None:
             raise EnrichError(
                 f"rule {r.name!r} not found in folder {folder!r} — did `terraform apply` "
                 f"stage it? enrich runs after apply, before push."
             )
-        client.update_rule(rule_id, _merged_body(client.get_rule(rule_id), r))
 
-    # Pass 2 — apply ORDERING. Separated so all rules exist/are enriched before any
-    # move, and before/after targets resolve deterministically.
+    # Pass 2 — apply ORDERING. Separated so every rule exists before any move, and
+    # before/after targets resolve deterministically.
     records: List[EnrichRecord] = []
     for ch in ordered:
         r = ch.rule
@@ -127,39 +147,6 @@ def enrich_folder(
             )
         )
     return EnrichResult(folder=folder, records=tuple(records))
-
-
-def _merged_body(current: Dict[str, Any], rule: SecurityRule) -> Dict[str, Any]:
-    """GET-modify body: set the provider-dropped fields, preserve everything else.
-
-    `application` always reflects the declared desired state (defaults to
-    ["any"]). `profile_setting`/`log_setting` are OPT-IN: written only when the
-    intent declared them; when absent the current value is preserved (omitted =
-    "not managed", not "clear" — the non-destructive rule from ADR-0003). Drops
-    server-only keys the PUT rejects.
-    """
-    body = dict(current)
-    body["application"] = list(rule.application)
-    if rule.profile_group:
-        body["profile_setting"] = {"group": [rule.profile_group]}
-    if rule.log_setting:
-        body["log_setting"] = rule.log_setting
-    # v1.0 completeness. These carry declared defaults (any / false), so they
-    # always reflect desired state — set unconditionally (like application). The
-    # provider drops config-driven fields, so enrich is authoritative; `action` is
-    # re-asserted here to guarantee drop/reset-* land even if the provider mangles
-    # it. `description` is opt-in (set only when declared) to stay non-destructive.
-    body["action"] = rule.action
-    body["source_user"] = list(rule.source_user)
-    body["category"] = list(rule.category)
-    body["negate_source"] = rule.negate_source
-    body["negate_destination"] = rule.negate_destination
-    body["log_start"] = rule.log_start
-    if rule.description is not None:
-        body["description"] = rule.description
-    for k in ("id", "tfid"):
-        body.pop(k, None)
-    return body
 
 
 def _position_str(rule: SecurityRule) -> str:
