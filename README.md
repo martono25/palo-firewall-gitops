@@ -81,10 +81,12 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   tool in the estate), auto-apply at LOW, NIST-mapped evidence bundles, drift detect-and-alert.
 - **Phase 3 — Scale + self-service — NEXT.** Multi-folder, Panorama backend, self-service
   intake, break-glass with automated evidence.
-- **Day-1 as GitOps (ADR-0002) — DATA PLANE COMPLETE.** The bootstrap half was already built;
-  the ordered data-plane chain (`InterfaceRequest` → `ZoneRequest` → `RouteRequest` →
-  `AccessRequest`) is now expressible end to end, each kind probed against the live provider
-  before being declared safe to apply. See [`TODOS.md`](TODOS.md).
+- **Day-1 as GitOps (ADR-0002) — KINDS PROVEN, ORDERING NOT BUILT.** Every link
+  (`InterfaceRequest` → `ZoneRequest` → `RouteRequest` → `AccessRequest`) is built, and the
+  chain has been run against a live firewall: interfaces addressed, default route active,
+  rules enforcing on real packets. What does NOT exist is the cross-kind ordering that makes
+  it one operation — the chain was sequenced by hand. `ZoneRequest` also never reached the
+  device (the tenant's zones pre-exist and self-attached). See [`TODOS.md`](TODOS.md).
 
 The three questions this project opened with are answered: no commercial firewall-analysis
 tool is owned (classifier built in-house), the pilot is a greenfield SCM folder, and the form
