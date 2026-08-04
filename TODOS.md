@@ -307,10 +307,46 @@ WRITTEN  profile_setting: {'group': ['best-practice']}
 So the workaround `src/fwgitops/enrich.py` embodies may no longer be needed, and
 the compiler could own these fields — which also fixes the P1 above at its root.
 
-**Before acting:** beta.4 is a PRE-RELEASE. Ordering (`rulebase` /
-`relative_position` / `target_rule`) was part of the same ADR-0003 finding and
-was NOT probed here — do that before retiring any of `enrich`. Schema flags are
-identical between the versions, so the change is in write behaviour only.
+**Ordering is PROBED and is a different story** (`spike/beta4-ordering`). Three
+rules created in one order, requesting another:
+
+```
+created   : alpha, bravo, charlie
+requested : bravo (top), charlie (before alpha), alpha (bottom)
+actual    : bravo, alpha, charlie
+```
+
+* `top` / `bottom` — HONOURED.
+* `before` + `target_rule` — **FAILED**, and this is the bad part:
+
+```
+Rule created but move failed: move request for rule <uuid> failed: 404 Not Found
+  Code=[API_I00013]  errorType: Object Not Present
+  message: Failed to find obj-uuid for command get
+
+Apply complete! Resources: 1 added, 0 changed, 1 destroyed.
+```
+
+beta.4 ATTEMPTS the move as a second API call, the call fails, and Terraform
+still reports **Apply complete**. A partial failure surfaced as a warning inside
+a green apply — the rule exists, in the wrong position, and the pipeline is
+happy. Rule order IS policy: a permissive rule above a deny is a different
+firewall.
+
+**It is the provider, not SCM.** The raw move endpoint works when called
+correctly — `folder` must be in the BODY, not a query parameter:
+
+```
+POST /config/security/v1/security-rules/{id}:move
+  body: {folder, destination: before, rulebase: pre, destination_rule: <uuid>}
+  -> 200, and the rulebase reorders to bravo, charlie, alpha
+```
+
+With `folder` as a query param it returns "folder value is invalid".
+
+**So:** beta.4 could take over `application` / `log_setting` / `profile_setting`,
+but ordering still needs the REST path `enrich` already owns — or a provider fix.
+Do NOT retire `enrich` wholesale on the strength of the field result.
 
 **Effort:** L
 **Priority:** P2
