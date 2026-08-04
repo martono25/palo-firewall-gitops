@@ -11,7 +11,12 @@ terraform {
   required_providers {
     scm = {
       source  = "PaloAltoNetworks/scm"
-      version = "~> 1.0" # resolved 1.0.11 in the Part-A spike
+      # PINNED EXACTLY: 1.0.12-beta.4 is a PRE-RELEASE. `~> 1.0` would not even
+      # select it (Terraform excludes pre-releases from range constraints), and a
+      # floating constraint would drift off it in either direction without anyone
+      # choosing to. It is adopted deliberately -- it writes the security-rule
+      # fields 1.0.11 silently drops (ADR-0003 addendum).
+      version = "1.0.12-beta.4"
     }
   }
 }
