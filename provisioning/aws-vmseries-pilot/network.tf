@@ -79,7 +79,14 @@ resource "aws_route_table_association" "dataplane" {
 }
 
 # untrust ($eth-internet) faces the internet, so it takes the public route.
+#
+# SUPERSEDED while the traffic test runs: a subnet may have exactly ONE route
+# table association, and the test needs untrust on its own table carrying a
+# return route to trust via the firewall. Putting that return route on the
+# SHARED public table instead would divert mgmt->trust traffic through the
+# firewall too, which is not what is under test.
 resource "aws_route_table_association" "untrust" {
+  count          = var.enable_traffic_test ? 0 : 1
   subnet_id      = aws_subnet.untrust.id
   route_table_id = aws_route_table.public.id
 }
@@ -125,10 +132,38 @@ resource "aws_security_group" "mgmt" {
   tags = { Name = "${var.project}-mgmt", Project = var.project }
 }
 
-# Dataplane: no ingress needed for the onboarding pilot; egress open.
+# Dataplane: the FIREWALL is the policy point on these interfaces, not this
+# security group.
+#
+# This carried ZERO ingress rules until 2026-08-04, with the note "no ingress
+# needed for the onboarding pilot". That was true while the dataplane carried
+# nothing — and silently stopped being true the moment the interfaces were
+# addressed. AWS dropped every inbound packet at the trust/untrust ENIs, so
+# traffic never reached PAN-OS at all: rule hit counts stayed at zero across
+# every rule INCLUDING interzone-default, which looks identical to "no traffic
+# was sent". The firewall's own pings worked throughout, because egress is
+# allowed and security groups are stateful — that asymmetry was the tell.
+#
+# A firewall dataplane interface has to accept traffic addressed elsewhere; that
+# is its entire job, and `source_dest_check = false` on the ENIs exists for the
+# same reason. Filtering here would mean two policy points disagreeing, with the
+# AWS one invisible to the platform and to every intent.
+#
+# Scoped to the VPC rather than 0.0.0.0/0: untrust sits in a subnet with an IGW
+# route, and there is no reason to accept unsolicited traffic from the internet
+# at the ENI level even though these interfaces carry no public IP.
 resource "aws_security_group" "dataplane" {
   name_prefix = "${var.project}-dataplane-"
   vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "Traffic the firewall is meant to inspect. PAN-OS policy decides, not this."
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0

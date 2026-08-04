@@ -390,6 +390,37 @@ gains tags on these types, or if reading TF state proves acceptable.
 
 ## Compiler / intent model
 
+### An AccessRequest cannot express ICMP — ping is unrequestable
+
+**Found 2026-08-04** when Martono asked why the traffic harness was reaching for
+a NAT rule instead of just testing connectivity with ping first. It cannot:
+
+```python
+_PROTOCOLS = {"tcp", "udp"}     # src/fwgitops/intent.py
+```
+
+`Service` requires `protocol` + `port`, so ICMP has no representation. A request
+as ordinary as "let the monitoring host ping this segment" cannot be written as
+an intent, and the requester gets `must be one of ['tcp', 'udp']` with no hint
+that the shape itself is unsupported.
+
+**Why it matters beyond convenience.** Ping is the first thing anyone reaches
+for to establish whether a path works, and the cheapest smoke test for this
+platform's own changes. Without it every connectivity question has to be posed
+as a TCP service that may not exist on the far side — which is exactly the
+wrong-shaped test that cost hours in this session.
+
+**Direction:** PAN-OS matches ICMP by APPLICATION (`ping`) with `service: any`,
+not by a port-based service. The intent model already has an `application`
+field, so the change sits in the SERVICE half: allow an application-defined
+service, or accept `protocol: icmp` and compile it to `service: any` +
+`application: ping`. Take care not to weaken port validation for tcp/udp — an
+`icmp` protocol that silently ignores `port` would be its own trap.
+
+**Effort:** M — intent model, compiler, and the Terraform service mapping.
+**Priority:** P2
+
+
 ### Zone deletion path
 
 **What:** Design what happens when a ZoneRequest is removed from Git.
