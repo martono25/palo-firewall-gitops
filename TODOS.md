@@ -145,7 +145,7 @@ provider-fidelity question for `scm_ethernet_interface`.
 
 ## Intent kinds
 
-### Cross-kind ORDERING — the last unbuilt piece of ADR-0002
+### ~~Cross-kind ORDERING — the last unbuilt piece of ADR-0002~~ — BUILT v1.17.0
 
 **What:** sequence a Day-1 build as ONE operation:
 `InterfaceRequest → ZoneRequest → RouteRequest → AccessRequest`.
@@ -170,14 +170,15 @@ attached themselves the moment the interfaces were addressed — no ZoneRequest 
 needed. Do not read the chain's success as evidence that kind works end to end;
 it is the one link with no live proof behind it.
 
-**Direction:** the registry already declares per-kind capability, so it is the
-natural home for a declared dependency (`InterfaceRequest` before `ZoneRequest`,
-etc.) rather than a hard-coded list in the CLI. Emission is already
-registry-driven per kind; ordering would follow the same shape.
+**BUILT v1.17.0**, in the registry as anticipated: `KindHandler.depends_on_kinds`
++ `kind_apply_order()` (topological, deterministic, fails closed on a cycle or an
+unregistered dependency), and `fwgitops apply-order` for the pipeline, which no
+longer relies on glob order.
 
-**Effort:** L
-**Priority:** P1 — it is the last item in ADR-0002 that is neither done nor
-deferred.
+**Still open, and NOT fixed by ordering:** `ZoneRequest` has never reached
+hardware. On this tenant the zones pre-exist in `ngfw-shared` and self-attach, so
+the chain's success is not evidence for that kind. It needs a firewall in a fresh
+folder to exercise.
 
 
 ### `scm_logical_router` fidelity probe — DONE, PASSED (2026-08-02)

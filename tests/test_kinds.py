@@ -166,3 +166,56 @@ def test_a_new_kind_needs_exactly_one_registry_entry():
     assert h.name_of(z) == "dmz"
     assert "zones" in h.tfvars([z])
     assert h.tfvars_filename.endswith(".auto.tfvars.json")
+
+
+# ── cross-kind ordering (ADR-0002's last unbuilt piece) ───────────────────
+def test_the_declared_order_is_adr_0002s_chain():
+    from fwgitops.kinds import kind_apply_order
+    assert kind_apply_order() == [
+        "InterfaceRequest", "ZoneRequest", "RouteRequest", "AccessRequest"]
+
+
+def test_the_order_is_deterministic():
+    """Two runs must agree, or a Day-1 build is not reproducible and the
+    ordering is decoration. Ties break alphabetically rather than on dict order."""
+    from fwgitops.kinds import kind_apply_order
+    assert kind_apply_order() == kind_apply_order()
+
+
+def test_a_cycle_fails_closed():
+    """An unorderable registry must raise, not return an arbitrary sequence —
+    the whole point is that the order is guaranteed."""
+    from fwgitops.kinds import KindOrderError, REGISTRY, kind_apply_order
+    import dataclasses
+    a = dataclasses.replace(REGISTRY["ZoneRequest"], depends_on_kinds=("RouteRequest",))
+    b = dataclasses.replace(REGISTRY["RouteRequest"], depends_on_kinds=("ZoneRequest",))
+    with pytest.raises(KindOrderError, match="cycle"):
+        kind_apply_order({"ZoneRequest": a, "RouteRequest": b})
+
+
+def test_a_dependency_on_an_unregistered_kind_fails_closed():
+    """A dropped edge would order things wrongly while looking like it worked —
+    exactly the failure this mechanism exists to prevent."""
+    from fwgitops.kinds import KindOrderError, REGISTRY, kind_apply_order
+    import dataclasses
+    h = dataclasses.replace(REGISTRY["ZoneRequest"], depends_on_kinds=("NatRequest",))
+    with pytest.raises(KindOrderError, match="unregistered kind"):
+        kind_apply_order({"ZoneRequest": h})
+
+
+def test_every_dependency_names_a_registered_kind():
+    """Guards the SHIPPED registry, so a typo in a new kind's dependency is a
+    test failure rather than a silently skipped step."""
+    from fwgitops.kinds import REGISTRY
+    for kind, h in REGISTRY.items():
+        for dep in h.depends_on_kinds:
+            assert dep in REGISTRY, f"{kind} depends on unregistered {dep!r}"
+
+
+def test_dependencies_are_consistent_with_the_order():
+    """Each kind must appear after everything it declares a dependency on."""
+    from fwgitops.kinds import REGISTRY, kind_apply_order
+    order = kind_apply_order()
+    for kind, h in REGISTRY.items():
+        for dep in h.depends_on_kinds:
+            assert order.index(dep) < order.index(kind), f"{dep} must precede {kind}"

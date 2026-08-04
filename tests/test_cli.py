@@ -564,3 +564,55 @@ def test_snapshot_requires_exactly_one_scope(capsys):
     assert "exactly one" in capsys.readouterr().err
     assert main(["snapshot", "InterfaceRequest", "--out", "/tmp/x.json"]) == 1
     assert "exactly one" in capsys.readouterr().err
+
+
+# ── apply-order: roots sequenced by the registry, not by glob ─────────────
+def _tfvars(root, name, files):
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    for f in files:
+        (d / f).write_text("{}")
+    return d
+
+
+def test_apply_order_sequences_roots_by_the_kinds_they_hold(tmp_path, capsys):
+    """A root holding interfaces must precede one holding zones/routes/rules —
+    even when the alphabet says otherwise, which is what the old
+    `for dir in terraform/*/` relied on."""
+    from fwgitops.cli import run_apply_order
+    _tfvars(tmp_path, "aaa-folder", ["zones.auto.tfvars.json", "rules.auto.tfvars.json"])
+    _tfvars(tmp_path, "zzz-device", ["interfaces.auto.tfvars.json"])
+    assert run_apply_order(tmp_path) == 0
+    assert capsys.readouterr().out.split() == ["zzz-device", "aaa-folder"]
+
+
+def test_apply_order_skips_roots_with_nothing_emitted(tmp_path, capsys):
+    from fwgitops.cli import run_apply_order
+    _tfvars(tmp_path, "empty", [])
+    _tfvars(tmp_path, "real", ["interfaces.auto.tfvars.json"])
+    assert run_apply_order(tmp_path) == 0
+    assert capsys.readouterr().out.split() == ["real"]
+
+
+def test_apply_order_skips_bootstrap_and_module_dirs(tmp_path, capsys):
+    """Those carry local state or no state at all; applying them in the chain
+    would be wrong regardless of ordering."""
+    from fwgitops.cli import run_apply_order
+    _tfvars(tmp_path, "modules", ["zones.auto.tfvars.json"])
+    _tfvars(tmp_path, "bootstrap-backend", ["zones.auto.tfvars.json"])
+    _tfvars(tmp_path, "prod", ["zones.auto.tfvars.json"])
+    assert run_apply_order(tmp_path) == 0
+    assert capsys.readouterr().out.split() == ["prod"]
+
+
+def test_apply_order_fails_closed_when_kinds_are_interleaved(tmp_path, capsys):
+    """If root A holds a kind depending on one in root B, and B holds a kind
+    depending on one in A, NO whole-root order works. Emitting an arbitrary
+    sequence would look like success and apply things in the wrong order."""
+    from fwgitops.cli import run_apply_order
+    _tfvars(tmp_path, "one", ["interfaces.auto.tfvars.json", "rules.auto.tfvars.json"])
+    _tfvars(tmp_path, "two", ["zones.auto.tfvars.json"])
+    assert run_apply_order(tmp_path) == 2
+    err = capsys.readouterr().err
+    assert "no whole-root apply order" in err
+    assert "per-kind applies" in err
