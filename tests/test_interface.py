@@ -251,5 +251,33 @@ def test_the_shipped_catalog_covers_every_targetable_firewall():
     h = FolderHierarchy.from_dict(
         yaml.safe_load((REPO_ROOT / "catalog" / "folders.yaml").read_text()))
     for serial in h.targetable_device_serials():
-        for role in cat.roles():
+        # UNIVERSAL roles only. A role marked `site_specific` is not expected on
+        # every firewall (a DMZ port is one site's wiring), and the test below
+        # asserts that such a role still fails CLOSED for an unmapped firewall.
+        # Skipping them here narrows what is expected; it does not weaken what
+        # is enforced.
+        for role in cat.universal_roles():
             assert cat.resolve(role, device=serial), f"{role} unmapped for {serial}"
+
+
+def test_a_site_specific_role_still_fails_closed_for_an_unmapped_firewall():
+    """`site_specific` changes what the coverage test EXPECTS, never what the
+    loader ENFORCES. Without this, marking a role site-specific would look like
+    a way to opt out of the guard rather than to describe the topology."""
+    import yaml
+
+    from fwgitops.catalog import CatalogError, FolderHierarchy, InterfaceCatalog
+    cat = InterfaceCatalog.from_dict(
+        yaml.safe_load((REPO_ROOT / "catalog" / "interfaces.yaml").read_text()))
+    h = FolderHierarchy.from_dict(
+        yaml.safe_load((REPO_ROOT / "catalog" / "folders.yaml").read_text()))
+
+    site_roles = [r for r in cat.roles() if r not in cat.universal_roles()]
+    assert site_roles, "expected at least one site-specific role (dmz) in the shipped catalog"
+    for role in site_roles:
+        unmapped = [s for s in h.targetable_device_serials()
+                    if s not in cat.device_names.get(role, {})]
+        assert unmapped, f"{role} is marked site_specific but maps every firewall"
+        for serial in unmapped:
+            with pytest.raises(CatalogError, match="no mapping for firewall"):
+                cat.resolve(role, device=serial)

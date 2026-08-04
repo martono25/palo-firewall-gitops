@@ -2,7 +2,8 @@
 
 - **Status:** Accepted — **BUILT**. Bootstrap, every config-job kind (proven on
   hardware), and the cross-kind ordering that sequences them. `NatRequest`
-  remains deferred to v2.0; `ZoneRequest` has still never reached a device.
+  remains deferred to v2.0. `ZoneRequest` reached a device on 2026-08-05 —
+  every Day-1 kind is now verified on hardware.
 - **Date:** 2026-07-27 (status revised 2026-07-31, again 2026-08-04)
 - **Deciders:** Martono, Claude
 

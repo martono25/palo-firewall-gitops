@@ -212,6 +212,48 @@ def test_a_folder_with_no_declared_router_is_rejected():
                     router_catalog=cat, folder_hierarchy=_hierarchy())
 
 
+# ── folder-scope-only kinds reject `device:` at PR time ───────────────────
+def _zone(**spec):
+    base = {"zone": "dmz", "type": "layer3", "interfaces": []}
+    base.update(spec)
+    return {
+        "apiVersion": "fw-intent/v1", "kind": "ZoneRequest",
+        "metadata": {"id": "ZN-1", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "x", "requested": "2026-08-05"},
+        "spec": base,
+    }
+
+
+def test_a_zone_cannot_target_a_firewall():
+    """Verified live 2026-08-05 (spike/zone-device-scope): SCM refuses a zone at
+    device scope with "Device <serial> doesn't exist" — while the SAME
+    device-scope write of an ethernet interface on the SAME firewall succeeds.
+
+    Rejected here so the failure is a PR comment naming the real constraint,
+    rather than an apply-time error blaming a firewall that is present and
+    connected — which sends the reader after entirely the wrong problem.
+    """
+    with pytest.raises(IntentError, match="a zone cannot target a firewall"):
+        _load(_zone(device=DEVICE))
+
+
+def test_a_zone_can_still_target_a_folder():
+    """The guard must reject the SCOPE, not the kind. Without this, disabling
+    device targeting could quietly disable zone targeting altogether."""
+    assert _load(_zone(folder=SANDBOX)).spec.folder == SANDBOX
+
+
+def test_the_folder_only_message_names_the_kind_that_was_rejected():
+    """Two kinds share this guard now. A shared message that said "route" for a
+    zone would be actively misleading — the reader would look for a route."""
+    with pytest.raises(IntentError, match="a route cannot target a firewall"):
+        _load(_route(device=DEVICE))
+    with pytest.raises(IntentError, match="logical routers at FOLDER scope"):
+        _load(_route(device=DEVICE))
+    with pytest.raises(IntentError, match="zones at FOLDER scope"):
+        _load(_zone(device=DEVICE))
+
+
 # ── the classifier must key on SCOPE, not folder ──────────────────────────
 def test_a_device_scoped_change_is_still_risk_checked():
     """Regression, and a bad one.

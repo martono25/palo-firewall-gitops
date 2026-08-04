@@ -65,3 +65,30 @@ interfaces:
     devices:
       "007955000894453": ethernet1/3
       "007955000893662": ethernet1/3
+
+  dmz:
+    description: >-
+      Screened segment. The first role whose folder-scope variable this platform
+      CREATES rather than inherits — `$eth-local` and `$eth-internet` are SCM
+      defaults in `ngfw-shared`, `$eth-dmz` is declared by
+      terraform/bootstrap-scm-folder. A zone can only bind a variable that
+      exists at its scope (a literal port name is refused as an invalid
+      reference), so without that bootstrap entry this role would be
+      unbindable.
+    folder: $eth-dmz
+    # NOT universal. `local` and `internet` exist on every firewall here, so a
+    # firewall missing one is a catalog gap and the coverage test says so. A DMZ
+    # port is a property of one site's wiring: 4453 has an ENI at device index
+    # 2, 3662 is not known to. Declaring one for 3662 would be a guess, and
+    # guessing physical ports is what this file exists to prevent.
+    #
+    # This marks the role as not-expected-everywhere; it does NOT loosen
+    # anything. `resolve()` still raises for an unmapped firewall, so an intent
+    # naming `device: 007955000893662` with `interface: dmz` is rejected at load
+    # rather than compiling into a port that may not exist.
+    site_specific: true
+    devices:
+      # ethernet1/2 = ENI device index 2, 10.100.1.110/24. Present on 4453 only;
+      # 3662 is deliberately absent, so targeting it for this role fails closed
+      # rather than guessing a port that may not have an ENI behind it.
+      "007955000894453": ethernet1/2

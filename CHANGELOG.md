@@ -3,6 +3,57 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.18.0] — 2026-08-05
+
+### ZoneRequest reached a firewall — the last unverified Day-1 kind
+
+Built since v1.2.0, never once seen on hardware: this tenant's zones pre-exist in
+`ngfw-shared` and self-attach, so every green apply proved the CHAIN, not the KIND.
+Zone `dmz` is a name that existed nowhere on the tenant, so its presence in the
+device's pushed config is attributable to GitOps and nothing else.
+
+```
+ethernet1/2   17   1   dmz   N/A   0   10.100.1.110/24
+
+dmz { network { layer3 ethernet1/2;
+                log-setting log-best;
+                zone-protection-profile best-practice; } }
+```
+
+Full field fidelity, and the `$eth-dmz` variable resolved to the physical port on
+the way down.
+
+### Zones are folder-scope only — `device:` now rejected at PR time
+
+`spike/zone-device-scope`. SCM refuses a device-scope zone with "Device <serial>
+doesn't exist" while the SAME device-scope write of an ethernet interface on the
+SAME firewall succeeds — the control that makes this resource-specific rather
+than a property of the device. The provider documents `device` for `scm_zone`;
+the API disagrees. NOT a provider defect: the identical raw REST call fails
+identically with no Terraform involved.
+
+Second of four Day-1 resources to behave this way (after `scm_logical_router`),
+so folder-only is now the default assumption for a network resource.
+
+### `site_specific` interface roles
+
+`dmz` exists on one firewall, not both. The coverage test asserted every role
+maps every targetable firewall — right for `local`/`internet`, wrong for a port
+that is one site's wiring. A role may now declare `site_specific: true`, which
+changes what the test EXPECTS and nothing about what is ENFORCED: `resolve()`
+still fails closed for an unmapped firewall, and a test asserts exactly that.
+
+### Also
+
+- `$eth-dmz` declared in `terraform/bootstrap-scm-folder` — a folder-scope zone
+  can only bind a variable that exists at that scope, and no Day-1 kind creates
+  one. Boundary recorded in TODOS.
+- Zone deletion probed: correct in CI, but the compiler leaves stale
+  `*.auto.tfvars.json` locally, so deleting the last intent of a kind reads as
+  `No changes` on a developer's machine. The destructive half of that test is
+  still outstanding.
+- 575 tests (+4).
+
 ## [1.17.0] — 2026-08-04
 
 Cross-kind ordering — the last unbuilt piece of ADR-0002.
