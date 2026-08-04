@@ -131,14 +131,16 @@ resource "aws_instance" "trust_client" {
   user_data = <<-EOT
     #!/bin/bash
     exec > /dev/console 2>&1
-    sleep 60
+    sleep 45
     echo "=== FWGITOPS TRAFFIC TEST: 10.100.3.200 -> 10.100.2.200 via the firewall ==="
-    for i in 1 2 3 4 5; do
+    # Runs long enough to observe live on the firewall (session table, rule hit
+    # counts). A short burst finishes before anything can be watched, which is
+    # how the first run left "did it even arrive?" unanswerable.
+    for i in $(seq 1 40); do
       echo "--- attempt $i ---"
-      echo "ping:"; ping -c 2 -W 2 10.100.2.200 2>&1 | tail -3
-      echo "http:"; curl -s -m 5 http://10.100.2.200/index.html 2>&1 | head -1
-      echo "route:"; ip route get 10.100.2.200 2>&1 | head -1
-      sleep 30
+      echo "ping:"; ping -c 2 -W 2 10.100.2.200 2>&1 | tail -2
+      echo "http:"; curl -s -m 5 -o /dev/null -w 'curl_http_code=%%{http_code}\n' http://10.100.2.200/ 2>&1
+      sleep 15
     done
     echo "=== FWGITOPS TRAFFIC TEST END ==="
   EOT
