@@ -3,6 +3,55 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.20.0] — 2026-08-05
+
+### `fwgitops scaffold-root` — the last manual step in greenfield
+
+A new folder needed ~260 lines of `variables.tf` hand-copied with every nested
+attribute right. Getting one wrong does not fail: Terraform DISCARDS an
+undeclared object attribute at the module boundary silently — no warning, exit 0
+(ADR-0004, HOLE 3) — so a drifted root quietly stops delivering part of every
+intent.
+
+So `variables.tf` is now GENERATED FROM THE MODULE, types copied verbatim, with
+only two deliberate differences: maps default to `{}` so `plan` works for a scope
+with nothing compiled into it yet, and `folder` defaults to the scope's SCM
+folder.
+
+`--check` (wired into both workflows) and `--sync` close the other half. Adding a
+module variable used to break every root by hand — it happened on 2026-08-05,
+when the module gained `folder_interfaces`. The contract tests DETECT that;
+generation PREVENTS it. **The tests were left untouched on purpose**: they are
+the independent verification, and a generator marking its own homework is worth
+little.
+
+Details that are load-bearing rather than decorative:
+
+- The provider pin is read from the module's `versions.tf`. Roots and module
+  drifting apart has broken CI here before (roots on `1.0.12-beta.4`, module on
+  `~> 1.0`, which cannot even *select* a pre-release). A naive `version = "..."`
+  search matches `required_version` first and pins the provider to the Terraform
+  constraint — a valid-looking string that nothing downstream complains about, so
+  the block is scoped and a test asserts the result is not `>= 1.6`.
+- A DEVICE root's `folder` variable is its CONTAINING folder, never the serial:
+  the module scopes `scm_tag` with it, tags are folder objects even when the
+  interface is a device override, and SCM rejects `folder=<serial>` outright.
+- `main.tf` is written ONCE, never regenerated. It carries hand-written
+  reasoning, and a root's backend points at real state — silently rewriting one
+  is how a state file gets orphaned.
+- `default` inside `optional(...)` is not a variable default. Stripping one would
+  truncate a TYPE, which is the exact damage this prevents. Tested.
+
+Verified by scaffolding a real root: `terraform fmt`, `init` and `validate` all
+clean, and the contract tests picked it up automatically. Both existing roots
+were `--sync`ed and still plan clean against live SCM.
+
+**Greenfield is now:** create the folder in `bootstrap-scm-folder` (it must
+precede the firewall's `dgname` registration), `scaffold-root`, add the folder's
+roles to `catalog/interfaces.yaml`, open a PR.
+
+- 596 tests (+9).
+
 ## [1.19.0] — 2026-08-05
 
 ### Folder interface variables move out of bootstrap — greenfield, mostly

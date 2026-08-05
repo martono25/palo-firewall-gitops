@@ -864,6 +864,157 @@ def run_folder_interfaces(
     return 0
 
 
+def run_scaffold_root(
+    out_root: Path,
+    *,
+    folder: Optional[str] = None,
+    device: Optional[str] = None,
+    device_folder: Optional[str] = None,
+    check: bool = False,
+    sync: bool = False,
+    module_dir: Optional[Path] = None,
+    out=None,
+    err=None,
+) -> int:
+    """Create a Terraform ROOT for a scope, or verify/refresh existing ones.
+
+    A root is almost all boilerplate that must mirror the module ATTRIBUTE FOR
+    ATTRIBUTE, because Terraform discards an undeclared object attribute at the
+    module boundary silently (ADR-0004, HOLE 3). Hand-copying ~260 lines for a
+    new folder was the last manual step between "add a folder to the catalog"
+    and a working firewall.
+
+    Three modes:
+      (default)  create a new root; REFUSES to overwrite an existing one
+      --sync     regenerate variables.tf for every existing root
+      --check    report roots whose variables.tf is stale; write nothing
+    """
+    from fwgitops.scaffold import (
+        BACKEND_TF, ScaffoldError, Scope, backend_example, render_main,
+        render_variables,
+    )
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    module_dir = module_dir or (out_root / "modules" / "security_folder")
+    if not module_dir.is_dir():
+        print(f"error: module not found: {module_dir}", file=err)
+        return 1
+
+    def _roots() -> List[Path]:
+        found = []
+        for main in sorted(out_root.glob("*/main.tf")):
+            if f'source = "{MODULE_SOURCE_LITERAL}"' in main.read_text(encoding="utf-8"):
+                found.append(main.parent)
+        return found
+
+    try:
+        if check or sync:
+            if folder or device:
+                print("error: --check/--sync operate on every existing root; "
+                      "do not also name one", file=err)
+                return 1
+            stale: List[Path] = []
+            for root in _roots():
+                current = (root / "variables.tf")
+                scope_folder = _root_folder_default(current)
+                want = render_variables(module_dir, scope_folder)
+                if current.read_text(encoding="utf-8") != want:
+                    stale.append(root)
+                    if sync:
+                        current.write_text(want, encoding="utf-8")
+            if sync:
+                print(f"OK — synced {len(stale)} root(s) to the module:", file=out)
+                for r in stale:
+                    print(f"  - {r}/variables.tf", file=out)
+                return 0
+            if stale:
+                print(f"STALE — {len(stale)} root(s) no longer mirror the module. "
+                      f"Terraform would DISCARD the difference silently:", file=err)
+                for r in stale:
+                    print(f"  - {r}/variables.tf", file=err)
+                print("Run `fwgitops scaffold-root --sync`.", file=err)
+                return 2
+            print(f"OK — {len(_roots())} root(s) mirror the module", file=out)
+            return 0
+
+        if bool(folder) == bool(device):
+            print("error: name exactly one of --folder or --device", file=err)
+            return 1
+        scope = Scope(folder=folder, device=device)
+        scope_folder = folder if folder else device_folder
+        if not scope_folder:
+            print("error: --device also needs --device-folder (the CONTAINING folder). "
+                  "Tags are folder objects even when the interface is a device "
+                  "override, and `folder=<serial>` is rejected by SCM.", file=err)
+            return 1
+
+        root = out_root / scope.dirname
+        if root.exists() and any(root.glob("*.tf")):
+            # Never overwrite. main.tf carries hand-written reasoning, and a
+            # root's backend points at real state — regenerating one silently is
+            # how a state file gets orphaned.
+            print(f"error: {root} already exists. Use --sync to refresh variables.tf; "
+                  f"main.tf is written once, deliberately.", file=err)
+            return 1
+
+        if scope.folder:
+            header = (f'# Per-folder root module for SCM folder "{scope.folder}". One root ==\n'
+                      "# one state (design Arch-2). `terraform plan` here is the PR preview\n"
+                      "# + drift detector.\n")
+        else:
+            header = (f"# Per-scope root module for FIREWALL {scope.device}. One root == one\n"
+                      "# state (design Arch-2).\n"
+                      "#\n"
+                      "# SEPARATE FROM ITS FOLDER'S ROOT on purpose: a device-scope write does\n"
+                      "# not EDIT the inherited object, it creates a per-device OVERRIDE with\n"
+                      "# its own id (spike/device-override-probe). Two objects means two\n"
+                      f"# states; sharing a root would let one scope's plan destroy the\n"
+                      "# other's overrides.\n")
+
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "variables.tf").write_text(render_variables(module_dir, scope_folder),
+                                           encoding="utf-8")
+        (root / "main.tf").write_text(render_main(module_dir, scope, header=header),
+                                      encoding="utf-8")
+        (root / "backend.tf").write_text(BACKEND_TF, encoding="utf-8")
+        (root / "backend.hcl.example").write_text(backend_example(scope), encoding="utf-8")
+    except ScaffoldError as e:
+        print(f"error: {e}", file=err)
+        return 2
+
+    print(f"OK — scaffolded {root}:", file=out)
+    for f in sorted(root.glob("*")):
+        print(f"  - {f}", file=out)
+    print("", file=out)
+    print("NEXT, and none of it is optional:", file=out)
+    print(f"  1. ./terraform/make-backend.sh {scope.dirname}   # writes backend.hcl", file=out)
+    print(f"  2. terraform -chdir={root} init -backend-config=backend.hcl", file=out)
+    print("  3. commit the generated .terraform.lock.hcl — an unlocked root can "
+          "select a different provider build", file=out)
+    return 0
+
+
+#: The literal every root uses to call the shared module. Roots are found by it.
+MODULE_SOURCE_LITERAL = "../modules/security_folder"
+
+
+def _root_folder_default(variables_tf: Path) -> str:
+    """The SCM folder an existing root defaults its `folder` variable to.
+
+    Read back rather than re-derived from the directory name: a DEVICE root is
+    `device-<serial>` on disk but its `folder` is the CONTAINING folder, and
+    guessing would put a serial where SCM rejects one.
+    """
+    import re as _re
+    text = variables_tf.read_text(encoding="utf-8")
+    m = _re.search(r'variable\s+"folder"\s*\{.*?default\s*=\s*"([^"]+)"', text, _re.S)
+    if not m:
+        raise __import__("fwgitops.scaffold", fromlist=["ScaffoldError"]).ScaffoldError(
+            f"{variables_tf} has no default for `folder`; cannot tell which SCM folder "
+            f"this root is for")
+    return m.group(1)
+
+
 def run_apply_order(out_root: Path, *, out=None, err=None) -> int:
     """Print Terraform root directories in APPLY order (ADR-0002's chain).
 
@@ -1481,6 +1632,19 @@ def build_parser() -> argparse.ArgumentParser:
                          "alphabetically. The apply pipeline consumes this so the "
                          "sequencing lives in the registry, not in a workflow file.")
 
+    sr = sub.add_parser("scaffold-root",
+                        help="create a Terraform root for a scope, or verify/refresh existing ones")
+    sr.add_argument("--out", default=Path("terraform"), type=Path,
+                    help="Terraform root directory (default: terraform)")
+    sr.add_argument("--folder", help="SCM folder this root is for")
+    sr.add_argument("--device", help="firewall serial this root is for")
+    sr.add_argument("--device-folder",
+                    help="with --device: the CONTAINING folder (tags are folder objects)")
+    sr.add_argument("--check", action="store_true",
+                    help="report roots whose variables.tf no longer mirrors the module")
+    sr.add_argument("--sync", action="store_true",
+                    help="regenerate variables.tf for every existing root")
+
     fi = sub.add_parser("folder-interfaces",
                         help="materialise each folder's $-interface variables from the catalog")
     fi.add_argument("--out", default=Path("terraform"), type=Path,
@@ -1602,6 +1766,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         for name in sorted(names):
             print(name)
         return 0
+    if args.command == "scaffold-root":
+        return run_scaffold_root(
+            args.out, folder=args.folder, device=args.device,
+            device_folder=args.device_folder, check=args.check, sync=args.sync,
+        )
+
     if args.command == "folder-interfaces":
         return run_folder_interfaces(
             args.out,
