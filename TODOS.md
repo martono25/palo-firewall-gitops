@@ -706,12 +706,13 @@ FEATURE rather than an observed behaviour:
   had staged changes on this firewall. So the deletion sat in SCM, applied, while
   the device still forwarded on the old route.
 
-  **That gap is the real result of this test.** SCM's reference check protects
-  the API layer — it stopped the zone delete outright. Nothing protects the
-  SCM-vs-DEVICE layer: a destroy can succeed in SCM and fail to reach the
-  firewall, leaving Git and SCM saying "no default route" while the device still
-  has one. It is silent, it persists, and **the next successful push by anyone
-  applies it** — including someone pushing an unrelated change.
+  **That gap was the real result of this test — and it is now CLOSED.**
+  `fwgitops device-sync` (v1.31.0) compares each firewall's RUNNING config
+  version against the newest committed version for its folder, using the
+  documented endpoints `/config/operations/v1/config-versions/running` and
+  `.../candidate`. Wired into the scheduled drift job. Exit 2 on behind /
+  never-pushed / unreadable — not a note, because config that exists in SCM and
+  is not enforced on the firewall is the platform's core claim being false.
 
   Restored immediately; both roots plan clean and the device kept its route.
 
@@ -732,16 +733,22 @@ FEATURE rather than an observed behaviour:
   Found building it: an empty intent tree returned early with "no intent files
   found" and exit 0 — so a PR deleting EVERY intent bypassed the gate entirely.
 
-* **Uncommitted third-party changes are staged on the pilot.**
-  `GET /config/operations/v1/config-versions/candidate` shows staged versions
-  from `msetiawan@paloaltonetworks.com` (`rwar`, `teste`, 2026-08-05 13:22 and
-  13:38) as well as `admin@paloaltonetworks.com` and `admin`, alongside the
-  GitOps service account's. They are why the admin-scoped push is refused: SCM
-  will not commit a partial set.
+* ~~**Uncommitted third-party changes are staged on the pilot.**~~ **WRONG —
+  RETRACTED 2026-08-06.** `config-versions/candidate` returns COMMITTED VERSION
+  HISTORY, not pending edits. `push.py` says so in its own header, from a
+  previous encounter with the same trap: a "detect-drift" guard once refused
+  forever because it read that list as pending. Reading it as staged changes
+  produced a false claim that other admins had work in the way, and nearly led
+  to discarding a candidate that contained nothing of the sort.
 
-  Not swept in with `--all-admins`: that would commit someone else's unreviewed
-  config to a firewall under this pipeline's audit trail, which is exactly what
-  the admin-scoped push exists to prevent (v1.7.0). It needs a human decision.
+  What the data actually shows: `msetiawan`'s version 70 (`rwar`) was COMMITTED
+  and the device's RUNNING version is 70, four seconds later. Nothing of anyone
+  else's is pending.
+
+  **The real cause of the refused push:** `is_first_push_done: false`. The
+  re-onboard reset it, so SCM has no per-admin baseline for the device and
+  refuses an admin-scoped partial push — the first push after onboarding must be
+  a full one. `device-sync` now reports exactly this state.
 
 * **Still open — evidence for a removal.** Bundles are built per request, so a
   deletion still produces no audit record beyond git history and the plan. The

@@ -3,6 +3,49 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.31.0] — 2026-08-06
+
+### `fwgitops device-sync` — is the firewall running what SCM holds?
+
+Drift detection compared Git against SCM. **Nothing compared SCM against the
+DEVICE.** So a change could be applied in SCM and never reach the firewall, with
+Git and SCM agreeing while the device runs something else — silent, persistent,
+and the next successful push by anyone applies it, including someone pushing an
+unrelated change.
+
+Observed for real on 2026-08-06: a logical router destroyed in SCM, the push
+refused, and the device still forwarding on the deleted route. Nothing in the
+pipeline reported it.
+
+Uses the documented endpoints (pan.dev → Configuration Operations → Config
+Versions): `/config-versions/running` gives each device's running version,
+`/config-versions/candidate` gives the folder's committed history. In sync means
+running == newest committed.
+
+**`is_first_push_done: false` is a third state, not a version mismatch.** A
+re-onboard resets it while the old running version remains, so a version-only
+comparison would call that in-sync. It is not: SCM has no per-admin baseline for
+the device and refuses an admin-scoped push, which is precisely what blocked the
+route-deletion test.
+
+Exit 2 on behind / never-pushed / unreadable — not a note. Config that exists in
+SCM and is not enforced on the firewall is the platform's core claim being false.
+Wired into the scheduled drift job.
+
+### Retraction: nobody had staged changes in the way
+
+`config-versions/candidate` returns **committed version history**, not pending
+edits — `push.py` documents this from a previous encounter with the same trap,
+where a "detect-drift" guard refused forever because it read that list as
+pending. Reading it the same way produced a false claim that other admins had
+uncommitted work blocking the push, and very nearly led to discarding a candidate
+that contained nothing of the sort.
+
+What the data shows: `msetiawan`'s version 70 was COMMITTED, and the device's
+running version is 70, four seconds later.
+
+- 657 tests (+10).
+
 ## [1.30.1] — 2026-08-06
 
 ### `RouteRequest` deletion tested — nothing refuses it, and the device never heard
