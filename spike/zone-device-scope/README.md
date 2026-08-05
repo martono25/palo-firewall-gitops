@@ -1,4 +1,45 @@
-# Zone device-scope probe — RUN 2026-08-05. RESULT: ZONES ARE FOLDER-SCOPE ONLY
+# Zone device-scope probe — RUN 2026-08-05. RESULT RETRACTED (see below)
+
+---
+
+# RETRACTED 2026-08-05 — THE CONCLUSION BELOW IS WRONG
+
+The firewall was in a broken registration state. After it was offboarded and
+re-onboarded into SCM, **every resource accepts a device-scope write**:
+
+| resource | before re-onboard | after |
+|---|---|---|
+| `scm_ethernet_interface` | accepted | accepted |
+| `scm_zone` | rejected | **accepted** |
+| `scm_logical_router` | rejected | **accepted** |
+| `scm_address` | rejected | **accepted** |
+| `scm_tag` | rejected | **accepted** |
+| `scm_security_rule` | rejected | **accepted** |
+
+Reproduced three times with readback and cleanup.
+
+**Why the control did not save me.** The control was `scm_ethernet_interface` —
+the ONE resource that still worked while the device was broken. A positive
+control is only decisive if the positive case is normal; here it was the
+anomaly, so "interface works, zone does not" read as *resource-specific* when it
+was really *device partially broken*. A control proves the path is alive, not
+that the rest of the system is healthy.
+
+**The error message was literally true.** `"Device <serial> doesn't exist.
+Please create it before running the command"` meant exactly what it said: the
+device was not properly registered for configuration. It was dismissed as
+misleading because the device showed `is_connected: true` and every GET worked —
+read paths and config-write paths clearly do not share that registration.
+
+**What to do differently:** when an error names a precondition, test the
+precondition directly instead of arguing from adjacent evidence that it must be
+wrong.
+
+The text below is preserved as written, not corrected in place, so the reasoning
+that led to the wrong conclusion stays legible.
+
+---
+
 
 Asked because `ZoneRequest` has been built since v1.2.0 and has **never reached
 a firewall**, and the obvious way to make one land on a specific device is to
