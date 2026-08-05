@@ -939,22 +939,42 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
-    _reject_unknown(sp, _ACCESS_SPEC_KEYS, path, c)
+
+    # `folder`/`device` are excluded from the generic sweep: they were just
+    # reported above with the reason. Reporting them twice buries the specific
+    # message under "unknown field(s)", which is the one that actually answers
+    # the author's question. Same treatment `expires` gets in _load_metadata.
+    _reject_unknown(sp, _ACCESS_SPEC_KEYS | {"folder", "device"}, path, c)
 
     environment = _req_str(sp, "environment", path, c)
+    # TARGETING IS A DECISION, NOT AN OVERSIGHT (ADR-0007).
+    #
     # `folder:` is meaningful vocabulary on the Day-1 kinds, so it WILL get
     # copied into an AccessRequest. Ignoring it silently would land the rule in
     # whatever `environment` resolves to while the author believes they targeted
     # the folder they named — a silently wrong target, which is the exact failure
-    # class this platform exists to prevent. AccessRequest is app-language on
-    # purpose: its requesters should never name an SCM folder.
-    for key in ("folder", "device"):
+    # class this platform exists to prevent.
+    #
+    # SCM DOES accept a security rule at device scope (verified 2026-08-05, after
+    # a re-onboard fixed the broken registration that made three earlier spikes
+    # conclude otherwise). So this is a choice, and each key says why — a generic
+    # "unknown field" would tell the author the field is wrong and nothing about
+    # why, and for a TARGET field why is the whole question.
+    for key, why in (
+        ("folder", "an app team should not need to know SCM topology, and an intent "
+                   "naming a folder breaks when that folder is renamed or its firewall "
+                   "moves — `environment` absorbed two topology events in one week "
+                   "without a single intent changing"),
+        ("device", "a per-firewall rule is a policy OVERRIDE, and policy that differs "
+                   "per firewall is divergence someone reasons about for as long as it "
+                   "exists. Device scope is for CONFIGURATION — an interface address is "
+                   "genuinely per-firewall — but the unit of POLICY is the folder"),
+    ):
         if key in sp:
             c.add(f"{path}.{key}",
-                  f"AccessRequest targets an `environment:`, not a {key} — app teams do "
-                  f"not name SCM folders or firewall serials. (`{key}:` is for the Day-1 "
-                  f"kinds: InterfaceRequest, ZoneRequest, RouteRequest.) Remove it, or map "
-                  f"the target to an environment in catalog/environments.yaml.")
+                  f"an AccessRequest targets an `environment:`, never a {key}: {why}. "
+                  f"See ADR-0007. If a rule genuinely must apply to one firewall, give "
+                  f"that firewall its own folder and environment.")
 
     action = sp.get("action")
     if action not in _ACTIONS:
