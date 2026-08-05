@@ -690,12 +690,33 @@ lies is worse than none.
 need nothing further; what is deferred is the DELETION PATH AS A DESIGNED
 FEATURE rather than an observed behaviour:
 
-* **`RouteRequest` deletion — untested.** A route is the object an outage runs
-  through, and unlike a zone its removal has no obvious backstop: SCM refused the
-  zone delete because a rule REFERENCED it, whereas deleting the last route from
-  a logical router leaves a perfectly valid object that simply no longer forwards
-  anything. Nothing would refuse that. The same experiment repeated here is the
-  first task.
+* **`RouteRequest` deletion — RUN 2026-08-06. SCM half proven; device half
+  BLOCKED.** The prediction held: **nothing refuses it.** SCM destroyed the
+  logical router without complaint, where the same operation on a referenced zone
+  returned `409 NON_ZERO_REFS`.
+
+  **What it reverts to is better than feared.** `prod-edge` held an OVERRIDE
+  router; destroying it reverted to the inherited `ngfw-shared` router
+  (`20394038`) with **VRF interface membership intact** — `$eth-local` and
+  `$eth-internet` survive because the PARENT declares them — and an empty route
+  table. So the failure mode is "loses its default route", not "loses its VRF".
+
+  **The device half could not be reached**, and how it failed is the finding:
+  `fwgitops push` was refused by SCM's admin-scope guard because OTHER admins
+  had staged changes on this firewall. So the deletion sat in SCM, applied, while
+  the device still forwarded on the old route.
+
+  **That gap is the real result of this test.** SCM's reference check protects
+  the API layer — it stopped the zone delete outright. Nothing protects the
+  SCM-vs-DEVICE layer: a destroy can succeed in SCM and fail to reach the
+  firewall, leaving Git and SCM saying "no default route" while the device still
+  has one. It is silent, it persists, and **the next successful push by anyone
+  applies it** — including someone pushing an unrelated change.
+
+  Restored immediately; both roots plan clean and the device kept its route.
+
+  **Remaining:** observe the device when the deletion actually lands. Needs the
+  staged changes from other admins to be resolved first (see below).
 * ~~**Deletion is invisible to the risk pipeline.**~~ **FIXED v1.30.0.**
   `fwgitops classify --baseline <tree>` classifies REMOVALS alongside additions
   and they participate in the same gate. Wired into the PR gate, which
@@ -710,6 +731,17 @@ FEATURE rather than an observed behaviour:
 
   Found building it: an empty intent tree returned early with "no intent files
   found" and exit 0 — so a PR deleting EVERY intent bypassed the gate entirely.
+
+* **Uncommitted third-party changes are staged on the pilot.**
+  `GET /config/operations/v1/config-versions/candidate` shows staged versions
+  from `msetiawan@paloaltonetworks.com` (`rwar`, `teste`, 2026-08-05 13:22 and
+  13:38) as well as `admin@paloaltonetworks.com` and `admin`, alongside the
+  GitOps service account's. They are why the admin-scoped push is refused: SCM
+  will not commit a partial set.
+
+  Not swept in with `--all-admins`: that would commit someone else's unreviewed
+  config to a firewall under this pipeline's audit trail, which is exactly what
+  the admin-scoped push exists to prevent (v1.7.0). It needs a human decision.
 
 * **Still open — evidence for a removal.** Bundles are built per request, so a
   deletion still produces no audit record beyond git history and the plan. The
