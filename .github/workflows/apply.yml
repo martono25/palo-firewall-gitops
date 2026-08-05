@@ -76,6 +76,13 @@ jobs:
       # is deterministic/byte-stable, so this matches the reviewed output when the
       # author recompiled in the PR, and self-corrects if they forgot. Fail-closed:
       # any invalid intent aborts here, before anything is applied.
+      # A root must mirror the module ATTRIBUTE FOR ATTRIBUTE: Terraform
+      # DISCARDS an undeclared object attribute at the module boundary silently
+      # — no warning, exit 0 — so a drifted root does not fail, it quietly stops
+      # delivering part of every intent. Fails the PR instead.
+      - name: Terraform roots mirror the module
+        run: fwgitops scaffold-root --check
+
       # MATERIALISE FOLDER INTERFACE VARIABLES FIRST, always before compile.
       # A folder's `$`-interface VARIABLES must exist before any zone in that
       # folder can bind one, and a GREENFIELD folder has no intents at all — so

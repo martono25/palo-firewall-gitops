@@ -642,7 +642,7 @@ does, and reject a raw `$`/port literal.
 **Effort:** M — schema change, touches the zone loader, compiler and fixtures.
 **Priority:** P2
 
-### ~~A greenfield folder has no `$eth-*` variables~~ — BUILT v1.19.0
+### ~~A greenfield folder has no `$eth-*` variables~~ — BUILT v1.19.0/v1.20.0
 
 Interface variables are now declared in `catalog/interfaces.yaml` (`create_in:`)
 and materialised by `fwgitops folder-interfaces` into the folder's CI-owned root.
@@ -654,15 +654,32 @@ gitignored state, so filing an ongoing activity there made every later interface
 addition a manual apply from one machine, outside the pipeline. See ADR-0005's
 amendment.
 
-**STILL OPEN — root scaffolding.** A brand-new folder needs its Terraform root
-(`main.tf`, `variables.tf`, backend config) created before `compile` will emit
-into it. That is still manual and templated, so greenfield is CLOSER, not
-finished. It is the last thing between here and "add a folder to the catalog,
-open a PR, get a working firewall".
+**ROOT SCAFFOLDING — BUILT v1.20.0.** `fwgitops scaffold-root --folder <name>`
+writes `variables.tf`, `main.tf`, `backend.tf` and `backend.hcl.example` for a
+new scope. `variables.tf` is GENERATED FROM THE MODULE rather than copied, which
+is the point: a root must mirror the module attribute for attribute, because
+Terraform discards an undeclared object attribute at the module boundary
+silently (ADR-0004, HOLE 3), so a drifted root does not fail — it quietly stops
+delivering part of every intent.
 
-**Effort:** M
-**Priority:** P1 (v1) — same reason as the parent item: v1's Day-1 claim is not
-true of a new folder until this is done.
+`--check` (in CI) and `--sync` close the other half. Adding a module variable
+used to break every root by hand; on 2026-08-05 the module gained
+`folder_interfaces` and the device root failed the contract test. The tests
+DETECT that, generation PREVENTS it, and the tests were deliberately left
+untouched — a generator marking its own homework is worth little.
+
+The provider pin is read from the module's `versions.tf`, because roots and
+module drifting apart has broken CI here before (roots on `1.0.12-beta.4`, module
+on `~> 1.0`, which cannot even select a pre-release).
+
+`main.tf` is written ONCE and never regenerated: it carries hand-written
+reasoning, and a root's backend points at real state, so silently rewriting one
+is how a state file gets orphaned.
+
+**So greenfield is now:** create the folder in `bootstrap-scm-folder` (it must
+precede the firewall's `dgname` registration), `scaffold-root`, add the folder's
+roles to `catalog/interfaces.yaml`, open a PR. Everything after the bootstrap is
+pipeline-owned.
 
 ### Verify the catalog against SCM — nothing does
 
