@@ -79,10 +79,26 @@ folders:
       "007955000893662":
         hostname: fw-prod-edge-3662
         model: PA-VM
-        # DISCONNECTED 2026-08-02 — config stages in SCM but a push cannot
-        # commit to it. Still targetable: staging config for a firewall that is
-        # temporarily offline is legitimate, and `push` reports the failure.
-        targetable: true
+        # GONE FROM SCM as of 2026-08-05. It was DISCONNECTED on 2026-08-02 (a
+        # stopped instance) and has since disappeared from
+        # GET /config/setup/v1/folders entirely — the hierarchy now returns one
+        # on-prem entry, 007955000894453.
+        #
+        # targetable: false, so an intent naming it is rejected at COMPILE time
+        # with a message about targetability, instead of compiling clean and
+        # dying at apply against a device that does not exist. Fail closed while
+        # the reason is unknown.
+        #
+        # Kept in the file rather than deleted because deleting it would also
+        # delete the record that it existed, and nobody has yet said whether it
+        # is coming back. Delete the entry (and its catalog/interfaces.yaml
+        # mappings) once that is settled.
+        #
+        # THIS IS THE FAILURE MODE THIS FILE IS FOR: it is a hand-maintained
+        # mirror of a hierarchy that changed underneath it, and nothing verified
+        # the two. See TODOS — a catalog-vs-SCM check is the prerequisite for
+        # supporting folder MOVES, which are exactly this kind of change.
+        targetable: false
 
   GitOps:
     # Sandbox: zero devices, nothing inherits from it. Where the provider

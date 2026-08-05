@@ -213,7 +213,13 @@ resource "scm_zone" "this" {
 # cannot carry `gitops:` provenance and are invisible to tag-based drift. They
 # use the state-based engine instead (drift_engine="state" in the registry).
 resource "scm_ethernet_interface" "this" {
-  for_each = var.interfaces
+  # TWO SOURCES, ONE RESOURCE. `interfaces` is compiled from InterfaceRequests
+  # (device scope, addressed); `folder_interfaces` is materialised from the
+  # catalog (folder scope, `$`-prefixed variables, no addressing). The key
+  # spaces are disjoint by construction — a folder variable is always
+  # `$`-prefixed and a device interface never is — so the merge cannot silently
+  # drop either side. `fwgitops folder-interfaces` asserts that prefix.
+  for_each = merge(var.folder_interfaces, var.interfaces)
 
   name = each.value.name
 
@@ -222,6 +228,12 @@ resource "scm_ethernet_interface" "this" {
   # the other firewall untouched (spike/device-override-probe).
   folder = each.value.folder
   device = each.value.device
+
+  # The physical port this folder-scope VARIABLE resolves to. Only meaningful at
+  # folder scope; null on a device-scope override, where the object already IS
+  # the port. Wiring it is what lets a NEW folder have bindable interfaces at
+  # all — see ADR-0005 and `fwgitops folder-interfaces`.
+  default_value = each.value.default_value
 
   comment = each.value.comment
   layer3  = each.value.layer3

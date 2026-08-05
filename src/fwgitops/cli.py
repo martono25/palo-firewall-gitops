@@ -743,6 +743,127 @@ def run_drift(
 
 
 
+FOLDER_VARS_FILENAME = "interface_vars.auto.tfvars.json"
+
+
+def run_folder_interfaces(
+    out_root: Path,
+    *,
+    interface_catalog_path: Path = Path("catalog/interfaces.yaml"),
+    folders_path: Path = Path("catalog/folders.yaml"),
+    write: bool = True,
+    out=None,
+    err=None,
+) -> int:
+    """Materialise each folder's `$`-interface VARIABLES from the catalog.
+
+    WHY THIS IS NOT `compile`. `compile` turns INTENTS into desired state, and
+    these are not intents — no requester asks for them, and a requester must not
+    be able to conjure a physical port by filing one. They are platform topology,
+    declared in `catalog/interfaces.yaml`, which is platform-maintained and
+    changed by PR.
+
+    More practically: a GREENFIELD folder has no intents at all, and `compile`
+    returns early on an empty intent tree. The folder needs its variables BEFORE
+    the first intent can bind one, so driving this off intents is circular.
+
+    WHY NOT BOOTSTRAP EITHER. `terraform/bootstrap-scm-folder` is run-once with
+    LOCAL, gitignored state, so its state lives on exactly one machine. Creating
+    interface variables there makes every later addition a manual apply from that
+    machine, outside the pipeline: no PR plan, no risk classification, no
+    evidence bundle, and invisible to drift (which is registry-driven per kind
+    and would own none of it). Adding an interface is infrequent, not run-once —
+    the two must not be filed together.
+
+    So this writes into the folder's CI-owned root, next to its zones and rules,
+    sharing the same remote state.
+    """
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    try:
+        from fwgitops.catalog import CatalogError, FolderHierarchy, InterfaceCatalog
+        from fwgitops.io import read_yaml as _ry
+        cat = InterfaceCatalog.from_dict(_ry(interface_catalog_path))
+        hier = FolderHierarchy.from_dict(_ry(folders_path))
+    except FileNotFoundError as e:
+        print(f"error: catalog not found: {e}", file=err)
+        return 1
+    except Exception as e:  # noqa: BLE001 - CatalogError or a YAML failure
+        print(f"error: invalid catalog: {e}", file=err)
+        return 1
+
+    # FAIL CLOSED before writing anything. A folder variable holds ONE
+    # default_value; if the folder's own firewalls resolve the role to different
+    # ports, no single value is right, and choosing one sends the other
+    # firewall's traffic out the wrong wire while every check stays green.
+    conflicts = cat.create_in_conflicts(hier.devices_of)
+    if conflicts:
+        print(f"REJECTED — {len(conflicts)} interface catalog conflict(s); nothing written:",
+              file=err)
+        for c in conflicts:
+            print(f"  - {c}", file=err)
+        return 2
+
+    written: List[Path] = []
+    for folder in sorted(hier.targetable_folders()):
+        variables = cat.folder_variables(folder)
+        if not variables:
+            continue
+        # The module merges `folder_interfaces` with the compiled `interfaces`
+        # into one for_each. That merge is only safe because the key spaces are
+        # disjoint, and this is where that holds: a folder-scope object is a
+        # `$`-prefixed VARIABLE, a device-scope one is a physical port. Asserted
+        # rather than assumed — a collision would silently drop one side, and
+        # `merge` gives no diagnostic.
+        bad = [n for n in variables if not n.startswith("$")]
+        if bad:
+            print(f"REJECTED — folder {folder}: interface variable(s) {bad} are not "
+                  f"`$`-prefixed. A folder-scope interface is a VARIABLE; a bare port "
+                  f"name here would collide with a device-scope interface of the same "
+                  f"name and one would be silently dropped.", file=err)
+            return 2
+        payload = {"folder_interfaces": {
+            name: {
+                "name": name,
+                "folder": folder,
+                "device": None,
+                "default_value": default_value,
+                "comment": "folder interface variable — managed by fwgitops",
+                # EMPTY, NOT NULL. The provider requires exactly one of
+                # layer3/layer2/tap/aggregate_group; null satisfies none and the
+                # plan fails with "No attribute specified when one (and only
+                # one) ... is required". `{}` declares the interface layer3 with
+                # nothing configured, which is what a folder VARIABLE should be.
+                #
+                # Deliberately NO addressing. An address is a property of ONE
+                # firewall's wiring (it must match that firewall's ENI); putting
+                # one here would hand every firewall inheriting this folder the
+                # same IP. Addressing stays a device-scope InterfaceRequest.
+                "layer3": {},
+            }
+            for name, default_value in sorted(variables.items())
+        }}
+        target = out_root / folder / FOLDER_VARS_FILENAME
+        problems = check_object_attributes(
+            target.parent, "folder_interfaces", payload["folder_interfaces"])
+        if problems:
+            print(f"REJECTED — Terraform contract problem(s) for {folder}; nothing written:",
+                  file=err)
+            for p in problems:
+                print(f"  - {p}", file=err)
+            return 2
+        if write:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(dumps_payload(payload), encoding="utf-8")
+        written.append(target)
+
+    verb = "wrote" if write else "would write"
+    print(f"OK — {verb} {len(written)} folder interface file(s):", file=out)
+    for t in written:
+        print(f"  - {t}", file=out)
+    return 0
+
+
 def run_apply_order(out_root: Path, *, out=None, err=None) -> int:
     """Print Terraform root directories in APPLY order (ADR-0002's chain).
 
@@ -1360,6 +1481,17 @@ def build_parser() -> argparse.ArgumentParser:
                          "alphabetically. The apply pipeline consumes this so the "
                          "sequencing lives in the registry, not in a workflow file.")
 
+    fi = sub.add_parser("folder-interfaces",
+                        help="materialise each folder's $-interface variables from the catalog")
+    fi.add_argument("--out", default=Path("terraform"), type=Path,
+                    help="Terraform root directory (default: terraform)")
+    fi.add_argument("--interfaces", default=Path("catalog/interfaces.yaml"), type=Path,
+                    help="interface catalog (default: catalog/interfaces.yaml)")
+    fi.add_argument("--folders", default=Path("catalog/folders.yaml"), type=Path,
+                    help="folder hierarchy (default: catalog/folders.yaml)")
+    fi.add_argument("--check", action="store_true",
+                    help="validate and report without writing files")
+
     ao = sub.add_parser("apply-order",
                         help="print Terraform roots in APPLY order (ADR-0002's ordered chain)")
     ao.add_argument("--out", default=Path("terraform"), type=Path,
@@ -1470,6 +1602,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         for name in sorted(names):
             print(name)
         return 0
+    if args.command == "folder-interfaces":
+        return run_folder_interfaces(
+            args.out,
+            interface_catalog_path=args.interfaces,
+            folders_path=args.folders,
+            write=not args.check,
+        )
+
     if args.command == "apply-order":
         return run_apply_order(args.out)
     if args.command == "snapshot":

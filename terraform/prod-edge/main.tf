@@ -27,11 +27,12 @@ provider "scm" {
 module "security_folder" {
   source = "../modules/security_folder"
 
-  folder          = var.folder
-  address_objects = var.address_objects
-  service_objects = var.service_objects
-  security_rules  = var.security_rules
-  zones           = var.zones
-  interfaces      = var.interfaces
-  routers         = var.routers
+  folder            = var.folder
+  address_objects   = var.address_objects
+  service_objects   = var.service_objects
+  security_rules    = var.security_rules
+  zones             = var.zones
+  interfaces        = var.interfaces
+  folder_interfaces = var.folder_interfaces
+  routers           = var.routers
 }

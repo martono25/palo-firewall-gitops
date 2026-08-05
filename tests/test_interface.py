@@ -224,12 +224,22 @@ def test_an_unknown_role_is_rejected_with_the_known_ones():
 
 def test_a_role_with_no_mapping_for_that_firewall_is_rejected():
     """Fail closed. Guessing a port is how an intent lands on the wrong wire —
-    and on AWS the physical name depends on which ENI index exists at all."""
+    and on AWS the physical name depends on which ENI index exists at all.
+
+    SYNTHETIC hierarchy on purpose. This asserts a property of the LOADER, so it
+    must not depend on the shipped catalog happening to contain a targetable
+    firewall that some role does not map. It did until 2026-08-05, when
+    007955000893662 vanished from SCM and was marked non-targetable — at which
+    point the intent was rejected one step EARLIER, for targetability, and this
+    test passed for the wrong reason right up until it failed.
+    """
     from fwgitops.catalog import FolderHierarchy
-    import yaml
-    h = FolderHierarchy.from_dict(yaml.safe_load((REPO_ROOT / "catalog" / "folders.yaml").read_text()))
+    h = FolderHierarchy.from_dict({"folders": {"prod-edge": {
+        "children": [], "targetable": True,
+        "devices": {"007955000899999": {"hostname": "fw-unmapped", "model": "PA-VM",
+                                        "targetable": True}}}}})
     with pytest.raises(IntentError, match="no mapping for firewall"):
-        load_intent(_doc(environment=None, device="007955000893662"),
+        load_intent(_doc(environment=None, device="007955000899999"),
                     interface_catalog=_ifcat(), folder_hierarchy=h)
 
 
@@ -274,10 +284,22 @@ def test_a_site_specific_role_still_fails_closed_for_an_unmapped_firewall():
 
     site_roles = [r for r in cat.roles() if r not in cat.universal_roles()]
     assert site_roles, "expected at least one site-specific role (dmz) in the shipped catalog"
+
+    # The ENFORCEMENT is asserted against a synthetic firewall, not against
+    # whichever serial the shipped catalog currently happens to leave unmapped.
+    # It used to be 007955000893662; that firewall left SCM on 2026-08-05 and is
+    # now non-targetable, so the shipped catalog maps every targetable firewall
+    # for every role. That is a fine state of the world, and it must not silently
+    # turn this test into a no-op.
     for role in site_roles:
-        unmapped = [s for s in h.targetable_device_serials()
-                    if s not in cat.device_names.get(role, {})]
-        assert unmapped, f"{role} is marked site_specific but maps every firewall"
-        for serial in unmapped:
-            with pytest.raises(CatalogError, match="no mapping for firewall"):
-                cat.resolve(role, device=serial)
+        with pytest.raises(CatalogError, match="no mapping for firewall"):
+            cat.resolve(role, device="007955000899999")
+
+    # And the shipped data must still MEAN something: a role is only worth
+    # marking site-specific if it maps fewer firewalls than a universal one.
+    universal_cover = max(
+        (len(cat.device_names.get(r, {})) for r in cat.universal_roles()), default=0)
+    for role in site_roles:
+        assert len(cat.device_names.get(role, {})) < universal_cover, (
+            f"{role} is marked site_specific but covers as many firewalls as a "
+            f"universal role — the marking is either wrong or now pointless")

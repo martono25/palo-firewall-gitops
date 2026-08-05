@@ -45,5 +45,9 @@ module "security_folder" {
   security_rules  = var.security_rules
   zones           = var.zones
   interfaces      = var.interfaces
-  routers         = var.routers
+  # Always empty at device scope: a `$`-variable is a FOLDER object.
+  # Declared and wired anyway because root and module variable sets must
+  # match exactly — a root that silently omits one is HOLE 2.
+  folder_interfaces = var.folder_interfaces
+  routers           = var.routers
 }

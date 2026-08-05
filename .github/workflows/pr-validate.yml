@@ -44,6 +44,15 @@ jobs:
 
       # 1. Fail-closed intent validation. Any invalid intent fails the PR here
       #    with an actionable report — the requester sees exactly what to fix.
+      # MATERIALISE FOLDER INTERFACE VARIABLES FIRST, always before compile.
+      # A folder's `$`-interface VARIABLES must exist before any zone in that
+      # folder can bind one, and a GREENFIELD folder has no intents at all — so
+      # this cannot be driven off the intent tree without being circular. The
+      # source is catalog/interfaces.yaml, which is platform-maintained and
+      # changed by PR, so a requester still cannot conjure a physical port.
+      - name: Materialise folder interface variables (check)
+        run: fwgitops folder-interfaces --check
+
       - name: Validate intent (fail-closed)
         run: fwgitops compile intent --check
 
@@ -71,6 +80,15 @@ jobs:
       #    plan/preview steps below read these. Requesters never run this — they
       #    only edit intent/** and open the PR; CI compiles deterministically, so
       #    the reviewed intent is exactly what apply uses.
+      # MATERIALISE FOLDER INTERFACE VARIABLES FIRST, always before compile.
+      # A folder's `$`-interface VARIABLES must exist before any zone in that
+      # folder can bind one, and a GREENFIELD folder has no intents at all — so
+      # this cannot be driven off the intent tree without being circular. The
+      # source is catalog/interfaces.yaml, which is platform-maintained and
+      # changed by PR, so a requester still cannot conjure a physical port.
+      - name: Materialise folder interface variables
+        run: fwgitops folder-interfaces --out terraform
+
       - name: Compile (generate tfvars)
         run: fwgitops compile intent --out terraform
 
