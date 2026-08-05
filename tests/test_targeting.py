@@ -179,6 +179,38 @@ def test_an_access_request_naming_a_folder_is_rejected_not_ignored():
     assert any("environment" in str(p) for p in e.value.problems)
 
 
+def test_an_access_request_naming_a_DEVICE_is_rejected_with_the_reason():
+    """ADR-0007, and it is a DECISION rather than a limitation.
+
+    SCM does accept a security rule at device scope — verified 2026-08-05, after
+    a re-onboard fixed the broken registration that made three earlier spikes
+    conclude otherwise. So this exclusion had to be re-decided on its merits:
+
+        device scope is for CONFIGURATION; the unit of POLICY is the folder.
+
+    An interface address is genuinely per-firewall (two firewalls cannot share
+    one). A rule that applies to one firewall and not its neighbours is a policy
+    override, and per-firewall divergence is something an operator reasons about
+    for as long as it exists.
+    """
+    with pytest.raises(IntentError, match="Device scope is for CONFIGURATION"):
+        _load(_access(device=DEVICE))
+
+
+def test_the_rejection_explains_itself_rather_than_saying_unknown_field():
+    """A generic "unknown field(s)" tells the author the field is wrong and
+    nothing about why — and for a TARGET field, why is the whole question. Both
+    messages name the alternative and cite the ADR, so the next person to want
+    this argues with the decision instead of rediscovering it."""
+    for kwargs in ({"folder": SANDBOX}, {"device": DEVICE}):
+        with pytest.raises(IntentError) as e:
+            _load(_access(**kwargs))
+        msg = str(e.value)
+        assert "ADR-0007" in msg
+        assert "own folder and environment" in msg
+        assert "unknown field" not in msg, "the specific reason must win over the generic one"
+
+
 def test_a_plain_access_request_is_unaffected():
     req = _load(_access())
     assert req.spec.environment == "prod"

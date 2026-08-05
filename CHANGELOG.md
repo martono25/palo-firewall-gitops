@@ -3,6 +3,41 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.29.0] — 2026-08-05
+
+### ADR-0007 — rule targeting decided
+
+`AccessRequest` targets `environment:` only. No code path changed: `folder:` and
+`device:` were already rejected. What changed is that the exclusion is now a
+DECISION with its reasoning attached, rather than a behaviour inherited from a
+constraint that turned out not to exist.
+
+**The line that decides it:** device scope is for CONFIGURATION; the unit of
+POLICY is the folder. An interface address is genuinely per-firewall — two
+firewalls cannot share `10.100.2.142/24` — so `InterfaceRequest` must be able to
+name a device. A rule that applies to one firewall and not its neighbours is a
+policy override, and per-firewall divergence is something an operator reasons
+about for as long as it exists.
+
+The rejection message now names the reason, the alternative and the ADR, because
+a generic "unknown field(s)" tells an author their field is wrong and nothing
+about why — and for a targeting field, why is the whole question.
+
+Two things found while writing it:
+
+- a **second** targeting rejection already existed further down the loader; the
+  new block duplicated it and both fired. Consolidated into the original, which
+  was better placed.
+- with the specific message added, the generic unknown-key sweep reported the
+  same key again and buried it. `folder`/`device` are now excluded from that
+  sweep, the same treatment `expires` gets in `_load_metadata`.
+
+**Not added:** `folder:` for platform-authored rules. Plausible future need, no
+current one, and this repo has deleted three fields in a week that were declared,
+stored and never read.
+
+- 635 tests (+2).
+
 ## [1.28.0] — 2026-08-05
 
 ### `verify-catalog` compares the device's display name

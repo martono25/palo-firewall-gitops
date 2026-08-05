@@ -11,6 +11,7 @@ the context, the decision, and its consequences at a point in time.
 | [0004](0004-compiler-terraform-contract.md) | The compiler → Terraform contract must be enforced | Accepted — built |
 | [0005](0005-interfacerequest-folder-scope.md) | `InterfaceRequest` targets folder scope via the `$eth-*` variables | Accepted — built |
 | [0006](0006-day1-kinds-target-a-folder.md) | Day-1 kinds name their `folder:`; `AccessRequest` keeps `environment:` | Accepted — built |
+| [0007](0007-rule-targeting.md) | An `AccessRequest` targets an environment, never a folder or a firewall | Accepted |
 
 **0001** — the intent-loader registry and `ZoneRequest` are built; the registry
 is otherwise a registry in name only (classify / evidence / drift are still

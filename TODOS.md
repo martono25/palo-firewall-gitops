@@ -178,21 +178,31 @@ removed rather than left as dead code carrying a wrong rationale. It can return
 if a resource is ever shown to be folder-only — with evidence gathered against a
 healthy device.
 
-### Rule targeting for v2.0 — now an open DESIGN question, not a constraint
+### ~~Rule targeting~~ — DECIDED, ADR-0007
 
-Device scope is available, so `AccessRequest` targeting is a choice again rather
-than a limit. What has not changed is the ARGUMENT for the current model:
-app teams should not need to know SCM topology (ADR-0006), which is why
-`environment` resolves 1:1 to a folder.
+`AccessRequest` targets `environment:` only. `folder:` and `device:` stay
+rejected, now with a message that gives the reason and cites the ADR rather than
+reporting a generic unknown field.
 
-The options are now:
-* keep `environment` only — rules reach firewalls by folder inheritance;
-* add `folder:` for platform-authored rules, keeping `environment` for app teams;
-* add `device:` as well, which SCM now permits.
+**The line:** device scope is for CONFIGURATION; the unit of POLICY is the
+folder. An interface address is genuinely per-firewall — two firewalls cannot
+share one — so `InterfaceRequest` must name a device. A rule that applies to one
+firewall and not its neighbours is a policy OVERRIDE, and per-firewall divergence
+is something an operator reasons about for as long as it exists.
 
-Worth deciding deliberately rather than by what the API happens to allow. A
-device-scope rule is a per-firewall policy override, which is powerful and also
-the thing that makes a fleet stop being uniform.
+Decided on merits, not inherited: SCM DOES accept device-scope security rules.
+The earlier "it is a constraint" reading came from three spikes run against a
+broken device registration.
+
+**Per-firewall policy costs a folder**, and that is the intended price. It is now
+a PR (`scaffold-root` + a catalog entry), the empty-folder warning catches the
+half-finished state, and the cost is proportionate to asking for a firewall whose
+policy diverges from its fleet.
+
+**`folder:` for platform-authored rules is NOT added.** Plausible future need, no
+current one — and this repo deleted three fields in a week that were declared,
+stored and never read (`app.folder`, `metadata.expires`, `devices.hostname`). Add
+it with the case that motivates it.
 
 ## Intent kinds
 
