@@ -415,7 +415,18 @@ def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
-    folder, device, environment = _load_target(sp, path, c)
+    # allow_device=False: zones are folder-scope only in SCM, verified live
+    # 2026-08-05 (spike/zone-device-scope). A device-scope zone create is
+    # refused with "Device <serial> doesn't exist" while the SAME device-scope
+    # write of an ethernet interface on the SAME firewall succeeds — so the
+    # message is not about the device, and a reader who trusts it goes hunting
+    # for a missing firewall. The provider documents `device` for scm_zone; the
+    # API disagrees. Reject here, at PR time, rather than letting it compile
+    # clean and die at apply.
+    folder, device, environment = _load_target(
+        sp, path, c, allow_device=False,
+        folder_only_noun="zone", folder_only_resource="zones",
+    )
     zone = _req_str(sp, "zone", path, c)
     ztype = sp.get("type")
     if ztype not in _ZONE_TYPES:
@@ -541,6 +552,7 @@ def _load_interface_spec(sp: Any, c: "_Collector") -> Optional[InterfaceSpec]:
 
 def _load_target(
     sp: dict, path: str, c: "_Collector", *, allow_device: bool = True,
+    folder_only_noun: str = "object", folder_only_resource: str = "objects",
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Resolve a Day-1 kind's target. Returns `(folder, device, environment)`.
 
@@ -622,18 +634,25 @@ def _load_target(
             return None, None, None
 
     if device and not allow_device:
-        # Verified against the live API 2026-08-04: SCM accepts `device=` on GET
-        # for logical routers but REJECTS it on POST —
+        # TWO kinds land here now — routers (verified 2026-08-04) and zones
+        # (verified 2026-08-05) — and both were verified the same way: SCM
+        # accepts `device=` on GET and REJECTS it on POST with
         #   400 API_I00013 "Device 007955000894453 doesn't exist"
-        # — while the same scope creates ethernet interfaces happily. The message
-        # is misleading; the device exists. Logical routers are folder-scope only.
+        # while that same scope creates ethernet interfaces on that same
+        # firewall happily. The message is misleading; the device exists. Two of
+        # four Day-1 resources behave this way, so folder-only is the sane
+        # DEFAULT assumption for a network resource — probe before relying on
+        # device scope for a new kind.
         #
         # Caught here because the alternative is the failure mode this platform
-        # keeps hitting: an intent that compiles clean and dies at apply.
+        # keeps hitting: an intent that compiles clean and dies at apply. It is
+        # worse than usual here, because the error blames a device that is
+        # present and connected, sending the reader after the wrong problem.
         c.add(f"{path}.device",
-              "a route cannot target a firewall — SCM creates logical routers at "
-              "FOLDER scope only (device= is accepted on read and rejected on write). "
-              "Target the folder the firewall inherits from, e.g. `folder: prod-edge`.")
+              f"a {folder_only_noun} cannot target a firewall — SCM creates "
+              f"{folder_only_resource} at FOLDER scope only (device= is accepted on "
+              f"read and rejected on write). Target the folder the firewall inherits "
+              f"from, e.g. `folder: prod-edge`.")
         return None, None, None
 
     if device:
@@ -689,7 +708,10 @@ def _load_route_spec(sp: Any, c: "_Collector") -> Optional[RouteSpec]:
         c.add(path, "required mapping")
         return None
     # allow_device=False: routers are folder-scope only in SCM (see _load_target).
-    folder, device, environment = _load_target(sp, path, c, allow_device=False)
+    folder, device, environment = _load_target(
+        sp, path, c, allow_device=False,
+        folder_only_noun="route", folder_only_resource="logical routers",
+    )
     destination = _req_str(sp, "destination", path, c)
     if destination is not None and not _CIDR_RE.match(destination):
         c.add(f"{path}.destination", f"must be CIDR (address/prefix), got {destination!r}")

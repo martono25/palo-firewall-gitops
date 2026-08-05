@@ -85,8 +85,10 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   `ZoneRequest` → `RouteRequest` → `AccessRequest`) is built AND run against a live firewall:
   interfaces addressed, default route active, rules enforcing on real packets. Ordering is
   declared in the kind registry and consumed by the apply pipeline (`fwgitops apply-order`).
-  Caveats worth knowing: `ZoneRequest` has never reached a device (this tenant's zones
-  pre-exist and self-attach) and `NatRequest` is deferred to v2.0. See [`TODOS.md`](TODOS.md).
+  All four kinds are now verified on hardware: the last one, `ZoneRequest`, reached the
+  pilot on 2026-08-05 (zone `dmz` bound to `ethernet1/2`, confirmed in the device's pushed
+  config with its protection and log-forwarding profiles intact). `NatRequest` is deferred
+  to v2.0, and zone DELETION is probed but not finished. See [`TODOS.md`](TODOS.md).
 
 The three questions this project opened with are answered: no commercial firewall-analysis
 tool is owned (classifier built in-house), the pilot is a greenfield SCM folder, and the form

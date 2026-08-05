@@ -485,18 +485,38 @@ service, or accept `protocol: icmp` and compile it to `service: any` +
 **Priority:** P2
 
 
-### Zone deletion path
+### Zone deletion path — PROBED 2026-08-05, one step outstanding
 
-**What:** Design what happens when a ZoneRequest is removed from Git.
+**What:** what happens when a ZoneRequest is removed from Git.
 
-**Why:** Terraform destroys the `scm_zone`, the device commit rejects it because
-a rule or interface still references it, and the candidate config is left
-half-applied. The project claims fail-closed; this path is neither designed nor
-tested.
+**Found so far, running it for real against the pilot:**
 
-**Effort:** M
+1. **The plan is correct in CI and WRONG locally.** `terraform/*/*.auto.tfvars.json`
+   is gitignored, so a CI run starts from a clean checkout, the compiler emits no
+   `zones.auto.tfvars.json`, `var.zones` falls back to its `default = {}`, and the
+   zone is planned for destruction — right.
+
+   Locally the compiler leaves the PREVIOUS `zones.auto.tfvars.json` on disk. It
+   writes the files a compile produces and never removes the ones it no longer
+   produces, so `terraform plan` still reads the stale file and reports
+   **`No changes`**. Deleting the last intent of a kind therefore looks like a
+   no-op to anyone verifying locally — which is exactly when someone checks. Not
+   a production defect; it makes local verification lie, which is its own cost.
+   Kind-generic: same for the last route, interface or rule in a folder.
+
+2. **The compiler cannot see an out-of-band reference, by construction.**
+   `check_zone_consistency` covers rules IN GIT. A rule added by hand in SCM that
+   references the zone is invisible to it. That is the case this item was opened
+   about and it is not closed.
+
+**OUTSTANDING — the actual destructive test.** Delete the zone while a hand-added
+rule still references it, and observe: does SCM refuse the delete, does the
+device commit reject, and what is left staged when it does? Needs an apply that
+DESTROYS on the live pilot, so it is a deliberate, authorised step rather than
+something to slip into a general run.
+
+**Effort:** S (the setup exists and is proven; one authorised destroy remains)
 **Priority:** P2
-**Depends on:** An `scm_zone` resource existing.
 
 ## Architecture
 
@@ -560,6 +580,50 @@ into this refactor. It is latent, not an active bug, and travels with this item.
 **Effort:** L
 **Priority:** P3
 **Depends on:** A third intent kind; a drift story for tagless objects.
+
+### ZoneRequest `interfaces:` takes a raw string, not a role
+
+**Found while putting a zone on hardware (2026-08-05).** `InterfaceRequest`
+names a ROLE (`interface: dmz`) and the catalog resolves it per scope, because
+the same interface is `$eth-dmz` at folder scope and `ethernet1/2` at device
+scope (ADR-0005). `ZoneRequest.spec.interfaces` is still a plain list of
+strings, so `REQ-2026-0806` has to hardcode `$eth-dmz` — the exact
+scope-specific literal ADR-0005 exists to keep out of intents.
+
+It is not cosmetic. Probed live: a folder-scope zone binding the literal
+`ethernet1/2` is REFUSED —
+
+```
+zone -> network -> layer3 'ethernet1/2' is not a valid reference
+```
+
+— so the wrong-but-plausible value compiles clean and dies at apply. SCM fails
+closed, which is the good outcome; the platform should fail EARLIER. Note
+`tests/test_cli.py` uses `interfaces: [ethernet1/2]` as a fixture, i.e. a value
+that cannot work on a real tenant.
+
+**Fix:** resolve `interfaces` through `InterfaceCatalog` like `InterfaceRequest`
+does, and reject a raw `$`/port literal.
+
+**Effort:** M — schema change, touches the zone loader, compiler and fixtures.
+**Priority:** P2
+
+### A greenfield folder has no `$eth-*` variables, and no kind creates them
+
+**Found 2026-08-05.** A folder-scope zone can only bind an interface object that
+exists at that scope, and on this tenant those are `$`-prefixed variables.
+`$eth-local` and `$eth-internet` came free as SCM defaults inherited from
+`ngfw-shared`; a THIRD role has no such default, and ADR-0005 deliberately has
+`InterfaceRequest` CONFIGURE interfaces rather than create them.
+
+So `$eth-dmz` had to be declared in `terraform/bootstrap-scm-folder` as platform
+config. That is a defensible boundary — creating ports is not what a change
+request should do — but it means **"Day-1 provisioning as GitOps" stops short of
+a genuinely greenfield folder**: someone must add an interface variable per role
+before any ZoneRequest in that folder can bind anything.
+
+**Priority:** P2 — decide whether bootstrap owning this is the answer (document
+it in ADR-0005) or whether a kind should own interface CREATION.
 
 ### ~~InterfaceRequest — intent kind #3~~ — DONE v1.8.0
 

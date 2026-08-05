@@ -411,9 +411,32 @@ class InterfaceCatalog:
     folder_names: Dict[str, str]
     #: role -> {serial -> physical name}
     device_names: Dict[str, Dict[str, str]]
+    #: Roles that are NOT expected on every firewall.
+    #:
+    #: `local` and `internet` are universal here: every firewall this platform
+    #: manages has both, so a firewall MISSING one is a catalog gap and a test
+    #: asserts total coverage. That invariant is worth keeping — it is what
+    #: stops an intent naming a device whose port was never mapped.
+    #:
+    #: It is the wrong invariant for a role like `dmz`, which is a property of
+    #: one site's wiring: fw-prod-edge-4453 has an ENI at device index 2,
+    #: fw-prod-edge-3662 is not known to. Listing a port for it would be a
+    #: GUESS, and guessing ports is precisely what this catalog exists to
+    #: prevent (ADR-0005 — the physical name has already changed once here).
+    #:
+    #: So a role that is not universal must SAY SO, and then the coverage test
+    #: skips it. This is narrower than relaxing the test: an unmarked role is
+    #: still required everywhere, and `resolve()` still fails closed for an
+    #: unmapped firewall either way. The flag changes what is EXPECTED, never
+    #: what is enforced at load.
+    site_specific: FrozenSet[str] = frozenset()
 
     def roles(self) -> List[str]:
         return sorted(self.folder_names)
+
+    def universal_roles(self) -> List[str]:
+        """Roles every targetable firewall is expected to have."""
+        return [r for r in self.roles() if r not in self.site_specific]
 
     def known(self, role: str) -> bool:
         return role in self.folder_names
@@ -449,6 +472,7 @@ class InterfaceCatalog:
             raise CatalogError("interface catalog: `interfaces` must be a mapping")
         folder_names: Dict[str, str] = {}
         device_names: Dict[str, Dict[str, str]] = {}
+        site_specific: set = set()
         for role, spec in roles.items():
             if not isinstance(role, str) or not role.strip():
                 raise CatalogError(f"interface catalog: bad role name {role!r}")
@@ -480,7 +504,14 @@ class InterfaceCatalog:
                         f"interface name (e.g. ethernet1/4)")
                 out[serial.strip()] = phys.strip()
             device_names[role] = out
-        return cls(folder_names=folder_names, device_names=device_names)
+            if spec.get("site_specific") is True:
+                site_specific.add(role)
+            elif spec.get("site_specific") not in (None, False):
+                raise CatalogError(
+                    f"interface catalog: {role!r}.site_specific must be true or false, "
+                    f"got {spec.get('site_specific')!r}")
+        return cls(folder_names=folder_names, device_names=device_names,
+                   site_specific=frozenset(site_specific))
 
 
 @dataclass(frozen=True)
