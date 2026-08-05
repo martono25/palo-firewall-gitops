@@ -681,29 +681,41 @@ precede the firewall's `dgname` registration), `scaffold-root`, add the folder's
 roles to `catalog/interfaces.yaml`, open a PR. Everything after the bootstrap is
 pipeline-owned.
 
-### Verify the catalog against SCM — nothing does
+### ~~Verify the catalog against SCM~~ — BUILT v1.21.0
 
-**Found 2026-08-05.** `007955000893662` disappeared from
-`GET /config/setup/v1/folders` and `catalog/folders.yaml` went on listing it as
-targetable, with port mappings in `catalog/interfaces.yaml`. An intent naming it
-compiled clean and would have died at apply — the failure mode this project
-designs against, arriving through the catalog rather than the compiler.
+`fwgitops verify-catalog` (read-only) compares `catalog/folders.yaml` and
+`catalog/interfaces.yaml` against `GET /config/setup/v1/folders`. Wired into the
+PR gate and the scheduled drift job.
 
-Marked `targetable: false` as a fail-closed stopgap, but nothing DETECTS the next
-one. The catalog is a hand-maintained mirror of a hierarchy that changes
-underneath it.
+Catches all four shapes this has actually taken or could take:
 
-**This is the prerequisite for folder MOVES (v2.0).** Re-parenting a firewall is
-exactly a hierarchy change, so any move support built on an unverified catalog
-inherits this bug by design. Build the check first.
+| divergence | why it matters |
+|---|---|
+| declared, ABSENT from SCM | the 2026-08-05 case — 3662 |
+| declared as a FOLDER, SCM says `on-prem` | the v1.11.0 case — `folder=<serial>` is rejected on write |
+| folder under a different PARENT | config inherits down the tree, so the recorded blast radius is wrong |
+| firewall under a different parent | its zones/routes/rules come from a folder this repo is not managing |
 
-The natural home is the drift work, which already reads SCM: compare
-`folders.yaml` against the live hierarchy including the `container` vs `on-prem`
-`type` distinction, and fail the PR on divergence.
+**`targetable: false` is treated as an acknowledgement, not a failure.** A stale
+entry the operator has already fenced off is reported and exits 0. Failing anyway
+would train people to ignore the check, which is how a real divergence gets waved
+through.
 
-**Effort:** M
-**Priority:** P1 (v1) — cheap, and it is currently the only thing standing
-between a silent catalog lie and an apply-time failure.
+**Objects in SCM the catalog does not mention are NOT reported.** Prisma Access
+built-ins are deliberately absent, and a check that cries wolf every run is one
+nobody reads.
+
+**Verified against the live tenant by mutation:** restoring
+`catalog/folders.yaml` to its state before the 2026-08-05 hand-patch (3662 marked
+targetable) makes it exit 2 and name all three stale entries. It would have
+caught the bug that motivated it.
+
+Fails closed on an empty read and on a transport failure — a check that passes
+when it could not reach the thing it checks is worse than no check.
+
+**Still open, deliberately:** the 3662 entries themselves. Whether to delete them
+or keep the record is a decision about that firewall, not about the check; they
+are fenced off and now reported on every run, so they cannot be forgotten.
 
 ### Re-parenting a firewall into a different folder — DEFERRED to v2.0
 
@@ -732,8 +744,9 @@ needs a probe against a live firewall.
 
 **Effort:** L
 **Priority:** P2 (v2.0)
-**Depends on:** the catalog-vs-SCM check above. Building move support on an
-unverified catalog reproduces the 3662 bug by design.
+**Depends on:** the catalog-vs-SCM check above — BUILT v1.21.0, so this is
+unblocked. A move shows up as a PARENT divergence, which is now a blocking
+finding, so an out-of-band re-parent is caught rather than silently believed.
 
 ### ~~InterfaceRequest — intent kind #3~~ — DONE v1.8.0
 

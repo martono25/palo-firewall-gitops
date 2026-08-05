@@ -47,6 +47,19 @@ jobs:
           role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
           aws-region: ap-southeast-1
 
+      # THE CATALOG IS A HAND-MAINTAINED MIRROR of a hierarchy that changes
+      # underneath it, and nothing verified the two until now. It has gone wrong
+      # twice: device serials listed as child FOLDERS (v1.11.0), and a firewall
+      # that left SCM entirely while the catalog kept listing it as targetable
+      # (2026-08-05). Both produce the same failure — an intent that compiles
+      # clean and dies at apply, past every compile-time check.
+      #
+      # Read-only. Objects in SCM the catalog does not mention are NOT reported:
+      # Prisma Access built-ins are deliberately absent, and a check that cries
+      # wolf every run gets ignored.
+      - name: Verify the catalog against SCM
+        run: fwgitops verify-catalog
+
       # Read-only: plan with -detailed-exitcode (2 = drift) per managed folder.
       - name: Detect drift (terraform plan per folder)
         run: |

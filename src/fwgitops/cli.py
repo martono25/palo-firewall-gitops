@@ -1015,6 +1015,88 @@ def _root_folder_default(variables_tf: Path) -> str:
     return m.group(1)
 
 
+def run_verify_catalog(
+    *,
+    folders_path: Path = Path("catalog/folders.yaml"),
+    interface_catalog_path: Path = Path("catalog/interfaces.yaml"),
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Verify catalog/folders.yaml against SCM's real hierarchy. READ-ONLY.
+
+    The catalog is declared rather than read live so the compiler and classifier
+    stay pure — the same intents always compile to the same output. Purity buys
+    determinism, not truth, and nothing was checking the truth.
+
+    Exit 2 on a BLOCKING divergence: the catalog claiming something SCM
+    contradicts, for an object an intent could actually name. A stale entry
+    already marked `targetable: false` is reported and does not fail — the
+    operator has said "do not use this", which is the acknowledgement, and
+    failing anyway would just train people to ignore the check.
+
+    NOT reported: objects in SCM the catalog does not mention. Prisma Access
+    built-ins are deliberately absent because this platform does not manage
+    them, and a check that cries wolf every run gets ignored.
+    """
+    from fwgitops.catalog import FolderHierarchy, InterfaceCatalog
+    from fwgitops.catalogcheck import compare, compare_interfaces, parse_live
+    from fwgitops.io import read_yaml as _ry
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    try:
+        hier = FolderHierarchy.from_dict(_ry(folders_path))
+        ifcat = InterfaceCatalog.from_dict(_ry(interface_catalog_path))
+    except FileNotFoundError as e:
+        print(f"error: catalog not found: {e}", file=err)
+        return 1
+    except Exception as e:  # noqa: BLE001
+        print(f"error: invalid catalog: {e}", file=err)
+        return 1
+
+    if session is None:
+        from fwgitops.scmapi import ScmCredentials, ScmSession
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except Exception as e:  # noqa: BLE001 - missing/!invalid credentials
+            print(f"error: cannot reach SCM: {e}", file=err)
+            return 1
+
+    try:
+        payload = session.request("GET", "/config/setup/v1/folders",
+                                  params={"limit": 500})
+    except Exception as e:  # noqa: BLE001 - any transport/API failure
+        print(f"error: reading the SCM hierarchy failed: {e}", file=err)
+        return 1
+
+    live = parse_live(payload.get("data", []))
+    if not live:
+        # Fail closed. An empty hierarchy would make every declared folder look
+        # absent and turn this into a blanket failure, or — worse, if the
+        # comparison were ever inverted — a blanket pass.
+        print("error: SCM returned no folders at all; refusing to compare against "
+              "an empty hierarchy", file=err)
+        return 1
+
+    findings = compare(hier, live) + compare_interfaces(ifcat, hier, live)
+    blocking = [f for f in findings if f.blocking]
+    noted = [f for f in findings if not f.blocking]
+
+    for f in noted:
+        print(f"NOTE  {f}", file=out)
+    if blocking:
+        print(f"REJECTED — the catalog contradicts SCM in {len(blocking)} place(s):",
+              file=err)
+        for f in blocking:
+            print(f"  - {f}", file=err)
+        return 2
+
+    print(f"OK — catalog matches SCM ({len(live)} live entries, "
+          f"{len(noted)} acknowledged stale entry(s))", file=out)
+    return 0
+
+
 def run_apply_order(out_root: Path, *, out=None, err=None) -> int:
     """Print Terraform root directories in APPLY order (ADR-0002's chain).
 
@@ -1632,6 +1714,11 @@ def build_parser() -> argparse.ArgumentParser:
                          "alphabetically. The apply pipeline consumes this so the "
                          "sequencing lives in the registry, not in a workflow file.")
 
+    vc = sub.add_parser("verify-catalog",
+                        help="verify catalog/folders.yaml against SCM's real hierarchy (read-only)")
+    vc.add_argument("--folders", default=Path("catalog/folders.yaml"), type=Path)
+    vc.add_argument("--interfaces", default=Path("catalog/interfaces.yaml"), type=Path)
+
     sr = sub.add_parser("scaffold-root",
                         help="create a Terraform root for a scope, or verify/refresh existing ones")
     sr.add_argument("--out", default=Path("terraform"), type=Path,
@@ -1766,6 +1853,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         for name in sorted(names):
             print(name)
         return 0
+    if args.command == "verify-catalog":
+        return run_verify_catalog(folders_path=args.folders,
+                                  interface_catalog_path=args.interfaces)
+
     if args.command == "scaffold-root":
         return run_scaffold_root(
             args.out, folder=args.folder, device=args.device,
