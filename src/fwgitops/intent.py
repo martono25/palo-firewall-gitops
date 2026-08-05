@@ -77,6 +77,60 @@ class Service:
     port: str      # "443" or "8000-8100"
 
 
+#: Every key each kind's `spec:` may carry. One frozenset per loader, checked at
+#: the END of that loader so field-level problems are reported first — being told
+#: `logging` is unknown is more useful alongside "and `log` must be a bool" than
+#: instead of it.
+#:
+#: WHY EXPLICIT rather than derived at runtime: the loaders read keys through
+#: several helpers, some of which read `sp` themselves, so a runtime derivation
+#: would be a second implementation of the thing it validates. Instead
+#: `tests/test_intent.py` walks the AST of each loader — following helpers that
+#: take `sp` — and asserts these sets EXACTLY match the keys actually read. A key
+#: the loader reads but that is missing here would reject a valid intent; one
+#: listed here but never read is a dead allowance that lets a typo through.
+_ACCESS_SPEC_KEYS = frozenset({
+    "environment", "action", "source", "destination", "service", "log",
+    "application", "profile", "log_forwarding", "position", "description",
+    "log_start", "source_user", "category", "negate_source", "negate_destination",
+})
+_ZONE_SPEC_KEYS = frozenset({
+    "folder", "device", "environment", "zone", "type", "interfaces",
+    "protection_profile", "log_forwarding", "dos_profile", "dos_log_forwarding",
+    "user_id", "device_id", "user_acl", "device_acl",
+})
+_INTERFACE_SPEC_KEYS = frozenset({
+    "folder", "device", "environment", "interface", "ip", "dhcp", "mtu",
+    "comment", "management_profile",
+})
+_ROUTE_SPEC_KEYS = frozenset({
+    "folder", "device", "environment", "destination", "nexthop",
+    "nexthop_interface", "router", "vrf", "metric", "admin_dist",
+})
+
+
+def _reject_unknown(sp: Any, allowed: "frozenset[str]", path: str, c: "_Collector") -> None:
+    """Unknown `spec:` keys are REJECTED, not ignored.
+
+    This is the sharper half of the metadata guard. `metadata:` is paperwork; a
+    dropped key there costs an audit trail. `spec:` is FIREWALL BEHAVIOUR, so a
+    dropped key is a rule that does not do what it says and looks fine doing it:
+
+        spec:
+          logging: true      # compiles clean, logs nothing — the field is `log`
+
+    No plan diff, no warning, no failed apply. The rule is simply weaker than
+    the request that was approved.
+    """
+    if not isinstance(sp, dict):
+        return
+    unknown = sorted(str(k) for k in set(sp) - allowed)
+    if unknown:
+        c.add(path, f"unknown field(s) {unknown}; expected {sorted(allowed)}. "
+                    f"Unknown keys are rejected rather than ignored — in `spec` a "
+                    f"silently dropped field is a rule that does not do what it says.")
+
+
 #: Every key `metadata:` may carry. Mirrors `Metadata` exactly; a test asserts
 #: the two cannot drift apart, because a field added to the dataclass and not
 #: here would be rejected in every intent that used it.
@@ -420,6 +474,7 @@ def _load_zone_spec(sp: Any, c: _Collector) -> Optional[ZoneSpec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
+    _reject_unknown(sp, _ZONE_SPEC_KEYS, path, c)
     # allow_device=False: zones are folder-scope only in SCM, verified live
     # 2026-08-05 (spike/zone-device-scope). A device-scope zone create is
     # refused with "Device <serial> doesn't exist" while the SAME device-scope
@@ -484,6 +539,7 @@ def _load_interface_spec(sp: Any, c: "_Collector") -> Optional[InterfaceSpec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
+    _reject_unknown(sp, _INTERFACE_SPEC_KEYS, path, c)
     folder, device, environment = _load_target(sp, path, c)
     role = _req_str(sp, "interface", path, c)
 
@@ -712,6 +768,7 @@ def _load_route_spec(sp: Any, c: "_Collector") -> Optional[RouteSpec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
+    _reject_unknown(sp, _ROUTE_SPEC_KEYS, path, c)
     # allow_device=False: routers are folder-scope only in SCM (see _load_target).
     folder, device, environment = _load_target(
         sp, path, c, allow_device=False,
@@ -919,6 +976,7 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     if not isinstance(sp, dict):
         c.add(path, "required mapping")
         return None
+    _reject_unknown(sp, _ACCESS_SPEC_KEYS, path, c)
 
     environment = _req_str(sp, "environment", path, c)
     # `folder:` is meaningful vocabulary on the Day-1 kinds, so it WILL get

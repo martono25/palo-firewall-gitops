@@ -3,6 +3,46 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.25.0] — 2026-08-05
+
+### Unknown `spec:` keys are rejected
+
+The sharper half of the metadata guard, and the reason it was worth doing
+separately. `metadata:` is paperwork — a dropped key there costs an audit trail.
+`spec:` is FIREWALL BEHAVIOUR, so a dropped key is a rule that does not do what
+it says, and looks fine doing it:
+
+```yaml
+spec:
+  logging: true      # compiled clean, logged nothing — the field is `log`
+```
+
+No plan diff, no warning, no failed apply. Just a rule weaker than the one that
+was approved.
+
+All four loaders (AccessRequest, Zone, Interface, Route) now reject unknown
+fields and name the ones they accept.
+
+### The allow-lists are pinned to the loaders by an AST test
+
+Both directions are bugs, and they are different bugs: a key the loader READS but
+that is missing from the list REJECTS a valid intent — blocking legitimate work,
+with an error that blames the author. A key listed but never read is a dead
+allowance that lets exactly the typo this guard exists to catch straight through.
+
+**This is not hypothetical.** The first version of the extractor hard-coded the
+accessor helpers it knew about, missed `_opt_positive_int`, and produced a
+`_ROUTE_SPEC_KEYS` without `metric` — which would have rejected the shipped
+default route, whose `metric: 10` has always reached the firewall correctly
+(confirmed against live SCM). It was caught by the every-shipped-intent test
+added in v1.24.0, not by review.
+
+The test now DISCOVERS accessors instead of listing them: any
+`helper(sp, "key", ...)` counts, and helpers taking `sp` are followed. A new
+accessor cannot drop out of the audit by being unknown to it.
+
+- 622 tests (+6).
+
 ## [1.24.0] — 2026-08-05
 
 ### Unknown `metadata:` keys are rejected
