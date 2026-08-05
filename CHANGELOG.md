@@ -3,6 +3,51 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.28.0] — 2026-08-05
+
+### `verify-catalog` compares the device's display name
+
+The pilot's SCM display name reset to `PA-VM` during the re-onboard and nothing
+noticed. It is cosmetic in itself — and it is a reliable SYMPTOM of a
+re-registration, which is not cosmetic at all: the same event destroyed every
+device-scope interface override and set `is_first_push_done` back to false, so a
+push in that window would have stripped the addressing off a working firewall.
+
+Reported as a note, not a failure. It breaks nothing by itself, and failing a
+pipeline over a label is how a check earns the reputation that gets real findings
+ignored. The message says what to check: that the device root still plans clean
+before pushing.
+
+### `hostname:` renamed to `display_name:` in catalog/folders.yaml
+
+It never held the hostname — the firewall's is `ip-10-100-0-51`, DHCP-assigned
+and undeclared. It held the label SCM shows. And it was **parsed by nothing**: a
+third decorative field, after `app.folder` and `expires`, sitting in a file that
+otherwise drives behaviour.
+
+Now parsed, stored on `FolderHierarchy.device_display_names`, and compared. The
+old key is **rejected**, not silently accepted — renaming it quietly would leave
+the old spelling looking meaningful while doing nothing, which is the state it
+was already in. Declaring one stays optional: absence means "not tracked", not
+"mismatched".
+
+Mutation-verified: disabling the comparison fails the test.
+
+### Correction to a claim made earlier today
+
+`PUT /config/setup/v1/devices/{serial}` with `{display_name, folder}` works with
+this service account. Earlier attempts sent `display_name` alone and came back
+`403 Access denied` — **a missing required field presenting as a permissions
+error** — from which the conclusion was drawn that renaming needed the SCM UI or
+a device-management role. It did not.
+
+Two notes on the pan.dev page for that endpoint: the path parameter is the
+SERIAL, not "the UUID of the resource" as documented (passing the real UUID
+returns `500 ... failed to get the device details with serial <uuid>`), and
+`folder` is effectively required despite being listed as optional.
+
+- 633 tests (+4).
+
 ## [1.27.0] — 2026-08-05
 
 ### Model A: an app does not choose the folder

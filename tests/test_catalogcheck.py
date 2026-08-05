@@ -36,7 +36,7 @@ folders:
     targetable: true
     devices:
       "007955000894453":
-        hostname: fw-a
+        display_name: fw-a
         model: PA-VM
         targetable: true
 """
@@ -77,7 +77,7 @@ def test_a_firewall_that_left_scm_is_BLOCKING_while_targetable():
     """2026-08-05, exactly. 007955000893662 vanished from SCM and the catalog went
     on listing it as targetable with port mappings."""
     cat = CATALOG + """      "007955000893662":
-        hostname: fw-gone
+        display_name: fw-gone
         model: PA-VM
         targetable: true
 """
@@ -92,7 +92,7 @@ def test_the_same_firewall_marked_non_targetable_is_reported_but_NOT_blocking():
     it. Failing anyway would train people to ignore the check, which is how a
     real divergence gets waved through."""
     cat = CATALOG + """      "007955000893662":
-        hostname: fw-gone
+        display_name: fw-gone
         model: PA-VM
         targetable: false
 """
@@ -237,3 +237,47 @@ def test_a_parent_folder_is_not_reported_as_empty():
     every run, which is how a real finding later gets skipped."""
     findings = compare(_h(), _live())
     assert not [f for f in findings if "NO FIREWALL" in f.message]
+
+
+def test_a_reset_display_name_is_NOTED():
+    """Cosmetic on its own — and a reliable symptom of a RE-ONBOARD.
+
+    On 2026-08-05 the name went to `PA-VM`, the device-scope interface overrides
+    were destroyed, and `is_first_push_done` returned to false. A push in that
+    window would have stripped the addressing off a working firewall. The name is
+    the cheapest visible signal that it happened.
+    """
+    cat = CATALOG.replace(
+        '        display_name: fw-a\n', '        display_name: fw-a\n')
+    rows = [dict(r) for r in LIVE_OK]
+    for r in rows:
+        if r["name"] == "007955000894453":
+            r["display_name"] = "PA-VM"          # what a re-onboard leaves behind
+    findings = compare(_h(cat), _live(rows))
+    hits = [f for f in findings if "display_name" in f.message]
+    assert len(hits) == 1
+    assert not hits[0].blocking, "a label must not fail the pipeline"
+    assert "RE-ONBOARDED" in hits[0].message
+
+
+def test_a_matching_display_name_is_silent():
+    """A check that fires when nothing is wrong is one people stop reading."""
+    cat = CATALOG.replace(
+        '        display_name: fw-a\n', '        display_name: fw-a\n')
+    rows = [dict(r) for r in LIVE_OK]
+    for r in rows:
+        if r["name"] == "007955000894453":
+            r["display_name"] = "fw-a"
+    assert not [f for f in compare(_h(cat), _live(rows)) if "display_name" in f.message]
+
+
+def test_a_device_with_no_declared_display_name_is_not_reported():
+    """Declaring one is optional. Absence means "not tracked", not "mismatched" —
+    otherwise adding the check would have flagged every device in every catalog
+    that had not opted in yet."""
+    bare = CATALOG.replace("        display_name: fw-a\n", "")
+    rows = [dict(r) for r in LIVE_OK]
+    for r in rows:
+        if r["name"] == "007955000894453":
+            r["display_name"] = "anything-at-all"
+    assert not [f for f in compare(_h(bare), _live(rows)) if "display_name" in f.message]

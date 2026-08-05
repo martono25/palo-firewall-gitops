@@ -173,3 +173,16 @@ def test_the_shipped_app_catalog_declares_no_folders():
     offenders = [n for n, spec in (raw.get("apps") or {}).items()
                  if isinstance(spec, dict) and "folder" in spec]
     assert not offenders, f"apps still declaring a folder: {offenders}"
+
+
+def test_the_old_hostname_key_is_REJECTED():
+    """`hostname:` was parsed by NOTHING — a decorative field in a file that
+    otherwise drives behaviour — and it never held the hostname (that is
+    DHCP-assigned, `ip-10-100-0-51`, and undeclared). Renaming it silently would
+    leave the old key looking meaningful while doing nothing, which is the state
+    it was already in."""
+    from fwgitops.catalog import FolderHierarchy
+    with pytest.raises(CatalogError, match="renamed to `display_name`"):
+        FolderHierarchy.from_dict({"folders": {"prod-edge": {
+            "children": [], "targetable": True,
+            "devices": {"007955000894453": {"hostname": "fw-a", "targetable": True}}}}})

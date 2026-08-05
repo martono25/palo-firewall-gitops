@@ -281,6 +281,15 @@ class FolderHierarchy:
     devices: Dict[str, str] = field(default_factory=dict)
     #: Serials explicitly marked targetable, same fail-closed rule as folders.
     targetable_devices: FrozenSet[str] = frozenset()
+    #: serial -> the DISPLAY NAME this platform expects SCM to show.
+    #:
+    #: Not the firewall's hostname — that is `ip-10-100-0-51` here, set by DHCP,
+    #: and nothing declares it. This is the label SCM shows in its inventory,
+    #: which a re-onboard RESETS (it went to `PA-VM` on 2026-08-05 and nothing
+    #: noticed). Declared so `verify-catalog` can catch that: the reset itself is
+    #: cosmetic, but it is a reliable symptom of a re-registration, and a
+    #: re-registration wipes device-scope config.
+    device_display_names: Dict[str, str] = field(default_factory=dict)
 
     def has_children(self, folder: str) -> bool:
         return bool(self.children.get(folder))
@@ -334,6 +343,7 @@ class FolderHierarchy:
         out: Dict[str, FrozenSet[str]] = {}
         targetable: set = set()
         devices: Dict[str, str] = {}
+        display_names: Dict[str, str] = {}
         targetable_devices: set = set()
         for name, spec in folders.items():
             # A device folder is named for the serial. Unquoted, YAML reads a
@@ -393,6 +403,24 @@ class FolderHierarchy:
                         f"{devices[serial]!r} and {name.strip()!r} — a firewall sits "
                         f"under exactly one folder")
                 devices[serial] = name.strip()
+                if isinstance(dspec, dict) and "hostname" in dspec:
+                    # REJECTED, not ignored. `hostname:` was never parsed by
+                    # anything — a third decorative field in a file that
+                    # otherwise drives behaviour — and it never held the
+                    # hostname. Renaming it silently would leave the old key
+                    # looking meaningful while doing nothing, exactly as before.
+                    raise CatalogError(
+                        f"folder hierarchy: {serial!r}.hostname is renamed to "
+                        f"`display_name`. It never held the firewall's hostname (that is "
+                        f"DHCP-assigned and undeclared) — it is the label SCM shows, which "
+                        f"`fwgitops verify-catalog` now compares. Rename the key.")
+                dname = dspec.get("display_name") if isinstance(dspec, dict) else None
+                if dname is not None:
+                    if not isinstance(dname, str) or not dname.strip():
+                        raise CatalogError(
+                            f"folder hierarchy: {serial!r}.display_name must be a "
+                            f"non-empty string, got {dname!r}")
+                    display_names[serial] = dname.strip()
                 dflag = dspec.get("targetable") if isinstance(dspec, dict) else None
                 if dflag is not None and not isinstance(dflag, bool):
                     raise CatalogError(
@@ -411,7 +439,8 @@ class FolderHierarchy:
                 f"A firewall is the last level of the hierarchy but is addressed "
                 f"`device=<serial>`, never `folder=<serial>`.")
         return cls(children=out, targetable=frozenset(targetable),
-                   devices=devices, targetable_devices=frozenset(targetable_devices))
+                   devices=devices, targetable_devices=frozenset(targetable_devices),
+                   device_display_names=display_names)
 
 
 @dataclass(frozen=True)

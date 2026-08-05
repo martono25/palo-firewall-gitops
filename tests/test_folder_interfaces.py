@@ -34,7 +34,7 @@ folders:
     targetable: true
     devices:
       "007955000894453":
-        hostname: fw-a
+        display_name: fw-a
         model: PA-VM
         targetable: true
 """
@@ -87,7 +87,7 @@ def test_a_folder_whose_firewalls_disagree_is_REJECTED():
     choosing.
     """
     folders = FOLDERS + """      "007955000893662":
-        hostname: fw-b
+        display_name: fw-b
         model: PA-VM
         targetable: true
 """
@@ -102,7 +102,7 @@ def test_agreement_is_not_a_conflict():
     """The guard must fire on DISAGREEMENT, not on having more than one firewall
     — otherwise it would block every multi-firewall folder."""
     folders = FOLDERS + """      "007955000893662":
-        hostname: fw-b
+        display_name: fw-b
         model: PA-VM
         targetable: true
 """
@@ -137,7 +137,7 @@ def test_a_conflict_writes_nothing_at_all(tmp_path):
     (tmp_path / "interfaces.yaml").write_text(
         CATALOG + '      "007955000893662": ethernet1/5\n')
     (tmp_path / "folders.yaml").write_text(FOLDERS + """      "007955000893662":
-        hostname: fw-b
+        display_name: fw-b
         model: PA-VM
         targetable: true
 """)
