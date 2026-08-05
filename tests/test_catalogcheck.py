@@ -209,3 +209,31 @@ def test_the_shipped_catalog_parses_and_compares(tmp_path):
     h = FolderHierarchy.from_dict(
         yaml.safe_load((REPO_ROOT / "catalog" / "folders.yaml").read_text()))
     assert compare(h, _live()) is not None
+
+
+def test_a_targetable_folder_with_no_firewall_is_NOTED_not_blocking():
+    """Objects compiled there reach no device: compile, apply and push all
+    succeed and nothing is enforced.
+
+    Non-blocking on purpose. ADR-0002 creates the folder BEFORE the firewall
+    registers to it, so an empty folder is the normal state during bring-up —
+    failing would break the documented order and train people to ignore this.
+    """
+    cat = CATALOG + """  GitOps:
+    children: []
+    targetable: true
+"""
+    rows = LIVE_OK + [{"name": "GitOps", "type": "container", "parent": "ngfw-shared"}]
+    findings = compare(_h(cat), _live(rows))
+    empty = [f for f in findings if "NO FIREWALL" in f.message]
+    assert len(empty) == 1
+    assert not empty[0].blocking
+    assert "GitOps" in empty[0].subject
+
+
+def test_a_parent_folder_is_not_reported_as_empty():
+    """`ngfw-shared` has no firewall of its own but inherits down to `prod-edge`,
+    so config placed there does reach devices. Reporting it would be noise on
+    every run, which is how a real finding later gets skipped."""
+    findings = compare(_h(), _live())
+    assert not [f for f in findings if "NO FIREWALL" in f.message]

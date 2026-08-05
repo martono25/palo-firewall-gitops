@@ -148,10 +148,23 @@ class NameCatalog:
 
 @dataclass(frozen=True)
 class AppDef:
-    """A named application: its environment/folder/zone and where it lives."""
+    """A named application: its environment and zone, and where it lives.
+
+    NO `folder` (removed 2026-08-05, "Model A"). A rule's folder is a property of
+    the TRAFFIC PATH, not of either endpoint: a rule from an app in folder X to
+    one in folder Y traverses both firewalls, so asking an app which folder to
+    use is ambiguous for most rules. The folder comes from `environment`, and an
+    app's folder is therefore derivable from its environment rather than declared
+    beside it.
+
+    It had been declared in catalog/apps.yaml and stored here, and the compiler
+    NEVER READ IT — `_target()` has always used `env_map.resolve(...).folder`. An
+    app whose folder contradicted its environment loaded without complaint and
+    the contradiction did nothing, which is the silent-drop failure this codebase
+    removes wherever it appears.
+    """
 
     environment: str
-    folder: str
     zone: str
     addresses: Tuple[str, ...]  # CIDRs (network addresses; strict)
     fqdns: Tuple[str, ...]
@@ -183,7 +196,7 @@ class AppCatalog:
             raise CatalogError("app catalog must be a mapping")
         entries = raw.get("apps", raw) if "apps" in raw else raw
         if not isinstance(entries, dict):
-            raise CatalogError("'apps' must be a mapping of name -> {environment, folder, zone, ...}")
+            raise CatalogError("'apps' must be a mapping of name -> {environment, zone, ...}")
 
         out: Dict[str, AppDef] = {}
         problems: List[str] = []
@@ -191,9 +204,19 @@ class AppCatalog:
             if not isinstance(spec, dict):
                 problems.append(f"{name}: must be a mapping")
                 continue
-            env, folder, zone = spec.get("environment"), spec.get("folder"), spec.get("zone")
+            # REJECTED, not ignored. This loader would otherwise drop `folder:`
+            # silently — which is exactly what it did until 2026-08-05, so every
+            # shipped app declared one that had no effect. Deleting the field
+            # without rejecting it would leave those files looking correct.
+            if "folder" in spec:
+                problems.append(
+                    f"{name}.folder: removed — an app does not choose the folder. A rule's "
+                    f"folder comes from its `environment` (catalog/environments.yaml), because "
+                    f"the folder is a property of the traffic path, not of an endpoint. Delete "
+                    f"this line; the app's folder is its environment's folder.")
+            env, zone = spec.get("environment"), spec.get("zone")
             strs_ok = True
-            for field, val in (("environment", env), ("folder", folder), ("zone", zone)):
+            for field, val in (("environment", env), ("zone", zone)):
                 if not isinstance(val, str) or not val.strip():
                     problems.append(f"{name}.{field}: required non-empty string")
                     strs_ok = False
@@ -219,7 +242,7 @@ class AppCatalog:
 
             if strs_ok:
                 out[str(name)] = AppDef(
-                    environment=env, folder=folder, zone=zone,
+                    environment=env, zone=zone,
                     addresses=tuple(valid_addr), fqdns=tuple(str(f) for f in fqdns),
                 )
         if problems:
