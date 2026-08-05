@@ -258,7 +258,11 @@ def test_rule_carries_full_provenance_tags():
     assert meta.req_id == "REQ-2026-0417"
     assert meta.ticket == "JIRA-12345"
     assert meta.section.value == "specific-allow"
-    assert meta.expires is not None
+    # NO expiry tag, even though this intent HAS an `expires` date. It is CI
+    # lifecycle, not a property of the rule — nothing on the firewall acts on it.
+    # It survives in the intent YAML and the evidence bundle.
+    assert meta.expires is None
+    assert not any(t.startswith("gitops:expires") for t in ch.rule.tags)
 
 
 def test_objects_tagged_managed_marker_only():

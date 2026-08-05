@@ -278,6 +278,8 @@ metadata:
   justification: "Web tier needs to reach the payments API"
   requested: 2026-07-19
   expires: 2026-10-19          # optional; null = permanent (higher review tier)
+                               # NOTE: CI lifecycle only. NOT written to the
+                               # firewall and NOT enforced by it — see below.
 spec:
   environment: prod            # → resolves to SCM folder + zone context
   action: allow                # allow | deny
@@ -608,9 +610,22 @@ never stages two changes at once (preserves 1:1 isolation + clean rollback); (b)
 step FAILS CLOSED if unexpected staged changes are present — committing an out-of-band GUI
 edit under our audit trail would be worse than stopping. That staged delta is Level-1 drift.
 
-**Expiry auto-rollback:** a scheduled job finds rules past `expires:` and generates a removal change
-(auto for low-risk, gated otherwise) — expiry metadata drives lifecycle, keeping temporary rules from
-rotting into permanent exposure.
+**Expiry auto-rollback — DESIGNED, NOT BUILT (status as of 2026-08-05).** The intent is that a
+scheduled job finds rules past `expires:` and generates a removal change (auto for low-risk, gated
+otherwise), keeping temporary rules from rotting into permanent exposure. **Neither that job nor the
+"null = permanent → higher review tier" rule exists yet**, so today `expires:` is recorded and acted
+on by nobody. Stated plainly because an evidence bundle asserts the date, and a reader is entitled to
+know whether anything honours it.
+
+`expires:` is **CI lifecycle, not rule expiry**. It is NOT written to the firewall: it used to be a
+`gitops:expires:<date>` tag, removed in v1.22.0 because PAN-OS stores such a tag and ignores it — a
+date on the device that looked like a control and was not one. PAN-OS *does* have real rule expiry
+(`scm_security_rule.schedule` → `scm_schedule.non_recurring`, enforced on the device); if expiry ever
+needs to survive CI being broken, that is the mechanism, and it is a separate decision.
+
+Consequence: because the date is no longer on the rule, the removal job must read intent YAML rather
+than live state — it can say what SHOULD have expired, not what IS expired on a firewall whose intent
+was deleted.
 
 Git stays authoritative throughout: the SCM snapshot restore is a break-glass escape only (it bypasses
 Git and creates Level-1 drift that must then be back-filled).

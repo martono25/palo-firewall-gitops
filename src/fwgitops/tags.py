@@ -103,12 +103,35 @@ def managed_tags(
     req_id: str,
     section: Union[Section, str],
     ticket: Optional[str] = None,
-    expires: Optional[date] = None,
 ) -> list[str]:
     """Build the canonical tag set for a managed object/rule.
 
     The marker tag is always first. Deterministic: identical inputs yield an
     identical, order-stable list.
+
+    ── EXPIRY IS DELIBERATELY NOT HERE (removed 2026-08-05) ────────────────
+    `metadata.expires` used to be written as `gitops:expires:<date>`. It is not
+    any more, because it is CI EXPIRY, NOT RULE EXPIRY: nothing on the firewall
+    acts on it. PAN-OS stores the tag and ignores it, so on the device it was a
+    date that looked like a control and was not one — the most expensive kind of
+    metadata, because a reader in the SCM UI reasonably assumes something
+    enforces it.
+
+    A rule's tags describe WHAT THE RULE IS. Expiry describes what this pipeline
+    intends to DO with the request later, which is a property of the request, not
+    of the firewall object. It lives in the intent YAML and the evidence bundle,
+    which is where lifecycle belongs.
+
+    PAN-OS DOES have real rule expiry — `scm_security_rule.schedule` pointing at
+    an `scm_schedule` with `non_recurring` date ranges, enforced on the device.
+    If device-enforced expiry is ever wanted, that is the mechanism; a tag was
+    never going to be.
+
+    CONSEQUENCE, accepted knowingly: an expired-rule check can no longer be
+    answered from live state alone. `parse_managed_meta` still READS the tag so
+    rules tagged before this change are understood, but nothing writes it, so the
+    check must read intent YAML. That trades drift's independence from Git for
+    not shipping a date the device implies it honours.
     """
     section_value = section.value if isinstance(section, Section) else Section(section).value
     tags = [
@@ -118,8 +141,6 @@ def managed_tags(
     ]
     if ticket is not None:
         tags.append(_tag("ticket", _validate_value("ticket", ticket)))
-    if expires is not None:
-        tags.append(_tag("expires", expires.isoformat()))
     return tags
 
 
@@ -155,6 +176,10 @@ def parse_managed_meta(tags: Iterable[str]) -> Optional[ManagedMeta]:
         elif key == "ticket":
             ticket = value
         elif key == "expires":
+            # LEGACY READ ONLY. `managed_tags` no longer writes this — see the
+            # note there. Kept so a rule tagged before 2026-08-05, or by an older
+            # version still deployed somewhere, is parsed rather than treated as
+            # malformed. Remove once no live rule carries one.
             expires = date.fromisoformat(value)
 
     if req_id is None:

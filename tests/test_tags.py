@@ -38,15 +38,46 @@ def test_full_round_trip_build_then_parse():
         req_id="REQ-2026-0417",
         section=Section.SPECIFIC_ALLOW,
         ticket="JIRA-12345",
-        expires=date(2026, 10, 19),
     )
     meta = parse_managed_meta(built)
     assert meta == ManagedMeta(
         req_id="REQ-2026-0417",
         section=Section.SPECIFIC_ALLOW,
         ticket="JIRA-12345",
-        expires=date(2026, 10, 19),
+        expires=None,
     )
+
+
+def test_expiry_is_NEVER_written_to_a_rule():
+    """`metadata.expires` is CI lifecycle, not a property of the firewall rule.
+
+    Nothing on the device acts on it: PAN-OS stores the tag and ignores it, so
+    writing it shipped a date that LOOKED like a control and was not one — the
+    expensive kind of metadata, because a reader in the SCM UI reasonably assumes
+    something enforces it. Real device-enforced expiry exists
+    (`scm_security_rule.schedule` -> `scm_schedule.non_recurring`); a tag was
+    never going to be it.
+
+    Asserted on the KEY, not on one date, so no future caller can reintroduce it
+    under a different value.
+    """
+    for kwargs in (
+        dict(req_id="REQ-1", section=Section.SPECIFIC_ALLOW),
+        dict(req_id="REQ-1", section=Section.SPECIFIC_ALLOW, ticket="T-1"),
+    ):
+        assert not any(t.startswith("gitops:expires") for t in managed_tags(**kwargs))
+
+
+def test_a_legacy_expiry_tag_is_still_PARSED():
+    """Nothing writes one any more, but rules tagged before 2026-08-05 (or by an
+    older version still deployed) carry them. Parsing must keep working, or those
+    rules would look malformed to drift — which fails closed loudly and would
+    turn a cosmetic change into an incident."""
+    legacy = managed_tags(req_id="REQ-OLD", section=Section.SPECIFIC_ALLOW) + [
+        "gitops:expires:2026-10-19"]
+    meta = parse_managed_meta(legacy)
+    assert meta.req_id == "REQ-OLD"
+    assert meta.expires == date(2026, 10, 19)
 
 
 def test_optional_fields_omitted():
@@ -63,7 +94,7 @@ def test_section_accepts_enum_and_str_equivalently():
 
 
 def test_determinism_identical_inputs_identical_output():
-    kw = dict(req_id="REQ-9", section=Section.SPECIFIC_ALLOW, ticket="T-1", expires=date(2027, 1, 1))
+    kw = dict(req_id="REQ-9", section=Section.SPECIFIC_ALLOW, ticket="T-1")
     assert managed_tags(**kw) == managed_tags(**kw)
 
 
