@@ -3,6 +3,52 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.21.0] — 2026-08-05
+
+### `fwgitops verify-catalog` — the catalog can no longer lie quietly
+
+`catalog/folders.yaml` is a hand-maintained mirror of a hierarchy that changes
+underneath it. It is declared rather than read live on purpose, so the compiler
+and classifier stay pure — but purity buys determinism, not truth, and nothing
+was checking the truth.
+
+It had already gone wrong twice, in opposite directions: device serials listed as
+targetable child FOLDERS (v1.11.0), and a firewall that left SCM entirely while
+the catalog kept listing it as targetable with port mappings (2026-08-05). Both
+produce the same failure — an intent that compiles clean and dies at apply,
+having passed every compile-time check, because none of them look here.
+
+Read-only, wired into the PR gate and the scheduled drift job. Catches:
+
+- declared but **absent** from SCM
+- declared as a FOLDER where SCM reports `on-prem` (a DEVICE) — `folder=<serial>`
+  is rejected on write
+- a folder under a different **parent** — config inherits down the tree, so the
+  blast radius this repo records would be wrong
+- a firewall under a different parent — its zones, routes and rules come from a
+  folder this repo is not managing
+
+Two judgement calls, both about staying worth reading:
+
+- **`targetable: false` is an acknowledgement, not a failure.** An entry the
+  operator has already fenced off is reported and exits 0. Failing anyway trains
+  people to ignore the check, which is how a real divergence gets waved through.
+- **Objects in SCM the catalog does not mention are not reported.** Prisma Access
+  built-ins are deliberately unmanaged; flagging them every run would make this
+  noise.
+
+**Verified against the live tenant by mutation:** with `catalog/folders.yaml`
+restored to its pre-2026-08-05 state, it exits 2 and names all three stale
+entries. It would have caught the bug that motivated it.
+
+Fails closed on an empty read and on a transport failure — a check that passes
+when it could not reach what it checks is worse than no check.
+
+This also **unblocks v2.0 re-parenting**: a move surfaces as a parent divergence,
+which is now blocking, so an out-of-band re-parent is caught rather than believed.
+
+- 608 tests (+12).
+
 ## [1.20.0] — 2026-08-05
 
 ### `fwgitops scaffold-root` — the last manual step in greenfield
