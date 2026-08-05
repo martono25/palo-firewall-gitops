@@ -47,6 +47,18 @@ jobs:
           role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
           aws-region: ap-southeast-1
 
+      # IS THE FIREWALL RUNNING WHAT SCM HOLDS? Drift (below) compares Git
+      # against SCM. Nothing compared SCM against the DEVICE, so a change could
+      # be applied in SCM and never reach the firewall — Git and SCM agreeing
+      # while the device runs something else. Silent, persistent, and the next
+      # successful push by anyone applies it, including someone pushing an
+      # unrelated change.
+      #
+      # Observed 2026-08-06: a logical router destroyed in SCM, the push refused,
+      # and the device still forwarding on the deleted route. Nothing reported it.
+      - name: Device config sync (SCM vs firewall)
+        run: fwgitops device-sync
+
       # THE CATALOG IS A HAND-MAINTAINED MIRROR of a hierarchy that changes
       # underneath it, and nothing verified the two until now. It has gone wrong
       # twice: device serials listed as child FOLDERS (v1.11.0), and a firewall

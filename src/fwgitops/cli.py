@@ -1191,6 +1191,67 @@ def run_verify_catalog(
     return 0
 
 
+def run_device_sync(*, session=None, out=None, err=None) -> int:
+    """Is each FIREWALL running what SCM holds? READ-ONLY.
+
+    Drift detection compares Git against SCM. Nothing compared SCM against the
+    DEVICE — so a change could be applied in SCM and never reach the firewall,
+    with Git and SCM agreeing while the device runs something else. Silent,
+    persistent, and the next successful push by anyone applies it.
+
+    Exit 2 when any device is behind, never-pushed, or unreadable. Unlike the
+    catalog's cosmetic findings this is not a note: config that exists in SCM and
+    is not enforced on the firewall is the platform's core claim being false.
+    """
+    from fwgitops.devicesync import compare, latest_committed, running_by_device
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    if session is None:
+        from fwgitops.scmapi import ScmCredentials, ScmSession
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except Exception as e:  # noqa: BLE001
+            print(f"error: cannot reach SCM: {e}", file=err)
+            return 1
+    try:
+        devices = session.request("GET", "/config/setup/v1/devices",
+                                  params={"limit": 200}).get("data", []) or []
+        running = running_by_device(
+            session.request("GET", "/config/operations/v1/config-versions/running"))
+        latest: Dict[str, Optional[int]] = {}
+        for folder in sorted({d.get("folder") for d in devices if d.get("folder")}):
+            vs = session.request("GET", "/config/operations/v1/config-versions/candidate",
+                                 params={"folder": folder}).get("data", []) or []
+            latest[folder] = latest_committed(vs)
+    except Exception as e:  # noqa: BLE001 - any transport/API failure
+        print(f"error: reading SCM config versions failed: {e}", file=err)
+        return 1
+
+    if not devices:
+        # Fail closed: no devices could mean a healthy empty tenant OR a broken
+        # read, and reporting "all in sync" for the second is the blindness this
+        # command exists to remove.
+        print("error: SCM returned no devices; refusing to report sync status "
+              "against an empty inventory", file=err)
+        return 1
+
+    results = compare(devices, running, latest)
+    problems = [r for r in results if r.is_problem]
+    for r in sorted(results, key=lambda x: x.serial):
+        ver = f"v{r.running_version}" if r.running_version is not None else "v?"
+        want = f"v{r.latest_version}" if r.latest_version is not None else "v?"
+        print(f"  {r.serial:20} {r.state:13} running={ver:5} committed={want:5} "
+              f"folder={r.folder}", file=out)
+    if problems:
+        print(f"OUT OF SYNC — {len(problems)} of {len(results)} device(s):", file=err)
+        for r in problems:
+            print(f"  - {r.serial}: {r.detail}", file=err)
+        return 2
+    print(f"OK — {len(results)} device(s) running the newest committed config", file=out)
+    return 0
+
+
 def run_apply_order(out_root: Path, *, out=None, err=None) -> int:
     """Print Terraform root directories in APPLY order (ADR-0002's chain).
 
@@ -1813,6 +1874,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "alphabetically. The apply pipeline consumes this so the "
                          "sequencing lives in the registry, not in a workflow file.")
 
+    ds = sub.add_parser("device-sync",
+                        help="is each firewall running what SCM holds? (read-only)")
+
     vc = sub.add_parser("verify-catalog",
                         help="verify catalog/folders.yaml against SCM's real hierarchy (read-only)")
     vc.add_argument("--folders", default=Path("catalog/folders.yaml"), type=Path)
@@ -1953,6 +2017,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         for name in sorted(names):
             print(name)
         return 0
+    if args.command == "device-sync":
+        return run_device_sync()
+
     if args.command == "verify-catalog":
         return run_verify_catalog(folders_path=args.folders,
                                   interface_catalog_path=args.interfaces)
