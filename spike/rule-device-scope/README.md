@@ -24,6 +24,47 @@ is exactly why the control was mandatory. Without it, "device-scope rule
 rejected" and "device scope rejected" are indistinguishable, and they imply
 different builds.
 
+## RE-VERIFIED 2026-08-05 after a challenge that device scope was enabled
+
+The conclusion held, but the first round's supporting evidence was partly WRONG
+and is retracted here rather than quietly dropped.
+
+**Raw REST, default host, clean state, control in the same run:**
+
+| resource | device-scope WRITE |
+|---|---|
+| `scm_ethernet_interface` | **ACCEPTED** |
+| `scm_zone` | rejected |
+| `scm_logical_router` | rejected |
+| `scm_address` | rejected |
+| `scm_tag` | rejected |
+| `scm_security_rule` | **rejected** |
+
+So it is broader than first reported: addresses and tags are folder-only too.
+**Only `scm_ethernet_interface` supports device scope.**
+
+### Two things I had wrong
+
+1. **`device` goes in the request BODY, not the query string.** The provider's
+   own `CURL COMMAND EQUIVALENT` (visible at `TF_LOG=TRACE`) shows
+   `-d '{"device":"<serial>",...}'` with no query parameter. Every earlier raw
+   REST probe passed it as `params={"device": ...}` and was therefore testing
+   nothing. Rerun with the body form, the matrix above is what comes out.
+
+2. **`"Device <serial> doesn't exist" is NOT a reliable signal of scope
+   support.** The same message comes back when the object already exists at that
+   scope — a POST for an `ethernet1/1` override that was already present returned
+   it, and the identical request succeeded once the object was destroyed. So the
+   message covers at least two unrelated conditions, and a single rejection
+   proves nothing without a clean state AND a positive control.
+
+**A hypothesis raised and RETRACTED:** the provider talks to
+`api.strata.paloaltonetworks.com` while `src/fwgitops/scmapi.py` defaults to
+`api.sase.paloaltonetworks.com`, which looked like it explained everything. A/B
+tested with the same body at the same moment: **both hosts behave identically**,
+accepting the interface and refusing the rule. The host is not a factor and there
+is no tooling defect here.
+
 ## Three of four now behave this way
 
 | resource | device scope on write | probe |
