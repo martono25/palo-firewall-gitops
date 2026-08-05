@@ -619,3 +619,102 @@ def test_every_shipped_intent_still_loads():
         load_intent(_yaml.safe_load(path.read_text()), **kw)
         seen += 1
     assert seen >= 10
+
+
+# ── unknown spec keys are rejected, not ignored ───────────────────────────
+def _spec_keys_actually_read(src_path):
+    """Every `spec:` key each loader really reads, by walking the AST.
+
+    DISCOVERS accessors rather than hard-coding them: any `helper(sp, "key", ...)`
+    counts, and any other helper taking `sp` first is followed. The first version
+    of this hard-coded the accessor list, missed `_opt_positive_int`, and produced
+    an allow-list that would have REJECTED the shipped default route — which sets
+    `metric: 10` and always reached the firewall correctly.
+    """
+    import ast
+    from pathlib import Path as _Path
+
+    tree = ast.parse(_Path(src_path).read_text())
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+
+    def keys_of(fn, seen):
+        if fn.name in seen:
+            return set()
+        seen = seen | {fn.name}
+        out = set()
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            if (isinstance(f, ast.Attribute) and f.attr == "get"
+                    and isinstance(f.value, ast.Name) and f.value.id == "sp"
+                    and node.args and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                out.add(node.args[0].value)
+            if not isinstance(f, ast.Name):
+                continue
+            if not (node.args and isinstance(node.args[0], ast.Name)
+                    and node.args[0].id == "sp"):
+                continue
+            if (len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+                    and isinstance(node.args[1].value, str)):
+                out.add(node.args[1].value)
+            elif f.id == "_load_target":
+                out |= {"folder", "device", "environment"}
+            elif f.id in funcs:
+                out |= keys_of(funcs[f.id], seen)
+        return out
+
+    return {name: keys_of(fn, set())
+            for name, fn in funcs.items() if name.endswith("_spec")}
+
+
+@pytest.mark.parametrize("loader,constant", [
+    ("_load_spec", "_ACCESS_SPEC_KEYS"),
+    ("_load_zone_spec", "_ZONE_SPEC_KEYS"),
+    ("_load_interface_spec", "_INTERFACE_SPEC_KEYS"),
+    ("_load_route_spec", "_ROUTE_SPEC_KEYS"),
+])
+def test_each_allow_list_matches_what_its_loader_actually_reads(loader, constant):
+    """Both directions matter, and each is a different bug.
+
+    A key the loader READS but that is MISSING from the allow-list rejects a
+    valid intent — the worst outcome, because it blocks legitimate work and the
+    error blames the author. That is not hypothetical: hand-listing these sets
+    omitted `metric`, and the shipped default route stopped loading.
+
+    A key LISTED but never read is a dead allowance that lets exactly the typo
+    this guard exists to catch straight through.
+    """
+    from pathlib import Path as _Path
+
+    import fwgitops.intent as mod
+
+    read = _spec_keys_actually_read(_Path(mod.__file__))[loader]
+    declared = set(getattr(mod, constant))
+    assert declared == read, (
+        f"{constant} and {loader} disagree — "
+        f"only in loader: {sorted(read - declared)} (would REJECT valid intents); "
+        f"only in list: {sorted(declared - read)} (dead allowance)")
+
+
+def test_an_unknown_spec_key_is_REJECTED():
+    """The sharper half of the metadata guard. `metadata:` is paperwork; `spec:`
+    is firewall behaviour, so a dropped key is a rule that does not do what it
+    says — and looks fine doing it."""
+    doc = valid_doc()
+    doc["spec"]["logging"] = True          # the field is `log`
+    with pytest.raises(IntentError, match=r"unknown field\(s\) \['logging'\]"):
+        load_intent(doc)
+
+
+def test_a_plausible_typo_in_spec_does_not_silently_weaken_the_rule():
+    """`log: true` is the difference between a logged allow and an unlogged one.
+    Before this, `logging: true` compiled clean and produced a rule with logging
+    at its default — no plan diff, no warning, no failed apply, and a rule weaker
+    than the one that was approved."""
+    doc = valid_doc()
+    doc["spec"]["logging"] = True
+    del doc["spec"]["log"]
+    with pytest.raises(IntentError, match="does not do what it says"):
+        load_intent(doc)

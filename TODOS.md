@@ -472,27 +472,25 @@ been hit before only because no tag value has ever changed on a live rule.
 **Effort:** M
 **Priority:** P2
 
-### `spec:` still ignores unknown keys — `metadata:` no longer does
+### ~~`spec:` ignores unknown keys~~ — BUILT v1.25.0
 
-**Found 2026-08-05 while closing the metadata case (v1.24.0).** `_load_metadata`
-now rejects unknown fields, so a typo or a retired key fails at PR time instead
-of being silently dropped. The `spec:` blocks were NOT changed and still ignore
-anything they do not recognise.
+All four spec loaders now reject unknown fields, closing the class the metadata
+guard started. `spec` was the sharper half: it is where firewall behaviour lives,
+so a dropped key is a rule that does not do what it says and looks fine doing it
+(`logging: true` compiled clean and produced a rule logging at its default — no
+plan diff, no warning, no failed apply).
 
-That is the larger surface: `spec` is where the firewall behaviour lives, so a
-dropped key there is a rule that does not do what it says. `spec: {..., logging:
-true}` compiles clean and logs nothing, because the field is `log`.
+The allow-lists are pinned by an AST test that walks each loader and asserts the
+declared set EXACTLY matches the keys actually read. Both directions are bugs: a
+key read but unlisted REJECTS a valid intent, and a key listed but unread is a
+dead allowance that lets the typo through. Mutation-verified in both directions.
 
-Not done in the same change deliberately — there are five spec loaders
-(AccessRequest, Zone, Interface, Route, plus the nested endpoint/service forms),
-each with its own allowed set, and getting one wrong REJECTS a currently valid
-intent. The metadata case was one small set with a test pinning it to the
-dataclass; the spec case needs the same treatment five times over, and each set
-should be derived from its dataclass the same way rather than hand-listed.
-
-**Effort:** M
-**Priority:** P2 — the failure is silent and lands on rule behaviour rather than
-on paperwork, which makes it worse than the one just fixed.
+**Worth keeping:** the first version of that test hard-coded the accessor helpers
+it knew about, missed `_opt_positive_int`, and produced an allow-list that
+rejected the shipped default route (`metric: 10`). Caught by the
+every-shipped-intent test added the day before, not by review. The test now
+DISCOVERS accessors — any `helper(sp, "key", ...)` counts — so a new accessor
+cannot silently drop out of the audit.
 
 ## Drift
 
