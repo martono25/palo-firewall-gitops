@@ -533,9 +533,24 @@ Terraform auto-loaded it, and a real deletion read as `No changes` LOCALLY while
 CI (clean checkout, gitignored tfvars) did the right thing. Verification that
 lies is worse than none.
 
-**Still open:** nothing for zones. The equivalent path for `RouteRequest` is
-untested, and a route is the object an outage runs through — the same experiment
-is worth repeating there.
+**Remaining deletion work is v2.0 (decision 2026-08-05).** Zones are proven and
+need nothing further; what is deferred is the DELETION PATH AS A DESIGNED
+FEATURE rather than an observed behaviour:
+
+* **`RouteRequest` deletion — untested.** A route is the object an outage runs
+  through, and unlike a zone its removal has no obvious backstop: SCM refused the
+  zone delete because a rule REFERENCED it, whereas deleting the last route from
+  a logical router leaves a perfectly valid object that simply no longer forwards
+  anything. Nothing would refuse that. The same experiment repeated here is the
+  first task.
+* **Deletion is currently a BEHAVIOUR, not a contract.** It works because SCM
+  happens to fail closed. No test in this repo asserts it, no ADR states what
+  removal of an intent is supposed to mean per kind, and the classifier does not
+  tier a deletion differently from a creation — removing a rule that permits
+  traffic and removing a route that carries it are not the same act.
+
+**Priority:** P2 (v2.0), alongside `NatRequest` and rule ordering — all three are
+compiler/intent-model work rather than plumbing.
 
 ## Architecture
 
@@ -641,8 +656,20 @@ request should do — but it means **"Day-1 provisioning as GitOps" stops short 
 a genuinely greenfield folder**: someone must add an interface variable per role
 before any ZoneRequest in that folder can bind anything.
 
-**Priority:** P2 — decide whether bootstrap owning this is the answer (document
-it in ADR-0005) or whether a kind should own interface CREATION.
+**SCOPED TO v1 (decision 2026-08-05).** Not backlog. "Day-1 provisioning as
+GitOps" is v1's headline claim, and it is not true of a folder that starts empty
+— which is the only kind of folder a NEW site has. Closing v1 on a claim that
+holds only for the one folder whose interface variables were inherited by
+accident would be shipping a demo.
+
+The design question is still open and is the first thing to settle: does
+`bootstrap-scm-folder` own interface variables per role (documented in ADR-0005,
+platform config like the folder itself), or does a kind own interface CREATION?
+They differ in who is allowed to add a port, which is a permissions question
+before it is a code one.
+
+**Effort:** M
+**Priority:** P1 (v1) — blocks the v1 Day-1 claim being true for a new folder.
 
 ### ~~InterfaceRequest — intent kind #3~~ — DONE v1.8.0
 
