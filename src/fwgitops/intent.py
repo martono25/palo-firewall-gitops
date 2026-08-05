@@ -77,6 +77,12 @@ class Service:
     port: str      # "443" or "8000-8100"
 
 
+#: Every key `metadata:` may carry. Mirrors `Metadata` exactly; a test asserts
+#: the two cannot drift apart, because a field added to the dataclass and not
+#: here would be rejected in every intent that used it.
+_METADATA_KEYS = frozenset({"id", "requester", "ticket", "justification", "requested"})
+
+
 @dataclass(frozen=True)
 class Metadata:
     id: str
@@ -880,6 +886,25 @@ def _load_metadata(md: Any, c: _Collector) -> Optional[Metadata]:
               "expired rule. Delete the field. For expiry the DEVICE enforces, see "
               "`scm_security_rule.schedule` (PAN-OS schedules), which is a separate "
               "capability this platform does not yet wire.")
+
+    # UNKNOWN KEYS ARE REJECTED, not ignored.
+    #
+    # Silently dropping them is how a field stops working without anyone
+    # noticing: a typo (`justifcation:`) reads as "the required field is
+    # missing", which at least fails — but `tickets:` or a retired field reads as
+    # accepted and does nothing. The `expires` retirement made that concrete;
+    # this closes the class rather than the instance.
+    #
+    # `expires` is excluded here because it has its own message above explaining
+    # what replaced it. Folding it into a generic "unknown key" list would throw
+    # that away exactly when someone needs it.
+    if isinstance(md, dict):
+        unknown = sorted(str(k) for k in set(md) - _METADATA_KEYS - {"expires"})
+        if unknown:
+            c.add(path, f"unknown field(s) {unknown}; expected "
+                        f"{sorted(_METADATA_KEYS)}. Unknown keys are rejected rather "
+                        f"than ignored — a silently dropped field looks exactly like "
+                        f"one that works.")
 
     if None in (_id, requester, ticket, justification, requested):
         return None

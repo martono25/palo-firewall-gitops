@@ -546,3 +546,76 @@ def test_zone_reference_names_are_catalog_validated():
     with pytest.raises(IntentError) as e:
         load_intent(_zone_sec_doc(protection_profile="typo"), zone_protection_catalog=cat)
     assert any("zone-protection profile 'typo'" in str(p) for p in e.value.problems)
+
+
+# ── unknown metadata keys are rejected, not ignored ───────────────────────
+def test_an_unknown_metadata_key_is_REJECTED():
+    """Silently dropping unknown keys is how a field stops working with nobody
+    noticing. A typo like `justifcation:` at least fails, as the required field
+    then reads as missing — but `tickets:`, or a field retired in a later
+    version, reads as ACCEPTED and does nothing.
+
+    The `expires` retirement made that concrete: removing it from the schema
+    alone would have turned every existing `expires:` into a no-op. This closes
+    the class rather than that one instance.
+    """
+    doc = valid_doc()
+    doc["metadata"]["tickets"] = "JIRA-12345"
+    with pytest.raises(IntentError, match=r"unknown field\(s\) \['tickets'\]"):
+        load_intent(doc)
+
+
+def test_the_error_names_the_keys_that_ARE_allowed():
+    """A rejection that does not say what was expected just moves the guesswork."""
+    doc = valid_doc()
+    doc["metadata"]["justifcation"] = "typo"
+    with pytest.raises(IntentError) as e:
+        load_intent(doc)
+    for expected in ("id", "requester", "ticket", "justification", "requested"):
+        assert expected in str(e.value)
+
+
+def test_a_retired_key_keeps_its_OWN_message():
+    """`expires` explains what replaced it. Folding it into a generic unknown-key
+    list would throw that explanation away exactly when someone needs it."""
+    doc = valid_doc()
+    doc["metadata"]["expires"] = "2026-10-19"
+    with pytest.raises(IntentError, match="does not model rule expiry"):
+        load_intent(doc)
+
+
+def test_the_allowed_key_set_matches_the_dataclass():
+    """If a field is added to `Metadata` and not to `_METADATA_KEYS`, every intent
+    using it is rejected as unknown — the new field would be unusable, and the
+    error would blame the author rather than the schema."""
+    import dataclasses
+
+    from fwgitops.intent import _METADATA_KEYS, Metadata
+    assert {f.name for f in dataclasses.fields(Metadata)} == set(_METADATA_KEYS)
+
+
+def test_every_shipped_intent_still_loads():
+    """The guard is only safe if the repo's own intents pass it. A validation
+    change that rejects the shipped tree would fail CI on the next PR, whoever
+    opened it and whatever it touched."""
+    from pathlib import Path
+
+    import yaml as _yaml
+
+    from fwgitops.catalog import FolderHierarchy, InterfaceCatalog, RouterCatalog
+    from fwgitops.resolve import EnvMap
+    root = Path(__file__).resolve().parents[1]
+    kw = dict(
+        env_map=EnvMap.from_dict(_yaml.safe_load((root / "catalog" / "environments.yaml").read_text())),
+        folder_hierarchy=FolderHierarchy.from_dict(
+            _yaml.safe_load((root / "catalog" / "folders.yaml").read_text())),
+        interface_catalog=InterfaceCatalog.from_dict(
+            _yaml.safe_load((root / "catalog" / "interfaces.yaml").read_text())),
+        router_catalog=RouterCatalog.from_dict(
+            _yaml.safe_load((root / "catalog" / "routers.yaml").read_text())),
+    )
+    seen = 0
+    for path in sorted((root / "intent").rglob("*.yaml")):
+        load_intent(_yaml.safe_load(path.read_text()), **kw)
+        seen += 1
+    assert seen >= 10

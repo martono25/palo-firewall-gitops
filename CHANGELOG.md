@@ -3,6 +3,56 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.24.0] — 2026-08-05
+
+### Unknown `metadata:` keys are rejected
+
+They were silently ignored. That is how a field stops working with nobody
+noticing: a typo like `justifcation:` at least fails, because the required field
+then reads as missing — but `tickets:`, or a field retired in a later version,
+reads as ACCEPTED and does nothing.
+
+The `expires` retirement made it concrete. Removing that field from the schema
+alone would have turned every existing `expires:` into a no-op, which is why it
+needed an explicit rejection. This closes the class rather than that instance.
+
+```
+metadata: unknown field(s) ['tickets']; expected ['id', 'justification',
+'requested', 'requester', 'ticket']. Unknown keys are rejected rather than
+ignored — a silently dropped field looks exactly like one that works.
+```
+
+`expires` keeps its OWN message naming the device-enforced alternative; folding
+it into a generic unknown-key list would throw that away exactly when someone
+needs it.
+
+A test pins `_METADATA_KEYS` to the `Metadata` dataclass, because a field added
+to one and not the other would make every intent using it fail — with an error
+blaming the author rather than the schema. Another loads every shipped intent, so
+a validation change that rejects this repo's own tree fails here rather than on
+the next PR someone opens.
+
+**Not covered, and filed:** `spec:` blocks still ignore unknown keys. That is the
+larger surface — `spec` is where firewall behaviour lives, so a dropped key there
+is a rule that does not do what it says (`logging: true` compiles clean and logs
+nothing; the field is `log`). Five loaders, each needing its own allowed set
+derived from its dataclass, and getting one wrong rejects a currently valid
+intent.
+
+### Fixed: `terraform plan` lacked the provider's concurrency guard
+
+`apply.yml` has passed `-parallelism=1` from the start, with a comment that the
+scm provider cannot handle concurrent token acquisition. Neither plan step did.
+
+A plan REFRESHES every resource, so a folder with ~19 tag objects plus rules,
+zones and routers issues exactly that concurrent burst. It surfaces as an
+intermittent `403 Forbidden {"msg":"Access denied"}` reading an `scm_tag` — which
+reads as a permissions problem and is not one, and which passes on a re-run, so
+it looks like flakiness rather than a missing flag. Caught in CI on this PR;
+`pr-validate` and `drift-detect` now match `apply`.
+
+- 616 tests (+5).
+
 ## [1.23.0] — 2026-08-05
 
 ### `expires` removed from the intent schema entirely
