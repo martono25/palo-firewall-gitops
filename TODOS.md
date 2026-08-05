@@ -472,6 +472,28 @@ been hit before only because no tag value has ever changed on a live rule.
 **Effort:** M
 **Priority:** P2
 
+### `spec:` still ignores unknown keys — `metadata:` no longer does
+
+**Found 2026-08-05 while closing the metadata case (v1.24.0).** `_load_metadata`
+now rejects unknown fields, so a typo or a retired key fails at PR time instead
+of being silently dropped. The `spec:` blocks were NOT changed and still ignore
+anything they do not recognise.
+
+That is the larger surface: `spec` is where the firewall behaviour lives, so a
+dropped key there is a rule that does not do what it says. `spec: {..., logging:
+true}` compiles clean and logs nothing, because the field is `log`.
+
+Not done in the same change deliberately — there are five spec loaders
+(AccessRequest, Zone, Interface, Route, plus the nested endpoint/service forms),
+each with its own allowed set, and getting one wrong REJECTS a currently valid
+intent. The metadata case was one small set with a test pinning it to the
+dataclass; the spec case needs the same treatment five times over, and each set
+should be derived from its dataclass the same way rather than hand-listed.
+
+**Effort:** M
+**Priority:** P2 — the failure is silent and lands on rule behaviour rather than
+on paperwork, which makes it worse than the one just fixed.
+
 ## Drift
 
 ### State-based drift cannot tell an orphan from a hand-added object
