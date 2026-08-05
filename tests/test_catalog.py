@@ -66,29 +66,29 @@ def app(spec):
 
 
 def test_app_resolves_addresses_and_zone():
-    c = app({"environment": "prod", "folder": "prod-edge", "zone": "local",
+    c = app({"environment": "prod", "zone": "local",
              "addresses": ["10.20.1.0/24"], "fqdns": ["a.internal"]})
     a = c.resolve("web")
-    assert a == AppDef("prod", "prod-edge", "local", ("10.20.1.0/24",), ("a.internal",))
+    assert a == AppDef("prod", "local", ("10.20.1.0/24",), ("a.internal",))
 
 
 def test_app_addresses_optional_if_fqdns_present():
-    c = app({"environment": "prod", "folder": "f", "zone": "local", "fqdns": ["a.internal"]})
+    c = app({"environment": "prod", "zone": "local", "fqdns": ["a.internal"]})
     assert c.resolve("web").addresses == ()
 
 
 def test_unknown_app_raises():
-    c = app({"environment": "prod", "folder": "f", "zone": "local", "addresses": ["10.0.0.0/8"]})
+    c = app({"environment": "prod", "zone": "local", "addresses": ["10.0.0.0/8"]})
     with pytest.raises(CatalogError, match="unknown app"):
         c.resolve("nope")
 
 
 @pytest.mark.parametrize("bad", [
     {"folder": "f", "zone": "z", "addresses": ["10.0.0.0/8"]},              # missing environment
-    {"environment": "p", "folder": "f", "zone": "z"},                        # no address or fqdn
-    {"environment": "p", "folder": "f", "zone": "z", "addresses": ["nope"]}, # bad CIDR
-    {"environment": "p", "folder": "f", "zone": "z", "addresses": ["10.20.1.5/24"]},  # host bits
-    {"environment": "p", "folder": "f", "zone": "z", "addresses": "not-a-list"},      # wrong shape
+    {"environment": "p", "zone": "z"},                        # no address or fqdn
+    {"environment": "p", "zone": "z", "addresses": ["nope"]}, # bad CIDR
+    {"environment": "p", "zone": "z", "addresses": ["10.20.1.5/24"]},  # host bits
+    {"environment": "p", "zone": "z", "addresses": "not-a-list"},      # wrong shape
 ])
 def test_malformed_app_fails_closed(bad):
     with pytest.raises(CatalogError):
@@ -147,3 +147,29 @@ def test_namecatalog_empty_reports_empty():
 def test_namecatalog_malformed_fails_closed(bad):
     with pytest.raises(CatalogError):
         ncat(bad)
+
+
+def test_an_app_declaring_a_folder_is_REJECTED():
+    """`folder:` was declared on every shipped app and NEVER READ — `_target()`
+    has always taken the folder from `env_map.resolve(environment)`. An app whose
+    folder contradicted its environment loaded fine and the contradiction did
+    nothing.
+
+    Deleting the field without rejecting it would leave those files looking
+    correct while quietly changing nothing, which is the same silent-drop the
+    `expires` retirement had to guard against.
+    """
+    with pytest.raises(CatalogError, match="an app does not choose the folder"):
+        app({"environment": "prod", "folder": "prod-edge", "zone": "local",
+             "addresses": ["10.20.1.0/24"]})
+
+
+def test_the_shipped_app_catalog_declares_no_folders():
+    from pathlib import Path as _Path
+
+    import yaml
+    root = _Path(__file__).resolve().parents[1]
+    raw = yaml.safe_load((root / "catalog" / "apps.yaml").read_text())
+    offenders = [n for n, spec in (raw.get("apps") or {}).items()
+                 if isinstance(spec, dict) and "folder" in spec]
+    assert not offenders, f"apps still declaring a folder: {offenders}"

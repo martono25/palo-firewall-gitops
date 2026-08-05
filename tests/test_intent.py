@@ -372,11 +372,11 @@ def test_endpoint_needs_exactly_one_key():
 def _app_catalog():
     from fwgitops.catalog import AppCatalog
     return AppCatalog.from_dict({"apps": {
-        "web-tier": {"environment": "prod", "folder": "prod-edge", "zone": "local",
+        "web-tier": {"environment": "prod", "zone": "local",
                      "addresses": ["10.20.1.0/24"]},
-        "payments": {"environment": "prod", "folder": "prod-edge", "zone": "app",
+        "payments": {"environment": "prod", "zone": "app",
                      "addresses": ["10.20.9.10/32"], "fqdns": ["pay.internal"]},
-        "staging-x": {"environment": "staging", "folder": "stg", "zone": "local",
+        "staging-x": {"environment": "staging", "zone": "local",
                       "addresses": ["10.99.0.0/24"]},
     }})
 

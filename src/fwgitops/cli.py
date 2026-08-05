@@ -255,6 +255,32 @@ def run_compile(
                     stale.unlink()
                     removed.append(stale)
 
+    # WARN when objects land in a folder no firewall inherits from.
+    #
+    # That combination is the quietest failure this pipeline can produce:
+    # compile succeeds, apply succeeds, the push succeeds trivially because there
+    # is nothing to push to, and not one packet is filtered. Every signal is
+    # green and the rule does not exist anywhere it matters.
+    #
+    # A WARNING, not a rejection. ADR-0002 has the folder created BEFORE the
+    # firewall registers to it (the firewall names it as `dgname`), so a folder
+    # legitimately has no devices during bring-up. Failing here would break the
+    # documented Day-1 order; staying silent is how someone finds out from a
+    # packet capture instead.
+    hierarchy = cats.get("folder_hierarchy")
+    if hierarchy is not None:
+        with_devices = set(hierarchy.devices.values())
+        empty = sorted({
+            t.parent.name for t in written
+            if not t.parent.name.startswith("device-")
+            and t.parent.name not in with_devices
+            and not hierarchy.children_of(t.parent.name)
+        })
+        for folder in empty:
+            print(f"WARNING — folder {folder!r} has NO FIREWALL beneath it. The objects "
+                  f"compiled here will apply and push successfully and enforce nothing, "
+                  f"until a firewall registers to it.", file=err)
+
     verb = "wrote" if write else "would write"
     print(
         f"OK — compiled {len(compiled)} request(s) into {len(written)} file(s); {verb}:",
@@ -1093,7 +1119,7 @@ def run_verify_catalog(
         return 2
 
     print(f"OK — catalog matches SCM ({len(live)} live entries, "
-          f"{len(noted)} acknowledged stale entry(s))", file=out)
+          f"{len(noted)} note(s) above)", file=out)
     return 0
 
 

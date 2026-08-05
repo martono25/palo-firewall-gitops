@@ -116,9 +116,9 @@ def test_tfvars_carries_rule_components():
 def _app_catalog():
     from fwgitops.catalog import AppCatalog
     return AppCatalog.from_dict({"apps": {
-        "web": {"environment": "prod", "folder": "prod-edge", "zone": "dmz",
+        "web": {"environment": "prod", "zone": "dmz",
                 "addresses": ["10.20.1.0/24"]},
-        "pay": {"environment": "prod", "folder": "prod-edge", "zone": "app",
+        "pay": {"environment": "prod", "zone": "app",
                 "addresses": ["10.20.9.10/32"]},
     }})
 

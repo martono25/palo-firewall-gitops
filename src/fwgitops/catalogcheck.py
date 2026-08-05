@@ -126,6 +126,32 @@ def compare(hierarchy: Any, live: Dict[str, LiveEntry]) -> List[Finding]:
                     f"wrong parent means the blast radius recorded here is wrong.",
                 ))
 
+    # A TARGETABLE FOLDER THAT NO FIREWALL INHERITS. Objects compiled into it
+    # reach nothing: the compile succeeds, the apply succeeds, the push succeeds
+    # trivially, and no packet is ever filtered. Every signal is green and the
+    # rule does not exist anywhere it matters.
+    #
+    # NOT blocking. It is the normal state of a folder during Day-1: ADR-0002 has
+    # the folder created BEFORE the firewall registers to it (the firewall names
+    # it as `dgname`), so a new folder is legitimately empty for a while. Failing
+    # here would break the documented bring-up order. Reported instead, so an
+    # empty folder is a thing you know about rather than discover.
+    with_devices = {f for f in hierarchy.devices.values()}
+    for folder in sorted(hierarchy.targetable_folders()):
+        if folder in with_devices:
+            continue
+        kids = hierarchy.children_of(folder) if hasattr(hierarchy, "children_of") else ()
+        if kids:
+            continue          # a parent inherits down to its children's firewalls
+        findings.append(Finding(
+            f"folder {folder!r}",
+            "is targetable but NO FIREWALL inherits from it. Objects compiled here "
+            "reach no device: compile, apply and push all succeed and nothing is "
+            "enforced. Normal while a folder waits for its firewall to register; "
+            "worth checking if it is not.",
+            blocking=False,
+        ))
+
     for serial, folder in sorted(hierarchy.devices.items()):
         entry = live.get(serial)
         targetable = hierarchy.is_device_targetable(serial)

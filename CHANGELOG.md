@@ -3,6 +3,44 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.27.0] — 2026-08-05
+
+### Model A: an app does not choose the folder
+
+`catalog/apps.yaml` declared `folder:` on every app, `AppDef` stored it, and the
+compiler **never read it** — `_target()` has always taken the folder from
+`env_map.resolve(environment)`. An app whose folder contradicted its environment
+loaded without complaint and the contradiction did nothing.
+
+Removed, and **rejected rather than ignored**: deleting the field alone would
+have left every shipped app file looking correct while quietly changing nothing,
+the same silent-drop the `expires` retirement had to guard against.
+
+The reason it belongs to the environment: **a rule's folder is a property of the
+traffic path, not of either endpoint.** A rule between apps in two folders
+traverses both firewalls, so asking an app which folder to use is ambiguous for
+most rules. Zone stays on the app, where it genuinely varies — `web-tier` is
+`local` and `payments-gateway` is `internet` in the same folder.
+
+### A folder that no firewall inherits is now surfaced
+
+The quietest failure this pipeline can produce: objects compiled into a folder
+with no devices beneath it. Compile succeeds, apply succeeds, the push succeeds
+*trivially because there is nothing to push to*, and not one packet is filtered.
+Every signal green, the rule enforced nowhere.
+
+- `fwgitops compile` prints a WARNING naming the folder.
+- `fwgitops verify-catalog` reports it as a note.
+
+**A warning, not a rejection.** ADR-0002 creates the folder BEFORE the firewall
+registers to it (the firewall names it as `dgname`), so an empty folder is the
+normal state during bring-up and failing would break the documented Day-1 order.
+A parent folder is not reported — `ngfw-shared` has no firewall of its own but
+inherits down to `prod-edge`, and a warning that fires on the normal case is one
+people stop reading.
+
+- 629 tests (+7).
+
 ## [1.26.0] — 2026-08-05
 
 ### RETRACTION: device scope works for every resource

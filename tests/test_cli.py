@@ -120,7 +120,7 @@ def test_compile_rejects_undeclared_zone(tmp_path, capsys):
     env_map.write_text(ENV_MAP)  # prod -> prod-edge, zones trust/app
     apps = tmp_path / "apps.yaml"
     apps.write_text(
-        "apps:\n  dmz-app: {environment: prod, folder: prod-edge, zone: dmz, addresses: [10.20.1.0/24]}\n"
+        "apps:\n  dmz-app: {environment: prod, zone: dmz, addresses: [10.20.1.0/24]}\n"
     )
     out = tmp_path / "tf"
     rc = run_compile(tmp_path / "intent", env_map, out, app_catalog_path=apps, require_terraform_root=False)
@@ -700,3 +700,61 @@ def test_the_sweep_never_deletes_a_file_the_compiler_does_not_own(tmp_path):
     foreign.write_text('{"hand": "maintained"}\n')
     assert run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False) == 0
     assert foreign.exists(), "the sweep deleted a file the compiler never wrote"
+
+
+# ── objects compiled into a folder no firewall inherits ───────────────────
+_HIER_ONE_EMPTY = """
+folders:
+  ngfw-shared:
+    children: [prod-edge, GitOps]
+    targetable: false
+  prod-edge:
+    children: []
+    targetable: true
+    devices:
+      "007955000894453": {hostname: fw-a, model: PA-VM, targetable: true}
+  GitOps:
+    children: []
+    targetable: true
+"""
+
+
+def _compile_into(tmp_path, folder, capsys, monkeypatch):
+    cat = tmp_path / "catalog"
+    cat.mkdir()
+    (cat / "folders.yaml").write_text(_HIER_ONE_EMPTY)
+    monkeypatch.chdir(tmp_path)
+    intents = tmp_path / "intent" / "prod"
+    intents.mkdir(parents=True)
+    (intents / "R.yaml").write_text(VALID_INTENT)
+    env_map = tmp_path / "env.yaml"
+    env_map.write_text(f"prod:\n  folder: {folder}\n  from_zone: trust\n  to_zone: app\n")
+    rc = run_compile(tmp_path / "intent", env_map, tmp_path / "terraform",
+                     require_terraform_root=False)
+    return rc, capsys.readouterr()
+
+
+def test_compiling_into_a_folder_with_no_firewall_WARNS(tmp_path, capsys, monkeypatch):
+    """The quietest failure this pipeline can produce: compile succeeds, apply
+    succeeds, the push succeeds trivially because there is nothing to push to,
+    and not one packet is filtered. Every signal green, rule enforced nowhere."""
+    rc, cap = _compile_into(tmp_path, "GitOps", capsys, monkeypatch)
+    assert rc == 0
+    assert "has NO FIREWALL beneath it" in cap.err
+    assert "enforce nothing" in cap.err
+
+
+def test_it_is_a_warning_not_a_rejection(tmp_path, capsys, monkeypatch):
+    """ADR-0002 creates the folder BEFORE the firewall registers to it (the
+    firewall names it as `dgname`), so an empty folder is the normal state during
+    bring-up. Failing here would break the documented Day-1 order."""
+    rc, _ = _compile_into(tmp_path, "GitOps", capsys, monkeypatch)
+    assert rc == 0
+    assert (tmp_path / "terraform" / "GitOps" / "rules.auto.tfvars.json").exists()
+
+
+def test_no_warning_for_a_folder_that_has_a_firewall(tmp_path, capsys, monkeypatch):
+    """A warning that fires on the normal case is one people stop reading."""
+    rc, cap = _compile_into(tmp_path, "prod-edge", capsys, monkeypatch)
+    assert rc == 0
+    assert "NO FIREWALL" not in cap.err

@@ -543,6 +543,33 @@ every-shipped-intent test added the day before, not by review. The test now
 DISCOVERS accessors — any `helper(sp, "key", ...)` counts — so a new accessor
 cannot silently drop out of the audit.
 
+### Where folder and zone are defined — SETTLED 2026-08-05 (Model A)
+
+They were defined in BOTH `catalog/environments.yaml` and `catalog/apps.yaml`,
+and the duplication was not benign: the app's `folder:` was parsed, stored on
+`AppDef`, and never read. `_target()` has always used the ENVIRONMENT's folder.
+
+**Decision — Model A:**
+
+| | owner | why |
+|---|---|---|
+| folder | `environments.yaml` | a rule's folder is a property of the TRAFFIC PATH, not of an endpoint. A rule between apps in two folders traverses both firewalls, so asking an app is ambiguous for most rules. |
+| zone | `apps.yaml`, defaulting to the environment pair | genuinely varies per app inside one folder — `web-tier` is `local`, `payments-gateway` is `internet`, same folder |
+
+`app.folder` is removed and now REJECTED, so the shipped files cannot keep
+looking authoritative while doing nothing.
+
+**Consequence to keep in view:** "many apps in one environment, in different
+folders" is deliberately NOT expressible. If apps must sit in different folders
+they belong to different environments — or the rule belongs in the folder they
+share, since config inherits DOWN and a common ancestor reaches both.
+
+**Not chosen:** Model B (app owns folder, environment becomes a lifecycle label).
+It is coherent but needs a tie-break for source-app-folder != destination-app-folder,
+still needs a folder for explicit `cidr:` endpoints that have no app, and makes
+app cardinality drive folder cardinality. Worth revisiting only if apps map to
+distinct firewalls.
+
 ## Drift
 
 ### State-based drift cannot tell an orphan from a hand-added object
