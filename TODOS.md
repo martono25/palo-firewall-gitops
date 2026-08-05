@@ -696,11 +696,30 @@ FEATURE rather than an observed behaviour:
   a logical router leaves a perfectly valid object that simply no longer forwards
   anything. Nothing would refuse that. The same experiment repeated here is the
   first task.
-* **Deletion is currently a BEHAVIOUR, not a contract.** It works because SCM
-  happens to fail closed. No test in this repo asserts it, no ADR states what
-  removal of an intent is supposed to mean per kind, and the classifier does not
-  tier a deletion differently from a creation — removing a rule that permits
-  traffic and removing a route that carries it are not the same act.
+* ~~**Deletion is invisible to the risk pipeline.**~~ **FIXED v1.30.0.**
+  `fwgitops classify --baseline <tree>` classifies REMOVALS alongside additions
+  and they participate in the same gate. Wired into the PR gate, which
+  materialises the base revision with `git archive`.
+
+  The tiers are NOT the mirror of creation, which is the point: removing an
+  `allow` withdraws access (LOW — it can break what depended on it, but opens
+  nothing); removing a `deny` may let traffic match a permissive rule below it
+  (HIGH). Route, zone and interface removals are HIGH — each has an
+  outage-shaped failure. An unknown kind is CRITICAL, because a default that
+  permits is how a class of change goes unassessed.
+
+  Found building it: an empty intent tree returned early with "no intent files
+  found" and exit 0 — so a PR deleting EVERY intent bypassed the gate entirely.
+
+* **Still open — evidence for a removal.** Bundles are built per request, so a
+  deletion still produces no audit record beyond git history and the plan. The
+  baseline tree HAS the request object, so a bundle is buildable; it needs a
+  status (`removed`) and a decision about what "applied" means for a deletion.
+
+* **Still open — the per-kind deletion CONTRACT (an ADR).** What removal MEANS
+  per kind is now encoded in tiers but not stated: zone -> binding released;
+  interface override -> reverts to inheritance (proven); route -> stops
+  forwarding; rule -> access withdrawn.
 
 **Priority:** P2 (v2.0), alongside `NatRequest` and rule ordering — all three are
 compiler/intent-model work rather than plumbing.

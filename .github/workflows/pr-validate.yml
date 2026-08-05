@@ -33,6 +33,12 @@ jobs:
       SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The base commit is needed to materialise the BASELINE intent tree,
+          # which is how a REMOVAL gets classified at all: a deleted intent is
+          # absent from the current tree, so without a baseline nothing tiers it
+          # and the gate never sees it.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v7
         with:
@@ -79,8 +85,34 @@ jobs:
       # 1b. Risk classification (Phase 2) — PR preview of each change's tier.
       #     Informational for now; the tier gate (LOW auto / HIGH review /
       #     CRITICAL dual-control) is wired on the apply side as it matures.
+      # Materialise the BASE revision's intent tree. `git archive` rather than a
+      # worktree: it is read-only, needs no cleanup, and cannot leave the
+      # checkout on the wrong ref if the step fails midway.
+      - name: Materialise the base intent tree
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/base-intent
+          base="${{ github.event.pull_request.base.sha }}"
+          if git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git archive "$base" intent | tar -x -C /tmp/base-intent
+            echo "BASELINE=/tmp/base-intent/intent" >> "$GITHUB_ENV"
+          else
+            echo "::warning::base commit $base unavailable — removals will NOT be classified"
+          fi
+
+      # 1b. Risk classification (Phase 2) — PR preview of each change's tier,
+      #     INCLUDING what the PR removes. A deletion is absent from the intent
+      #     tree, so before --baseline nothing classified it: removing a rule
+      #     that permits traffic and removing a route that carries it were both
+      #     unassessed and auto-appliable.
       - name: Risk-classify (preview)
-        run: fwgitops classify intent
+        run: |
+          set -euo pipefail
+          if [ -n "${BASELINE:-}" ]; then
+            fwgitops classify intent --baseline "$BASELINE"
+          else
+            fwgitops classify intent
+          fi
 
       # 1c. Enrich PREVIEW (dry-run, no SCM). The module is skeleton-only, so the
       #     terraform plan below does NOT show App-ID / profile / log-forwarding /
