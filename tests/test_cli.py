@@ -712,7 +712,7 @@ folders:
     children: []
     targetable: true
     devices:
-      "007955000894453": {hostname: fw-a, model: PA-VM, targetable: true}
+      "007955000894453": {display_name: fw-a, model: PA-VM, targetable: true}
   GitOps:
     children: []
     targetable: true

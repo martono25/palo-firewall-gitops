@@ -236,7 +236,7 @@ def test_a_role_with_no_mapping_for_that_firewall_is_rejected():
     from fwgitops.catalog import FolderHierarchy
     h = FolderHierarchy.from_dict({"folders": {"prod-edge": {
         "children": [], "targetable": True,
-        "devices": {"007955000899999": {"hostname": "fw-unmapped", "model": "PA-VM",
+        "devices": {"007955000899999": {"display_name": "fw-unmapped", "model": "PA-VM",
                                         "targetable": True}}}}})
     with pytest.raises(IntentError, match="no mapping for firewall"):
         load_intent(_doc(environment=None, device="007955000899999"),

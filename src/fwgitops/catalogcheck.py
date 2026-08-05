@@ -45,6 +45,7 @@ class LiveEntry:
     name: str
     type: str
     parent: Optional[str] = None
+    display_name: Optional[str] = None
 
     @property
     def is_device(self) -> bool:
@@ -74,6 +75,7 @@ def parse_live(rows: Iterable[dict]) -> Dict[str, LiveEntry]:
             name=name,
             type=row.get("type") or "",
             parent=row.get("parent") or None,
+            display_name=row.get("display_name") or None,
         )
     return out
 
@@ -179,6 +181,27 @@ def compare(hierarchy: Any, live: Dict[str, LiveEntry]) -> List[Finding]:
                 f"catalog places it under {folder!r}; SCM says {entry.parent!r}. "
                 f"A firewall inherits from its parent folder, so its zones, routes "
                 f"and rules come from a different folder than this repo believes.",
+            ))
+            continue
+
+        # DISPLAY NAME. Cosmetic in itself — but a reset is a reliable symptom of
+        # a RE-ONBOARD, and a re-onboard wipes device-scope config. On 2026-08-05
+        # this went to `PA-VM`, the device-scope interface overrides were
+        # destroyed, and `is_first_push_done` returned to false: a push in that
+        # window would have stripped the addressing off a working firewall.
+        #
+        # Non-blocking. It breaks nothing by itself, and failing the pipeline on a
+        # label is how a check earns the reputation that gets real findings
+        # ignored. Reported so the SYMPTOM is seen while it still means something.
+        want = getattr(hierarchy, "device_display_names", {}).get(serial)
+        if want and entry.display_name and entry.display_name != want:
+            findings.append(Finding(
+                f"firewall {serial!r}",
+                f"SCM shows display_name {entry.display_name!r}; the catalog declares "
+                f"{want!r}. Harmless on its own — but a reset name usually means the "
+                f"device was RE-ONBOARDED, which wipes device-scope config. Check the "
+                f"device root plans clean before pushing.",
+                blocking=False,
             ))
 
     return findings
