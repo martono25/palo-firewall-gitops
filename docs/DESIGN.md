@@ -277,9 +277,6 @@ metadata:
   ticket: JIRA-12345           # mandatory — audit linkage
   justification: "Web tier needs to reach the payments API"
   requested: 2026-07-19
-  expires: 2026-10-19          # optional; null = permanent (higher review tier)
-                               # NOTE: CI lifecycle only. NOT written to the
-                               # firewall and NOT enforced by it — see below.
 spec:
   environment: prod            # → resolves to SCM folder + zone context
   action: allow                # allow | deny
@@ -313,7 +310,7 @@ broad requester say `app: payments-api` instead of a subnet. Catalog resolution 
    *Shares the current-policy state model with the risk classifier — build once.*
 6. **Object management** — create objects only if absent; deterministic naming.
 7. **Synthesize rule** — folder scope, from/to zone, src/dst/svc, action, log, tags
-   (REQ-id + ticket + expiry).
+   (REQ-id + ticket + section). No expiry tag — expiry is not modelled, see below.
 8. **Placement** — position to avoid shadowing (specific-before-general; structured rulebase
    sections).
 9. **Emit artifact** — data for Terraform (see output contract below).
@@ -416,7 +413,7 @@ thresholds live in security-owned YAML; the logic stays Python.
 
 Compiled rule(s) (5-tuple sets, action, app, zones, folder/env) · analysis-core verdicts
 (redundant / shadowed / partial / placement-conflict) · current effective rulebase (novelty
-checks) · intent metadata (env, expiry, ticket) · catalog context (critical-asset tags).
+checks) · intent metadata (env, ticket) · catalog context (critical-asset tags).
 
 ### Check set — a rule table, most-severe-wins
 
@@ -436,7 +433,10 @@ severity that fires.
 - broad / high-risk service (wide port range, or 22/3389/etc. from a broad source)
 - partial-shadow verdict from the core
 - App-ID rule the static analysis couldn't fully verify (the known L7 gap)
-- permanent rule (no expiry) above a sensitivity threshold; any structural prod change
+- any structural prod change
+  (the original "permanent rule (no expiry) above a sensitivity threshold" signal is
+  DROPPED with the expiry field — every rule is now permanent, so it would fire on all
+  of them and mean nothing)
 
 **LOW (auto-apply eligible):**
 - fully-scoped allow (specific src/dst, single service, known zone-pair, lower-sensitivity env)
@@ -590,7 +590,6 @@ back-fill break-glass into Git.
 | **Pre-merge** (PR rejected/withdrawn) | nothing | trivial — close PR; the gate ensured no apply ran |
 | **Mid-apply** (job cancelled, runner dies, abort) | partial | candidate/commit boundary — see below |
 | **Post-apply** (bad change found later) | fully live | `git revert` intent → recompile → plan removes it → apply |
-| **Expiry** (`expires:` date passes) | live, stale | scheduled job removes the expired rule |
 
 **Mid-apply atomicity — candidate/commit transaction boundary. CONFIRMED by the spike
 (2026-07-19):** the `scm` provider has NO push/commit capability, so Terraform can only
@@ -610,22 +609,19 @@ never stages two changes at once (preserves 1:1 isolation + clean rollback); (b)
 step FAILS CLOSED if unexpected staged changes are present — committing an out-of-band GUI
 edit under our audit trail would be worse than stopping. That staged delta is Level-1 drift.
 
-**Expiry auto-rollback — DESIGNED, NOT BUILT (status as of 2026-08-05).** The intent is that a
-scheduled job finds rules past `expires:` and generates a removal change (auto for low-risk, gated
-otherwise), keeping temporary rules from rotting into permanent exposure. **Neither that job nor the
-"null = permanent → higher review tier" rule exists yet**, so today `expires:` is recorded and acted
-on by nobody. Stated plainly because an evidence bundle asserts the date, and a reader is entitled to
-know whether anything honours it.
+**Rule expiry is NOT modelled (removed 2026-08-05).** An optional `expires:` field existed on intent
+metadata and was retired: nothing enforced it. It never reached the firewall, no job removed an
+expired rule, and on a Day-1 kind it was parsed and dropped entirely because evidence bundles are
+`AccessRequest`-only. A field that means nothing is worse than a missing one — a reader assumes it
+means something, and the evidence bundle asserted a date nobody honoured.
 
-`expires:` is **CI lifecycle, not rule expiry**. It is NOT written to the firewall: it used to be a
-`gitops:expires:<date>` tag, removed in v1.22.0 because PAN-OS stores such a tag and ignores it — a
-date on the device that looked like a control and was not one. PAN-OS *does* have real rule expiry
-(`scm_security_rule.schedule` → `scm_schedule.non_recurring`, enforced on the device); if expiry ever
-needs to survive CI being broken, that is the mechanism, and it is a separate decision.
+It is now REJECTED at PR time rather than ignored, because this loader drops unknown metadata keys
+silently and a bare deletion would have turned every existing `expires:` into a no-op.
 
-Consequence: because the date is no longer on the rule, the removal job must read intent YAML rather
-than live state — it can say what SHOULD have expired, not what IS expired on a firewall whose intent
-was deleted.
+PAN-OS does have real, device-enforced rule expiry (`scm_security_rule.schedule` → an `scm_schedule`
+with `non_recurring` date ranges). That is a separate capability this platform does not wire; note
+that a lapsed *allow* stops matching and traffic then falls through to whatever sits below it, so it
+is only fail-closed if rule ordering says so.
 
 Git stays authoritative throughout: the SCM snapshot restore is a break-glass escape only (it bypasses
 Git and creates Level-1 drift that must then be back-filled).
@@ -818,7 +814,10 @@ CLI, TF module — is not a numbered task; it's built+tested except the TF modul
 - [ ] **T7 (P2)** — perf — Cache effective rulebase with explicit invalidation — **NOT STARTED** (Phase 2)
 - [ ] **T8 (P2)** — catalog — Derive catalog from authoritative IPAM + validation — **NOT STARTED** (Phase 2)
 - [ ] **T10 (P2)** — drift-l2 — Level-2 device drift: mgmt lockdown + SCM sync polling + config diff — **NOT STARTED** (Phase 2)
-- [ ] **T11 (P3)** — lifecycle — Scheduled expiry job — **NOT STARTED** (Phase 3)
+- [x] **T11 (P3)** — lifecycle — Scheduled expiry job — **DROPPED 2026-08-05.** Rule expiry
+      is not modelled; the `expires:` field it depended on was removed from the schema.
+      Device-enforced expiry via `scm_security_rule.schedule` remains available if the
+      requirement returns.
 
 ## GSTACK REVIEW REPORT
 

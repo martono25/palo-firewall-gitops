@@ -26,7 +26,6 @@ def valid_doc() -> dict:
             "ticket": "JIRA-12345",
             "justification": "Web tier needs to reach the payments API",
             "requested": "2026-07-19",
-            "expires": "2026-10-19",
         },
         "spec": {
             "environment": "prod",
@@ -215,7 +214,6 @@ def test_valid_intent_parses():
     ar = load_intent(valid_doc())
     assert isinstance(ar, AccessRequest)
     assert ar.metadata.id == "REQ-2026-0417"
-    assert ar.metadata.expires == date(2026, 10, 19)
     assert ar.spec.action == "allow"
     assert ar.spec.source == [Endpoint("cidr", "10.20.1.0/24")]
     assert Endpoint("fqdn", "payments.internal") in ar.spec.destination
@@ -223,13 +221,27 @@ def test_valid_intent_parses():
     assert ar.spec.log is True
 
 
+def test_expiry_is_REJECTED_not_ignored():
+    """Removed 2026-08-05. Rejected rather than dropped, because this loader
+    IGNORES unknown metadata keys — so deleting the field alone would turn every
+    existing `expires:` into a silent no-op, the "compiles clean, does nothing"
+    failure this codebase treats as a bug.
+
+    It modelled a lifecycle the platform does not run: the date never reached the
+    firewall and no job ever removed an expired rule. On a Day-1 kind it was
+    parsed and dropped entirely, since evidence bundles are AccessRequest-only.
+    """
+    doc = valid_doc()
+    doc["metadata"]["expires"] = "2026-10-19"
+    with pytest.raises(IntentError, match="does not model rule expiry"):
+        load_intent(doc)
+
+
 def test_log_defaults_true_and_expires_optional():
     doc = valid_doc()
     del doc["spec"]["log"]
-    del doc["metadata"]["expires"]
     ar = load_intent(doc)
     assert ar.spec.log is True
-    assert ar.metadata.expires is None
 
 
 # ── Envelope ──────────────────────────────────────────────────────────────

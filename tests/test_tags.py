@@ -44,7 +44,6 @@ def test_full_round_trip_build_then_parse():
         req_id="REQ-2026-0417",
         section=Section.SPECIFIC_ALLOW,
         ticket="JIRA-12345",
-        expires=None,
     )
 
 
@@ -68,22 +67,22 @@ def test_expiry_is_NEVER_written_to_a_rule():
         assert not any(t.startswith("gitops:expires") for t in managed_tags(**kwargs))
 
 
-def test_a_legacy_expiry_tag_is_still_PARSED():
-    """Nothing writes one any more, but rules tagged before 2026-08-05 (or by an
-    older version still deployed) carry them. Parsing must keep working, or those
-    rules would look malformed to drift — which fails closed loudly and would
-    turn a cosmetic change into an incident."""
+def test_a_legacy_expiry_tag_is_IGNORED_not_fatal():
+    """No live rule carries one (they were removed from the pilot in v1.22.0),
+    and `ManagedMeta` no longer has the field. An old tag must therefore be
+    ignored like any other unrecognised gitops key — NOT treated as malformed,
+    which fails closed loudly and would turn a leftover label into an incident."""
     legacy = managed_tags(req_id="REQ-OLD", section=Section.SPECIFIC_ALLOW) + [
         "gitops:expires:2026-10-19"]
     meta = parse_managed_meta(legacy)
     assert meta.req_id == "REQ-OLD"
-    assert meta.expires == date(2026, 10, 19)
+    assert not hasattr(meta, "expires")
 
 
 def test_optional_fields_omitted():
     built = managed_tags(req_id="REQ-1", section="broad-allow")
     meta = parse_managed_meta(built)
-    assert meta.ticket is None and meta.expires is None
+    assert meta.ticket is None
     assert meta.section is Section.BROAD_ALLOW  # str section accepted
 
 

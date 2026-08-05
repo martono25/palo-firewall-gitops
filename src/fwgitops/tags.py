@@ -82,7 +82,6 @@ class ManagedMeta:
     req_id: str
     section: Optional[Section]
     ticket: Optional[str]
-    expires: Optional[date]
 
 
 def _validate_value(kind: str, value: str) -> str:
@@ -109,29 +108,16 @@ def managed_tags(
     The marker tag is always first. Deterministic: identical inputs yield an
     identical, order-stable list.
 
-    ── EXPIRY IS DELIBERATELY NOT HERE (removed 2026-08-05) ────────────────
-    `metadata.expires` used to be written as `gitops:expires:<date>`. It is not
-    any more, because it is CI EXPIRY, NOT RULE EXPIRY: nothing on the firewall
-    acts on it. PAN-OS stores the tag and ignores it, so on the device it was a
-    date that looked like a control and was not one — the most expensive kind of
-    metadata, because a reader in the SCM UI reasonably assumes something
-    enforces it.
+    ── NO EXPIRY, AND NO EXPIRY FIELD AT ALL (v1.23.0) ────────────────────
+    `metadata.expires` was briefly written here as `gitops:expires:<date>`, then
+    removed from the tags (v1.22.0) and finally from the schema entirely
+    (v1.23.0). It modelled a lifecycle this platform does not run: nothing on the
+    firewall acts on such a tag, and no job ever removed an expired rule.
 
-    A rule's tags describe WHAT THE RULE IS. Expiry describes what this pipeline
-    intends to DO with the request later, which is a property of the request, not
-    of the firewall object. It lives in the intent YAML and the evidence bundle,
-    which is where lifecycle belongs.
-
-    PAN-OS DOES have real rule expiry — `scm_security_rule.schedule` pointing at
-    an `scm_schedule` with `non_recurring` date ranges, enforced on the device.
-    If device-enforced expiry is ever wanted, that is the mechanism; a tag was
-    never going to be.
-
-    CONSEQUENCE, accepted knowingly: an expired-rule check can no longer be
-    answered from live state alone. `parse_managed_meta` still READS the tag so
-    rules tagged before this change are understood, but nothing writes it, so the
-    check must read intent YAML. That trades drift's independence from Git for
-    not shipping a date the device implies it honours.
+    PAN-OS does have real, device-enforced rule expiry —
+    `scm_security_rule.schedule` pointing at an `scm_schedule` with
+    `non_recurring` date ranges. If that is ever wanted, that is the mechanism; a
+    tag was never going to be it.
     """
     section_value = section.value if isinstance(section, Section) else Section(section).value
     tags = [
@@ -162,7 +148,6 @@ def parse_managed_meta(tags: Iterable[str]) -> Optional[ManagedMeta]:
     req_id: Optional[str] = None
     section: Optional[Section] = None
     ticket: Optional[str] = None
-    expires: Optional[date] = None
 
     for tag in tag_set:
         parts = tag.split(SEP, 2)
@@ -175,19 +160,13 @@ def parse_managed_meta(tags: Iterable[str]) -> Optional[ManagedMeta]:
             section = Section(value) if value in Section._value2member_map_ else None
         elif key == "ticket":
             ticket = value
-        elif key == "expires":
-            # LEGACY READ ONLY. `managed_tags` no longer writes this — see the
-            # note there. Kept so a rule tagged before 2026-08-05, or by an older
-            # version still deployed somewhere, is parsed rather than treated as
-            # malformed. Remove once no live rule carries one.
-            expires = date.fromisoformat(value)
 
     if req_id is None:
         # Marker present but no req tag — malformed. Surface loudly rather than
         # silently returning a half-populated record (fail closed).
         raise ValueError("managed marker present but no gitops:req tag found")
 
-    return ManagedMeta(req_id=req_id, section=section, ticket=ticket, expires=expires)
+    return ManagedMeta(req_id=req_id, section=section, ticket=ticket)
 
 
 # ── Deterministic identity ────────────────────────────────────────────────

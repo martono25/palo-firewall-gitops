@@ -18,7 +18,6 @@ metadata:
   ticket: JIRA-12345
   justification: "Web tier needs to reach the payments API"
   requested: 2026-07-19
-  expires: 2026-10-19
 spec:
   environment: prod
   action: allow

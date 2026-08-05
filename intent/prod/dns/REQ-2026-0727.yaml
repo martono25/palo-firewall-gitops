@@ -8,7 +8,6 @@ metadata:
   ticket: JIRA-20727
   justification: "App tier resolves names via the internal DNS resolver"
   requested: 2026-07-26
-  expires: 2026-10-26
 spec:
   environment: prod            # → prod-edge, zones local→internet
   action: allow

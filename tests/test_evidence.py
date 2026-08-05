@@ -70,7 +70,7 @@ def test_request_section_carries_provenance():
     assert r["requester"] == "jane.doe@corp"
     assert r["ticket"] == "JIRA-12345"           # audit linkage
     assert r["justification"]
-    assert r["expires"] == "2026-10-19"
+    assert "expires" not in r, "expiry was removed from the schema in v1.23.0"
     assert len(r["intent_sha256"]) == 64          # hash, not a copy
 
 

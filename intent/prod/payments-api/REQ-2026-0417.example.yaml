@@ -14,7 +14,6 @@ metadata:
   ticket: JIRA-12345           # mandatory — audit linkage
   justification: "Web tier needs to reach the payments API"
   requested: 2026-07-19
-  expires: 2026-10-19          # optional; omit for a permanent rule
 spec:
   environment: prod            # compiler resolves this to the SCM folder + zones
   action: allow                # allow | deny
