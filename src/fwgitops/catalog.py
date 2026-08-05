@@ -430,6 +430,12 @@ class InterfaceCatalog:
     #: unmapped firewall either way. The flag changes what is EXPECTED, never
     #: what is enforced at load.
     site_specific: FrozenSet[str] = frozenset()
+    #: role -> {folder -> default_value}. The folder-scope VARIABLES this
+    #: platform creates, as opposed to the SCM defaults it merely inherits.
+    #: Opt-in: a role with no entry is assumed to come from somewhere else,
+    #: because creating `$eth-local` in a child folder would SHADOW the object
+    #: every firewall resolves `local` through rather than add anything.
+    create_in: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     def roles(self) -> List[str]:
         return sorted(self.folder_names)
@@ -463,6 +469,50 @@ class InterfaceCatalog:
             )
         return name
 
+    def folder_variables(self, folder: str) -> Dict[str, str]:
+        """The `$`-variables this folder must materialise: name -> default_value.
+
+        Empty for a folder that creates none, which is the normal case: a folder
+        usually inherits every interface it needs.
+        """
+        out: Dict[str, str] = {}
+        for role, by_folder in sorted(self.create_in.items()):
+            if folder in by_folder:
+                out[self.folder_names[role]] = by_folder[folder]
+        return out
+
+    def create_in_conflicts(self, devices_of_folder) -> List[str]:
+        """Where a folder's own firewalls contradict the port it declares.
+
+        `default_value` is ONE value per folder object, so a role whose firewalls
+        in that folder resolve to DIFFERENT physical ports cannot be expressed as
+        a folder variable at all — the correct answer there is a device-scope
+        override, which InterfaceRequest already does.
+
+        Reported rather than resolved. Picking one port would send the other
+        firewall's traffic out the wrong wire, silently, and be indistinguishable
+        from working until someone looked at a packet.
+
+        `devices_of_folder` is a callable folder -> iterable of serials (i.e.
+        `FolderHierarchy.devices_of`), kept as a parameter so this module stays
+        free of a hard dependency on the hierarchy.
+        """
+        problems: List[str] = []
+        for role, by_folder in sorted(self.create_in.items()):
+            for folder, declared in sorted(by_folder.items()):
+                mapped = self.device_names.get(role, {})
+                for serial in sorted(devices_of_folder(folder) or ()):
+                    actual = mapped.get(serial)
+                    if actual is not None and actual != declared:
+                        problems.append(
+                            f"interface role {role!r}: folder {folder!r} declares "
+                            f"create_in={declared!r} but firewall {serial!r} in that "
+                            f"folder maps to {actual!r}. One folder variable cannot be "
+                            f"two ports — use a device-scope InterfaceRequest for the "
+                            f"firewall that differs."
+                        )
+        return problems
+
     @classmethod
     def from_dict(cls, data: Any) -> "InterfaceCatalog":
         if not isinstance(data, dict):
@@ -473,6 +523,7 @@ class InterfaceCatalog:
         folder_names: Dict[str, str] = {}
         device_names: Dict[str, Dict[str, str]] = {}
         site_specific: set = set()
+        create_in: Dict[str, Dict[str, str]] = {}
         for role, spec in roles.items():
             if not isinstance(role, str) or not role.strip():
                 raise CatalogError(f"interface catalog: bad role name {role!r}")
@@ -504,6 +555,23 @@ class InterfaceCatalog:
                         f"interface name (e.g. ethernet1/4)")
                 out[serial.strip()] = phys.strip()
             device_names[role] = out
+            ci = spec.get("create_in") or {}
+            if not isinstance(ci, dict):
+                raise CatalogError(
+                    f"interface catalog: {role!r}.create_in must be a mapping of "
+                    f"folder -> physical interface name (the folder variable's "
+                    f"default_value)")
+            clean: Dict[str, str] = {}
+            for fol, phys in ci.items():
+                if not isinstance(fol, str) or not fol.strip():
+                    raise CatalogError(f"interface catalog: {role!r}.create_in bad folder {fol!r}")
+                if not isinstance(phys, str) or not phys.strip():
+                    raise CatalogError(
+                        f"interface catalog: {role}/create_in/{fol} must map to a physical "
+                        f"interface name (e.g. ethernet1/2)")
+                clean[fol.strip()] = phys.strip()
+            if clean:
+                create_in[role] = clean
             if spec.get("site_specific") is True:
                 site_specific.add(role)
             elif spec.get("site_specific") not in (None, False):
@@ -511,7 +579,7 @@ class InterfaceCatalog:
                     f"interface catalog: {role!r}.site_specific must be true or false, "
                     f"got {spec.get('site_specific')!r}")
         return cls(folder_names=folder_names, device_names=device_names,
-                   site_specific=frozenset(site_specific))
+                   site_specific=frozenset(site_specific), create_in=create_in)
 
 
 @dataclass(frozen=True)

@@ -33,45 +33,20 @@ resource "scm_folder" "this" {
   snippets = []
 }
 
-# ── INTERFACE VARIABLES ARE PLATFORM CONFIG, NOT INTENT ───────────────────
-# A folder-scope zone can ONLY bind an interface object that exists at that
-# scope, and on this tenant those are `$`-prefixed variables. Probed live
-# (spike/zone-device-scope), binding a literal port name is refused:
+# ── INTERFACE VARIABLES LIVE IN THE FOLDER'S OWN ROOT, NOT HERE ───────────
+# `$eth-dmz` was declared here briefly (v1.18.0) and MOVED OUT in v1.19.0, by
+# `state rm` + `import` rather than destroy-and-recreate, because a live zone
+# binds it.
 #
-#   zone -> network -> layer3 'ethernet1/2' is not a valid reference
+# The reason is cadence, not ownership. This root is run-once and holds LOCAL,
+# gitignored state, so its state exists on exactly one machine. Adding an
+# interface is infrequent but ONGOING — filing it here made every later addition
+# a manual apply from that one machine, outside the pipeline: no PR plan, no risk
+# classification, no evidence bundle, and invisible to drift.
 #
-# so a zone cannot reach a port that has no variable in front of it. SCM fails
-# closed here, which is the good outcome.
+# They are now materialised from `catalog/interfaces.yaml` by
+# `fwgitops folder-interfaces` into the folder's CI-owned root, sharing the
+# remote state its zones and rules already use. See ADR-0005.
 #
-# `$eth-local` and `$eth-internet` came free — they are SCM defaults defined in
-# `ngfw-shared` and inherited (catalog/interfaces.yaml). A THIRD role has no
-# such default, and nothing in the Day-1 kinds creates one: ADR-0005 has
-# `InterfaceRequest` CONFIGURE an interface that already exists, deliberately,
-# because creating ports is not what a change request should do.
-#
-# So the variable is declared HERE, with the folder, for the same reason the
-# folder is: it must exist before any intent can reference it, and it is
-# platform topology rather than a request. THIS IS A REAL BOUNDARY, not an
-# oversight — see the note in TODOS about what it means for a greenfield folder.
-#
-# Scope is `prod-edge`, NOT `ngfw-shared`. Both would work, since the firewall
-# inherits down the whole chain, but `ngfw-shared` also feeds the `GitOps`
-# sandbox and every future sibling. Declare at the narrowest scope that reaches
-# the target.
-resource "scm_ethernet_interface" "eth_dmz" {
-  name          = "$eth-dmz"
-  folder        = scm_folder.this.name
-  default_value = "ethernet1/2"
-
-  # NO addressing here. The IP belongs to an InterfaceRequest at DEVICE scope,
-  # exactly as REQ-2026-0801/0802 do it: the address is a property of one
-  # firewall's wiring (it must match that firewall's ENI), while the variable is
-  # shared. Putting an address on the shared object would give every firewall
-  # inheriting this folder the same IP.
-  layer3 = {}
-}
-
-output "eth_dmz_name" {
-  description = "Interface variable a ZoneRequest can bind. Mirrors catalog/interfaces.yaml role `dmz`."
-  value       = scm_ethernet_interface.eth_dmz.name
-}
+# WHAT STAYS HERE is only what must exist BEFORE the pipeline can run at all:
+# the folder itself, which a firewall names as `dgname` when it registers.

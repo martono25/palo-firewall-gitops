@@ -48,11 +48,35 @@
 # Verified live 2026-08-03 (`show interface all`, device scope):
 #   ethernet1/3  up  06:e5:9a:8b:d8:c9  zone internet
 #   ethernet1/4  up  06:ca:54:97:6c:b7  zone local
+# ── WHO CREATES THE FOLDER-SCOPE VARIABLE (`create_in`) ───────────────────
+# A folder-scope zone can only bind an interface object that exists AT THAT
+# SCOPE. Binding a literal port is refused (`'ethernet1/2' is not a valid
+# reference`), so the `$`-variable must exist before any zone in that folder can
+# carry traffic.
+#
+# `$eth-local` and `$eth-internet` exist by luck of setup: they are SCM defaults
+# defined in `ngfw-shared` and inherited. A NEW folder inherits them too, but a
+# NEW ROLE has no such default — which is why `$eth-dmz` had to be created by
+# hand, and why "Day-1 provisioning as GitOps" was not true of a folder that
+# starts empty.
+#
+# `create_in` maps FOLDER -> the physical port that folder's variable resolves
+# to (`default_value`). `fwgitops folder-interfaces` materialises exactly these,
+# into the folder's CI-owned Terraform root — so adding a role later is a
+# reviewed PR with a plan, not a manual apply from whichever laptop holds a
+# run-once root's local state.
+#
+# OPT-IN, and that direction is deliberate. Omitting it means "this variable
+# comes from somewhere else" — the safe default. Creating `$eth-local` in
+# `prod-edge` would SHADOW the object inherited from `ngfw-shared` with a new
+# one, which is a per-folder override of the interface every firewall resolves
+# `local` through. Never list an inherited SCM default here.
 interfaces:
   local:
     description: Inside / trust segment.
     # Name at FOLDER scope — the SCM folder variable.
     folder: $eth-local
+    # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
     # Name at DEVICE scope, per firewall. A firewall absent here cannot be
     # targeted for this role: fail closed rather than guess a port.
     devices:
@@ -62,6 +86,7 @@ interfaces:
   internet:
     description: Outside / untrust segment.
     folder: $eth-internet
+    # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
     devices:
       "007955000894453": ethernet1/3
       "007955000893662": ethernet1/3
@@ -76,6 +101,11 @@ interfaces:
       reference), so without that bootstrap entry this role would be
       unbindable.
     folder: $eth-dmz
+    # CREATED BY THIS PLATFORM, unlike the two above. folder -> default_value.
+    # The port must agree with every mapped firewall in that folder; a
+    # disagreement is a rejection, not a coin flip (see catalog.py).
+    create_in:
+      prod-edge: ethernet1/2
     # NOT universal. `local` and `internet` exist on every firewall here, so a
     # firewall missing one is a catalog gap and the coverage test says so. A DMZ
     # port is a property of one site's wiring: 4453 has an ENI at device index

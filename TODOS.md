@@ -642,34 +642,81 @@ does, and reject a raw `$`/port literal.
 **Effort:** M — schema change, touches the zone loader, compiler and fixtures.
 **Priority:** P2
 
-### A greenfield folder has no `$eth-*` variables, and no kind creates them
+### ~~A greenfield folder has no `$eth-*` variables~~ — BUILT v1.19.0
 
-**Found 2026-08-05.** A folder-scope zone can only bind an interface object that
-exists at that scope, and on this tenant those are `$`-prefixed variables.
-`$eth-local` and `$eth-internet` came free as SCM defaults inherited from
-`ngfw-shared`; a THIRD role has no such default, and ADR-0005 deliberately has
-`InterfaceRequest` CONFIGURE interfaces rather than create them.
+Interface variables are now declared in `catalog/interfaces.yaml` (`create_in:`)
+and materialised by `fwgitops folder-interfaces` into the folder's CI-owned root.
+`$eth-dmz` moved out of `bootstrap-scm-folder` by `state rm` + `import` — a live
+zone binds it, so destroy-and-recreate would have taken `dmz` off the firewall.
 
-So `$eth-dmz` had to be declared in `terraform/bootstrap-scm-folder` as platform
-config. That is a defensible boundary — creating ports is not what a change
-request should do — but it means **"Day-1 provisioning as GitOps" stops short of
-a genuinely greenfield folder**: someone must add an interface variable per role
-before any ZoneRequest in that folder can bind anything.
+The reason it moved was CADENCE, not ownership: bootstrap is run-once with local
+gitignored state, so filing an ongoing activity there made every later interface
+addition a manual apply from one machine, outside the pipeline. See ADR-0005's
+amendment.
 
-**SCOPED TO v1 (decision 2026-08-05).** Not backlog. "Day-1 provisioning as
-GitOps" is v1's headline claim, and it is not true of a folder that starts empty
-— which is the only kind of folder a NEW site has. Closing v1 on a claim that
-holds only for the one folder whose interface variables were inherited by
-accident would be shipping a demo.
-
-The design question is still open and is the first thing to settle: does
-`bootstrap-scm-folder` own interface variables per role (documented in ADR-0005,
-platform config like the folder itself), or does a kind own interface CREATION?
-They differ in who is allowed to add a port, which is a permissions question
-before it is a code one.
+**STILL OPEN — root scaffolding.** A brand-new folder needs its Terraform root
+(`main.tf`, `variables.tf`, backend config) created before `compile` will emit
+into it. That is still manual and templated, so greenfield is CLOSER, not
+finished. It is the last thing between here and "add a folder to the catalog,
+open a PR, get a working firewall".
 
 **Effort:** M
-**Priority:** P1 (v1) — blocks the v1 Day-1 claim being true for a new folder.
+**Priority:** P1 (v1) — same reason as the parent item: v1's Day-1 claim is not
+true of a new folder until this is done.
+
+### Verify the catalog against SCM — nothing does
+
+**Found 2026-08-05.** `007955000893662` disappeared from
+`GET /config/setup/v1/folders` and `catalog/folders.yaml` went on listing it as
+targetable, with port mappings in `catalog/interfaces.yaml`. An intent naming it
+compiled clean and would have died at apply — the failure mode this project
+designs against, arriving through the catalog rather than the compiler.
+
+Marked `targetable: false` as a fail-closed stopgap, but nothing DETECTS the next
+one. The catalog is a hand-maintained mirror of a hierarchy that changes
+underneath it.
+
+**This is the prerequisite for folder MOVES (v2.0).** Re-parenting a firewall is
+exactly a hierarchy change, so any move support built on an unverified catalog
+inherits this bug by design. Build the check first.
+
+The natural home is the drift work, which already reads SCM: compare
+`folders.yaml` against the live hierarchy including the `container` vs `on-prem`
+`type` distinction, and fail the PR on divergence.
+
+**Effort:** M
+**Priority:** P1 (v1) — cheap, and it is currently the only thing standing
+between a silent catalog lie and an apply-time failure.
+
+### Re-parenting a firewall into a different folder — DEFERRED to v2.0
+
+**What:** move an EXISTING firewall from one folder to another.
+
+**What is already known (2026-08-05), which is most of the design:**
+
+* **Device-scope objects travel; folder-scope objects do not.** Addressed
+  interfaces are keyed by serial (`terraform/device-<serial>` is named by serial,
+  not folder), so addressing survives a move. Zones, routers, rules and `$eth-*`
+  variables are folder objects and do NOT — the firewall simply stops inheriting
+  one folder and starts inheriting another.
+* **So the hazard is precise: the firewall keeps its IP addresses and loses its
+  policy.** An addressed interface in no zone drops traffic (verified in the zone
+  deletion test), so it fails closed — but that is an outage, not a safeguard.
+* **The order is therefore forced:** build the new folder completely, re-parent,
+  verify on the device, and only THEN remove the old folder's objects. Two
+  Terraform roots have no reason to pick that order on their own.
+
+**Unverified, and it decides everything:** whether SCM supports re-parenting a
+REGISTERED firewall at all. `dgname` is set in `init-cfg` at bootstrap, which is
+a registration-time association. Against that, the device is a first-class entry
+in `/config/setup/v1/folders` with its own `id` and a `parent` field, and
+`scm_folder.parent` is a required, updatable string. Suggestive, not proof — it
+needs a probe against a live firewall.
+
+**Effort:** L
+**Priority:** P2 (v2.0)
+**Depends on:** the catalog-vs-SCM check above. Building move support on an
+unverified catalog reproduces the 3662 bug by design.
 
 ### ~~InterfaceRequest — intent kind #3~~ — DONE v1.8.0
 

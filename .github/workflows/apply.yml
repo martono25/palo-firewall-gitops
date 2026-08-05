@@ -76,6 +76,15 @@ jobs:
       # is deterministic/byte-stable, so this matches the reviewed output when the
       # author recompiled in the PR, and self-corrects if they forgot. Fail-closed:
       # any invalid intent aborts here, before anything is applied.
+      # MATERIALISE FOLDER INTERFACE VARIABLES FIRST, always before compile.
+      # A folder's `$`-interface VARIABLES must exist before any zone in that
+      # folder can bind one, and a GREENFIELD folder has no intents at all — so
+      # this cannot be driven off the intent tree without being circular. The
+      # source is catalog/interfaces.yaml, which is platform-maintained and
+      # changed by PR, so a requester still cannot conjure a physical port.
+      - name: Materialise folder interface variables
+        run: fwgitops folder-interfaces
+
       - name: Compile intents
         run: fwgitops compile
 

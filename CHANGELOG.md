@@ -3,6 +3,71 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.19.0] — 2026-08-05
+
+### Folder interface variables move out of bootstrap — greenfield, mostly
+
+A folder-scope zone can only bind an interface object that exists at that scope
+(binding a literal port is refused as an invalid reference). `$eth-local` and
+`$eth-internet` exist only because they are SCM defaults inherited from
+`ngfw-shared`, so a NEW role — or a new folder wanting one — had nothing to bind.
+
+`$eth-dmz` was created by hand in `bootstrap-scm-folder` in v1.18.0. That was
+wrong, and the reason is CADENCE, not ownership: bootstrap is run-once with local
+`.gitignore`d state, so its state lives on exactly one machine. Every later
+interface addition would have been a manual apply from that machine — no PR plan,
+no risk classification, no evidence bundle, invisible to drift.
+
+Now: declared in `catalog/interfaces.yaml` under `create_in: {folder: port}` and
+materialised by **`fwgitops folder-interfaces`** into the folder's CI-owned root,
+sharing the remote state its zones and rules already use. The permission boundary
+is unchanged — the catalog is platform-maintained and changed by PR, so a
+requester still cannot conjure a port by filing an intent.
+
+`$eth-dmz` moved by `state rm` + `import`, NOT destroy-and-recreate: a live zone
+binds it, and destroying it would have taken `dmz` off the firewall. The only
+resulting diff was the management comment.
+
+Two constraints fall out of the data model, both fail-closed:
+
+- **Opt-in, never inferred.** Listing an inherited SCM default under `create_in`
+  would SHADOW the shared object with a per-folder copy, silently re-pointing the
+  interface every firewall in that folder resolves that role through. A test
+  forbids `local` and `internet` appearing there.
+- **One folder variable cannot be two ports.** If a folder's own firewalls map
+  the role differently, `folder-interfaces` reports and writes NOTHING rather
+  than picking one — choosing would send the other firewall's traffic out the
+  wrong wire while every check stayed green.
+
+### `007955000893662` is gone from SCM, and the catalog did not notice
+
+It vanished from `GET /config/setup/v1/folders`; `catalog/folders.yaml` went on
+listing it as targetable with port mappings. An intent naming it compiled clean
+and would have died at apply. Marked `targetable: false` as a fail-closed
+stopgap — but nothing DETECTS the next one, and a catalog-vs-SCM check is now
+filed as the prerequisite for folder moves (v2.0), since re-parenting is exactly
+this kind of hierarchy change.
+
+Two tests silently depended on that firewall being targetable and were rewritten
+against synthetic fixtures — they asserted properties of the loader, so they
+should never have leaned on the shipped catalog to stay in a particular state.
+
+### Also
+
+- The module merges `folder_interfaces` with `interfaces` into one `for_each`.
+  They are separate VARIABLES because both arrive as auto-loaded tfvars and
+  Terraform REPLACES a variable set twice rather than merging it — one name would
+  let whichever file loads last erase the other, with no diagnostic. The merge is
+  safe because folder variables are `$`-prefixed and device interfaces are not;
+  `folder-interfaces` asserts that rather than assuming it.
+- The root/module contract tests caught the first attempt (which merged in the
+  root) and were left untouched — the wiring was wrong, not the guard.
+- `default_value` is now wired in the module; it was previously unwired, so a
+  folder variable would have been created pointing at no port.
+- **Not closed:** a brand-new folder still needs its Terraform root scaffolded
+  before `compile` emits into it. Greenfield is closer, not finished.
+- 587 tests (+9).
+
 ## [1.18.0] — 2026-08-05
 
 ### ZoneRequest reached a firewall — the last unverified Day-1 kind

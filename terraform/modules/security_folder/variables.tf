@@ -47,11 +47,11 @@ variable "security_rules" {
     tags         = list(string)
     # ── ADR-0003 rule components (optional; defaults = plain L4 allow) ──
     application       = optional(list(string), ["any"])
-    profile_group     = optional(string)      # null -> no security profile
-    log_setting       = optional(string)      # null -> local logs only
+    profile_group     = optional(string) # null -> no security profile
+    log_setting       = optional(string) # null -> local logs only
     rulebase          = optional(string, "pre")
     relative_position = optional(string, "bottom") # top|bottom|before|after
-    target_rule       = optional(string)      # anchor for before/after
+    target_rule       = optional(string)           # anchor for before/after
     # ── v1.0 rule completeness ──
     # Set explicitly, per the provider's own scm_security_rule example. Omitting
     # `category` / `source_user` is not "leave alone": the provider models
@@ -137,9 +137,64 @@ variable "interfaces" {
     # hierarchy and inherits down it, but is addressed `device=`, never
     # `folder=`. A device-scope write to an inherited object creates a
     # per-device OVERRIDE — verified in spike/device-override-probe.
-    folder  = optional(string)
-    device  = optional(string)
-    comment = optional(string)
+    folder = optional(string)
+    device = optional(string)
+    # FOLDER-SCOPE VARIABLES ONLY. On this tenant a folder-scope interface is a
+    # `$`-prefixed VARIABLE whose default_value names the physical port every
+    # firewall beneath the folder resolves it to. A zone can only bind an
+    # interface object that exists at its scope -- binding a literal port name is
+    # refused as an invalid reference -- so this attribute is what makes a
+    # folder's zones bindable at all. Null at device scope, where the object IS
+    # the physical port.
+    default_value = optional(string)
+    comment       = optional(string)
+    layer3 = optional(object({
+      ip          = optional(list(object({ name = string })))
+      dhcp_client = optional(object({ enable = optional(bool) }))
+      mtu         = optional(number)
+      # Which admin services answer here. Attaching one to a DATA interface
+      # exposes admin services on that network — absence is the safe default.
+      interface_management_profile = optional(string)
+    }))
+  }))
+  default = {}
+}
+
+# ── RouteRequest (ADR-0001 kind #4) ───────────────────────────────────────
+# Routes AGGREGATE: many RouteRequests become one logical router, because a
+# static route lives at vrf[].routing_table.ip.static_route[] and that same
+# object carries the VRF's interface membership.
+#
+# `interface` is therefore NOT optional in spirit: Terraform manages whole
+# objects, so writing this router without it would strip the interface list from
+# the object all traffic traverses. The compiler carries membership on every
+# compiled route (from catalog/routers.yaml) and asserts they agree.
+variable "folder_interfaces" {
+  description = <<-EOT
+    Folder-scope `$`-interface VARIABLES, from catalog/interfaces.yaml via
+    `fwgitops folder-interfaces`. SEPARATE from `interfaces` because both arrive
+    as auto-loaded .tfvars and Terraform REPLACES a variable set twice rather
+    than merging it — one variable name would let whichever file loads last
+    erase the other, with no diagnostic.
+  EOT
+  type = map(object({
+    name = string
+    # Exactly one of folder/device is non-null (the provider enforces "exactly
+    # one of device, folder, snippet"). A firewall is the last level of the SCM
+    # hierarchy and inherits down it, but is addressed `device=`, never
+    # `folder=`. A device-scope write to an inherited object creates a
+    # per-device OVERRIDE — verified in spike/device-override-probe.
+    folder = optional(string)
+    device = optional(string)
+    # FOLDER-SCOPE VARIABLES ONLY. On this tenant a folder-scope interface is a
+    # `$`-prefixed VARIABLE whose default_value names the physical port every
+    # firewall beneath the folder resolves it to. A zone can only bind an
+    # interface object that exists at its scope -- binding a literal port name is
+    # refused as an invalid reference -- so this attribute is what makes a
+    # folder's zones bindable at all. Null at device scope, where the object IS
+    # the physical port.
+    default_value = optional(string)
+    comment       = optional(string)
     layer3 = optional(object({
       ip          = optional(list(object({ name = string })))
       dhcp_client = optional(object({ enable = optional(bool) }))

@@ -1,6 +1,7 @@
 # ADR-0005 — `InterfaceRequest` targets folder scope via the `$eth-*` variables
 
-- **Status:** Accepted — **built** (v1.8.0)
+- **Status:** Accepted — **built** (v1.8.0). AMENDED 2026-08-05 (v1.19.0):
+  who CREATES a folder's `$eth-*` variables — see *Amendment* at the end.
 - **Date:** 2026-08-02
 - **Deciders:** Martono, Claude
 
@@ -149,3 +150,83 @@ letting the device commit do it.
 - ADR-0001 — the multi-kind model; `InterfaceRequest` would be kind #3.
 - ADR-0004 — the fail-closed contract, including the per-attribute check that
   `layer3` will need.
+
+---
+
+## Amendment (2026-08-05, v1.19.0) — creating the `$eth-*` variables
+
+This ADR settled how an intent NAMES an interface. It did not say who CREATES
+the folder-scope variable an intent names, because at the time nobody had to:
+`$eth-local` and `$eth-internet` are SCM defaults defined in `ngfw-shared` and
+inherited by everything beneath it.
+
+That held for exactly as long as the platform used only those two roles.
+
+### What broke it
+
+Putting a `ZoneRequest` on hardware needed a THIRD role. A folder-scope zone can
+only bind an interface object that exists at that scope — probed live, binding a
+literal port is refused:
+
+```
+zone -> network -> layer3 'ethernet1/2' is not a valid reference
+```
+
+So `$eth-dmz` had to exist before the zone could. Nothing in the Day-1 kinds
+creates it: this ADR deliberately has `InterfaceRequest` CONFIGURE an interface
+that already exists, and that is still right — a change request should not be
+able to conjure a physical port.
+
+It was therefore created by hand in `terraform/bootstrap-scm-folder`, and that
+was the mistake.
+
+### Why bootstrap was the wrong home
+
+Not ownership — **cadence**. Bootstrap is run-once, before the pipeline exists,
+with LOCAL state that `.gitignore` excludes. Its state therefore lives on exactly
+one machine. Filing interface creation there made every later addition:
+
+* a manual apply from whichever laptop holds that state,
+* outside the pipeline — no PR plan, no risk classification, no evidence bundle,
+* and invisible to drift, which is registry-driven per kind and owned none of it.
+
+Adding an interface is infrequent, but it is **ongoing**, and infrequent is not
+the same as run-once. Folder CREATION genuinely is run-once and must precede the
+firewall's registration (`dgname`), so it stays in bootstrap. Interface variables
+do not and should not.
+
+### Decision
+
+A folder's `$eth-*` variables are declared in `catalog/interfaces.yaml` under
+`create_in: {folder: <physical port>}` and materialised by
+`fwgitops folder-interfaces` into that folder's CI-owned Terraform root, sharing
+the remote state its zones and rules already use.
+
+The permission boundary this ADR cares about is unchanged: the catalog is
+platform-maintained and changed by PR, so a requester still cannot create a port
+by filing an intent. What changes is that the PLATFORM's own edit becomes a
+reviewed PR with a plan instead of a manual apply.
+
+`$eth-dmz` was moved out of bootstrap by `state rm` + `import`, not
+destroy-and-recreate — a live zone binds it, and destroying it would have taken
+`dmz` off the firewall.
+
+### Two constraints that fall out of it
+
+1. **Opt-in, never inferred.** A role with no `create_in` is assumed to come from
+   somewhere else. Listing an inherited SCM default there would SHADOW the shared
+   object with a per-folder copy — silently re-pointing the interface every
+   firewall in that folder resolves that role through. A test forbids `local` and
+   `internet` appearing under `create_in`.
+2. **One folder variable cannot be two ports.** `default_value` is a single value
+   per folder object. If the folder's own firewalls map the role to different
+   ports, no value is correct, and the answer is a device-scope
+   `InterfaceRequest`. `folder-interfaces` REPORTS that and writes nothing rather
+   than choosing — picking one would send the other firewall's traffic out the
+   wrong wire while every check stayed green.
+
+### What this does NOT close
+
+A brand-new folder still needs its Terraform ROOT scaffolded (`main.tf`,
+`variables.tf`, backend config) before `compile` will emit into it — that remains
+a manual, templated step. Greenfield is closer, not finished.
