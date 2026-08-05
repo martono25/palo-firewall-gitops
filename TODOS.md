@@ -713,9 +713,18 @@ caught the bug that motivated it.
 Fails closed on an empty read and on a transport failure — a check that passes
 when it could not reach the thing it checks is worse than no check.
 
-**Still open, deliberately:** the 3662 entries themselves. Whether to delete them
-or keep the record is a decision about that firewall, not about the check; they
-are fenced off and now reported on every run, so they cannot be forgotten.
+**3662 REMOVED from both catalogs (2026-08-05).** `verify-catalog` now reports
+zero notes. Leaving a known-stale entry in place would have meant every run
+printing something to ignore, which is how a real divergence later gets ignored
+too — the entry was the last reason the check was ever noisy.
+
+The `site_specific` marking on the `dmz` role stays. With one firewall left it
+changes nothing and looks removable; it earns its keep the moment a SECOND
+firewall is added without a DMZ port, when the alternative is a coverage-test
+failure or a guessed port. The test asserting the marking is MEANINGFUL is now
+conditional on there being more than one firewall to compare — it was vacuous on
+a one-firewall estate, and would otherwise have failed simply because the estate
+shrank.
 
 ### Re-parenting a firewall into a different folder — DEFERRED to v2.0
 
