@@ -3,6 +3,25 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.21.1] — 2026-08-05
+
+### `007955000893662` removed from both catalogs
+
+It left SCM and was fenced off with `targetable: false` as a stopgap. Now
+deleted from `catalog/folders.yaml` and `catalog/interfaces.yaml`, so
+`verify-catalog` reports **zero** notes.
+
+That is the point of removing it rather than leaving it acknowledged: a check
+that prints a known-stale entry every run is one people stop reading, and this
+entry was the only reason it was ever noisy.
+
+The `site_specific` marking on `dmz` stays. With one firewall it changes nothing
+and looks removable; it earns its keep when a second firewall arrives without a
+DMZ port, where the alternative is a coverage-test failure or a guessed port. The
+test asserting that marking is meaningful is now conditional on there being more
+than one firewall — it was vacuous on a one-firewall estate and would otherwise
+have failed merely because the estate shrank.
+
 ## [1.21.0] — 2026-08-05
 
 ### `fwgitops verify-catalog` — the catalog can no longer lie quietly

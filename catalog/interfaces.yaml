@@ -81,7 +81,6 @@ interfaces:
     # targeted for this role: fail closed rather than guess a port.
     devices:
       "007955000894453": ethernet1/4
-      "007955000893662": ethernet1/4
 
   internet:
     description: Outside / untrust segment.
@@ -89,7 +88,6 @@ interfaces:
     # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
     devices:
       "007955000894453": ethernet1/3
-      "007955000893662": ethernet1/3
 
   dmz:
     description: >-
@@ -106,19 +104,24 @@ interfaces:
     # disagreement is a rejection, not a coin flip (see catalog.py).
     create_in:
       prod-edge: ethernet1/2
-    # NOT universal. `local` and `internet` exist on every firewall here, so a
-    # firewall missing one is a catalog gap and the coverage test says so. A DMZ
-    # port is a property of one site's wiring: 4453 has an ENI at device index
-    # 2, 3662 is not known to. Declaring one for 3662 would be a guess, and
-    # guessing physical ports is what this file exists to prevent.
+    # NOT universal. `local` and `internet` are expected on every firewall here,
+    # so one missing them is a catalog gap and the coverage test says so. A DMZ
+    # port is a property of one site's wiring — 4453 has an ENI at device index
+    # 2, and the next firewall need not.
     #
-    # This marks the role as not-expected-everywhere; it does NOT loosen
-    # anything. `resolve()` still raises for an unmapped firewall, so an intent
-    # naming `device: 007955000893662` with `interface: dmz` is rejected at load
-    # rather than compiling into a port that may not exist.
+    # KEPT DELIBERATELY while only one firewall exists. Right now every role
+    # covers the single firewall, so this marking changes nothing and looks
+    # removable; it earns its keep the moment a SECOND firewall is added without
+    # a DMZ port, which is when the alternative would be either a coverage-test
+    # failure or a GUESSED port. Guessing physical ports is what this file exists
+    # to prevent.
+    #
+    # It does not loosen anything either way: `resolve()` still raises for an
+    # unmapped firewall, so an intent naming one with `interface: dmz` is
+    # rejected at load rather than compiling into a port that may not exist.
     site_specific: true
     devices:
-      # ethernet1/2 = ENI device index 2, 10.100.1.110/24. Present on 4453 only;
-      # 3662 is deliberately absent, so targeting it for this role fails closed
-      # rather than guessing a port that may not have an ENI behind it.
+      # ethernet1/2 = ENI device index 2, 10.100.1.110/24. A firewall absent
+      # from this map cannot be targeted for this role — fail closed rather than
+      # guess a port that may have no ENI behind it.
       "007955000894453": ethernet1/2

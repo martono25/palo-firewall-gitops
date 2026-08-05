@@ -295,11 +295,20 @@ def test_a_site_specific_role_still_fails_closed_for_an_unmapped_firewall():
         with pytest.raises(CatalogError, match="no mapping for firewall"):
             cat.resolve(role, device="007955000899999")
 
-    # And the shipped data must still MEAN something: a role is only worth
-    # marking site-specific if it maps fewer firewalls than a universal one.
+    # Whether the shipped marking still MEANS anything is only decidable with
+    # more than one firewall. With exactly one, every role covers it and
+    # "site-specific" is indistinguishable from universal by coverage — the
+    # marking is a statement about the NEXT firewall, which no assertion here can
+    # see. Asserting it anyway would fail the moment the estate shrank to one,
+    # which is what happened when 007955000893662 left SCM on 2026-08-05.
+    #
+    # So the check is CONDITIONAL rather than deleted: it goes quiet on a
+    # one-firewall estate and comes back the moment there is something to
+    # compare.
     universal_cover = max(
         (len(cat.device_names.get(r, {})) for r in cat.universal_roles()), default=0)
-    for role in site_roles:
-        assert len(cat.device_names.get(role, {})) < universal_cover, (
-            f"{role} is marked site_specific but covers as many firewalls as a "
-            f"universal role — the marking is either wrong or now pointless")
+    if universal_cover > 1:
+        for role in site_roles:
+            assert len(cat.device_names.get(role, {})) < universal_cover, (
+                f"{role} is marked site_specific but covers as many firewalls as a "
+                f"universal role — the marking is either wrong or now pointless")
