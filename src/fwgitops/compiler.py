@@ -250,10 +250,9 @@ def compile_request(
         services=_names_in_order(svc_objs),
         action=ar.spec.action,
         log_end=ar.spec.log,
-        # NO expiry tag. `metadata.expires` is CI lifecycle, not a property of
-        # the firewall rule — nothing on the device acts on it, so writing it
-        # there shipped a date that looked like a control and was not one. It
-        # stays in the intent and the evidence bundle. See tags.managed_tags.
+        # No expiry: the field was removed from the intent schema in v1.23.0
+        # (see intent._load_metadata). Device-enforced expiry, if ever wanted, is
+        # scm_security_rule.schedule — not a tag.
         tags=managed_tags(
             req_id=ar.metadata.id,
             section=section,

@@ -9,7 +9,6 @@ metadata:
   ticket: JIRA-20725            # mandatory — audit linkage
   justification: "Web tier ships logs/metrics to the central observability collector"
   requested: 2026-07-25
-  expires: 2026-10-25
 spec:
   environment: prod            # → prod-edge folder, trust→app zones
   action: allow

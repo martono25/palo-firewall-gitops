@@ -8,7 +8,6 @@ metadata:
   ticket: JIRA-20726
   justification: "CI runners pull build artifacts from the internal package registry"
   requested: 2026-07-26
-  expires: 2026-10-26
 spec:
   environment: prod            # → prod-edge, zones local→internet
   action: allow

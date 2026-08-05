@@ -84,7 +84,6 @@ class Metadata:
     ticket: str
     justification: str
     requested: date
-    expires: Optional[date] = None
 
 
 @dataclass(frozen=True)
@@ -863,13 +862,30 @@ def _load_metadata(md: Any, c: _Collector) -> Optional[Metadata]:
         c.add(f"{path}.ticket", f"{ticket!r} must match {_SAFE_ID.pattern} (it becomes a tag)")
     justification = _req_str(md, "justification", path, c)
     requested = _date(md, "requested", path, c, required=True)
-    expires = _date(md, "expires", path, c, required=False)
+
+    # REMOVED 2026-08-05, and REJECTED rather than ignored. Unknown metadata
+    # keys are silently dropped by this loader, so deleting the field alone
+    # would turn every existing `expires:` into a silent no-op — the exact
+    # "compiles clean, does nothing" failure this codebase treats as a bug.
+    #
+    # It modelled a lifecycle this platform does not run: nothing removed an
+    # expired rule, and the date was never enforced anywhere. On a Day-1 kind it
+    # was parsed and dropped entirely, since evidence bundles are AccessRequest
+    # -only. A field that means nothing is worse than a missing one, because a
+    # reader assumes it means something.
+    if isinstance(md, dict) and "expires" in md:
+        c.add(f"{path}.expires",
+              "removed — this platform does not model rule expiry. Nothing enforced "
+              "the date: it was never applied to the firewall, and no job removed an "
+              "expired rule. Delete the field. For expiry the DEVICE enforces, see "
+              "`scm_security_rule.schedule` (PAN-OS schedules), which is a separate "
+              "capability this platform does not yet wire.")
 
     if None in (_id, requester, ticket, justification, requested):
         return None
     return Metadata(
         id=_id, requester=requester, ticket=ticket,  # type: ignore[arg-type]
-        justification=justification, requested=requested, expires=expires,  # type: ignore[arg-type]
+        justification=justification, requested=requested,  # type: ignore[arg-type]
     )
 
 

@@ -156,7 +156,6 @@ def build_bundle(
             "ticket": request.metadata.ticket,
             "justification": request.metadata.justification,
             "requested": request.metadata.requested.isoformat(),
-            "expires": request.metadata.expires.isoformat() if request.metadata.expires else None,
             "environment": request.spec.environment,
             "action": request.spec.action,
             "intent_file": intent_path,

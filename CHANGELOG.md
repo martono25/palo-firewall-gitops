@@ -3,6 +3,48 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.23.0] — 2026-08-05
+
+### `expires` removed from the intent schema entirely
+
+v1.22.0 stopped writing it to the firewall. This removes the field: from
+`Metadata`, from `ManagedMeta`, from evidence bundles, and from all four intent
+files that set one.
+
+It modelled a lifecycle this platform does not run. The date never reached a
+device, no job ever removed an expired rule, and on a Day-1 kind it was parsed
+and dropped entirely because evidence bundles are `AccessRequest`-only. A field
+that means nothing is worse than a missing one — a reader assumes it means
+something, and the evidence bundle asserted a date nobody honoured.
+
+**REJECTED, not ignored.** The loader drops unknown metadata keys silently, so
+deleting the field alone would have turned every existing `expires:` into a
+no-op — the "compiles clean, does nothing" failure this codebase treats as a bug.
+An intent still carrying one now fails at PR time with a message saying why and
+pointing at the device-enforced alternative.
+
+A leftover `gitops:expires:` TAG is now ignored rather than parsed. No live rule
+carries one, and treating it as malformed would fail closed loudly — turning a
+stale label into an incident.
+
+Follow-through in `docs/DESIGN.md`, which promised things that now cannot happen:
+
+- the expiry-auto-rollback section is replaced by a statement that expiry is not
+  modelled, and why
+- the rollback table's `Expiry` row is gone
+- **task T11 (scheduled expiry job) is marked DROPPED** rather than left looking
+  merely unstarted
+- the classifier signal *"permanent rule (no expiry) above a sensitivity
+  threshold"* is dropped — every rule is permanent now, so it would fire on all
+  of them and mean nothing
+
+PAN-OS keeps real device-enforced expiry (`scm_security_rule.schedule` →
+`scm_schedule.non_recurring`) if the requirement ever returns. Noted with the
+catch: a lapsed *allow* stops matching and traffic falls through to whatever is
+below it, so it is fail-closed only if rule ordering says so.
+
+- 611 tests (+1).
+
 ## [1.22.0] — 2026-08-05
 
 ### The expiry tag is no longer written to rules
