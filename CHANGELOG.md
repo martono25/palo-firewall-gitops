@@ -3,6 +3,51 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.30.0] — 2026-08-05
+
+### Deletions are visible to the classifier
+
+A deletion was invisible to the entire risk pipeline. `classify` reads the intent
+TREE, and a deleted intent is simply absent — so nothing classified it, the gate
+never saw it, and no evidence was produced. Terraform was the only stage that
+knew, and only at plan time.
+
+So removing a rule that permits traffic and removing a route that carries it were
+both **unclassified, unaudited and auto-appliable** — not because anyone judged
+them low risk, but because nothing judged them at all.
+
+`fwgitops classify --baseline <tree>` now classifies removals alongside
+additions, in the same report and the same gate. Tree-vs-tree rather than git, so
+the classifier stays pure and testable without a repository; CI materialises the
+base revision with `git archive`.
+
+**The tiers are not the mirror of creation, and that is the point:**
+
+| removal | tier | why |
+|---|---|---|
+| `allow` rule | LOW | withdraws access — can break what depended on it, opens nothing |
+| `deny` rule | HIGH | traffic it blocked may now match a permissive rule below |
+| route | HIGH | stops forwarding; nothing refuses it — a router with one fewer route is still valid |
+| zone | HIGH | interfaces lose their zone; PAN-OS drops traffic on an unzoned interface |
+| interface | HIGH | a device override reverts to the inherited object, which carries no addressing |
+| unknown kind | CRITICAL | a default that permits is how a class of change goes unassessed |
+
+**Found building it:** an empty intent tree returned early with "no intent files
+found" and exit 0, so a PR deleting EVERY intent bypassed the gate — the largest
+possible removal was the one case that could not be blocked.
+
+Fails closed on an unreadable baseline: reporting "no removals" because the
+comparison broke is the exact blindness this removes.
+
+Mutation-verified: forcing every removal to LOW fails seven tests.
+
+**Not included, and filed:** evidence bundles for removals (the baseline tree has
+the request object, so it is buildable — it needs a `removed` status and a
+decision about what "applied" means), and the per-kind deletion contract as an
+ADR.
+
+- 647 tests (+12).
+
 ## [1.29.0] — 2026-08-05
 
 ### ADR-0007 — rule targeting decided

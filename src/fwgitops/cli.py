@@ -47,6 +47,7 @@ from fwgitops.kinds import (
     of_kind,
 )
 from fwgitops.io import discover_intents, read_yaml
+from fwgitops.removal import classify_removal
 from fwgitops.resolve import EnvMap, ResolveError
 from fwgitops.tfcontract import check_contract, check_object_attributes, is_terraform_root
 
@@ -471,6 +472,7 @@ def run_classify(
     *,
     gate: Optional[str] = None,
     state_snapshot_paths: Optional[List[Path]] = None,
+    baseline_root: Optional[Path] = None,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
@@ -540,7 +542,11 @@ def run_classify(
         return 1
 
     intents = discover_intents(intent_root)
-    if not intents:
+    # NO EARLY RETURN ON AN EMPTY TREE when a baseline is given. A PR that
+    # deletes every intent leaves nothing to classify and is exactly when the
+    # gate matters most — returning 0 here would wave through the largest
+    # possible removal.
+    if not intents and baseline_root is None:
         print(f"no intent files found under {intent_root}", file=out)
         return 0
 
@@ -592,9 +598,31 @@ def run_classify(
             print(f"  {label:22} {v.tier:9} {checks}", file=out)
             if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
                 exceeded.append(f"{label}={v.tier}")
+    # ── REMOVALS ──────────────────────────────────────────────────────────
+    # A deleted intent is ABSENT from the tree above, so nothing classified it
+    # and the gate never saw it. Removing a rule that permits traffic and
+    # removing a route that carries it were equally invisible. `baseline_root` is
+    # the base revision's intent tree (CI materialises it with `git archive`);
+    # comparing trees keeps this pure, unlike reading git here.
+    removed_count = 0
+    if baseline_root is not None:
+        removals, code = _load_removals(baseline_root, intent_root, env_map, cats, err)
+        if removals is None:
+            return code
+        removed_count = len(removals)
+        for r in removals:
+            v = classify_removal(r)
+            tiers[v.tier] = tiers.get(v.tier, 0) + 1
+            checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
+            label = f"REMOVED {r.req_id}"
+            print(f"  {label:22} {v.tier:9} {checks}", file=out)
+            if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
+                exceeded.append(f"{label}={v.tier}")
+
     print(
-        f"classified {len(compiled)}: "
-        f"{tiers['LOW']} LOW · {tiers['HIGH']} HIGH · {tiers['CRITICAL']} CRITICAL",
+        f"classified {len(compiled) + removed_count}: "
+        f"{tiers['LOW']} LOW · {tiers['HIGH']} HIGH · {tiers['CRITICAL']} CRITICAL"
+        + (f" ({removed_count} removal(s))" if removed_count else ""),
         file=out,
     )
     if exceeded:
@@ -605,6 +633,46 @@ def run_classify(
         )
         return 3
     return 0
+
+
+def _load_removals(baseline_root: Path, intent_root: Path, env_map, cats, err):
+    """(removals, exit_code). `removals` is None when the baseline is unusable.
+
+    FAIL CLOSED. An unreadable or invalid baseline returns an error rather than
+    "no removals" — silently reporting zero removals because the comparison
+    broke is precisely the blindness this feature removes.
+    """
+    from fwgitops.removal import Removal, find_removals
+
+    if not baseline_root.exists():
+        print(f"error: baseline intent tree not found: {baseline_root}", file=err)
+        return None, 1
+
+    def index(root: Path, strict: bool):
+        out: Dict[Tuple[str, str], Removal] = {}
+        for path in discover_intents(root):
+            try:
+                doc = read_yaml(path)
+                req = load_intent(doc, env_map=env_map, **cats)
+            except Exception as e:  # noqa: BLE001
+                if strict:
+                    print(f"error: baseline intent {_display_path(path)} is unreadable "
+                          f"({e}). Refusing to report removals from a baseline that "
+                          f"cannot be fully parsed.", file=err)
+                    raise
+                continue
+            kind = doc.get("kind")
+            out[(kind, req.metadata.id)] = Removal(
+                kind=kind, req_id=req.metadata.id, request=req,
+                path=_display_path(path))
+        return out
+
+    try:
+        base = index(baseline_root, strict=True)
+    except Exception:  # noqa: BLE001 - already reported above
+        return None, 2
+    current = index(intent_root, strict=False)
+    return find_removals(base, current.keys()), 0
 
 
 def _compile_intents(intent_root, env_map_path, cats, err):
@@ -1702,6 +1770,11 @@ def build_parser() -> argparse.ArgumentParser:
                          "interface gaining addressing). Absent = those checks are skipped.")
     cl.add_argument("--gate", choices=("LOW", "HIGH", "CRITICAL"),
                     help="fail (exit 3) if any change's tier exceeds this max-auto tier")
+    cl.add_argument("--baseline", type=Path,
+                    help="intent tree of the BASE revision. Enables REMOVAL classification: "
+                         "a deleted intent is absent from the current tree, so without this "
+                         "nothing classifies it and the gate never sees it. CI materialises "
+                         "it with `git archive`.")
     cl.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
                     help="service name catalog (Phase 2)")
     cl.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path,
@@ -1845,6 +1918,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_classify(
             args.intent_root, args.env_map, gate=args.gate,
             state_snapshot_paths=args.state_snapshots,
+            baseline_root=args.baseline,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "evidence":
