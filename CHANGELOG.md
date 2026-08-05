@@ -43,16 +43,46 @@ that is one site's wiring. A role may now declare `site_specific: true`, which
 changes what the test EXPECTS and nothing about what is ENFORCED: `resolve()`
 still fails closed for an unmapped firewall, and a test asserts exactly that.
 
+### Zone deletion tested end to end — it fails closed
+
+Run for real against the pilot, with the zone AND a referencing rule committed on
+the device first. Deleting a REFERENCED zone is refused by SCM at the API:
+
+```
+409  NON_ZERO_REFS
+"Another entity is currently referencing this object ... Reference:
+ container -> prod-edge -> pre-rulebase -> security -> rules
+ -> handmade-refs-dmz -> from"
+```
+
+The destroy fails loudly, the zone survives in SCM and on the device, and the
+half-applied candidate config the TODO feared never happens — the delete never
+reaches the firewall. This is the backstop for the case
+`check_zone_consistency` cannot see, since it only covers rules in Git.
+
+Unreferenced, it deletes cleanly and the interface survives ADDRESSED BUT
+UNZONED. PAN-OS drops traffic on an unzoned interface, so that fails closed too.
+
+The push job reported `success` ~90s before the device reflected it — the same
+false-signal window as ever.
+
+### Compile now deletes tfvars it no longer produces
+
+Removing the last intent of a kind left the previous `*.auto.tfvars.json` on
+disk; Terraform auto-loaded it and silently re-asserted the deleted object. CI
+was always correct (files are gitignored, clean checkout), so this only bit
+someone verifying a deletion locally — with a confident wrong answer. Only a
+registered kind's exact filename is removed; a hand-maintained file is left
+alone.
+
 ### Also
 
 - `$eth-dmz` declared in `terraform/bootstrap-scm-folder` — a folder-scope zone
   can only bind a variable that exists at that scope, and no Day-1 kind creates
   one. Boundary recorded in TODOS.
-- Zone deletion probed: correct in CI, but the compiler leaves stale
-  `*.auto.tfvars.json` locally, so deleting the last intent of a kind reads as
-  `No changes` on a developer's machine. The destructive half of that test is
-  still outstanding.
-- 575 tests (+4).
+- `RouteRequest` deletion is still untested, and a route is what an outage runs
+  through — the same experiment is worth repeating there.
+- 578 tests (+7).
 
 ## [1.17.0] — 2026-08-04
 

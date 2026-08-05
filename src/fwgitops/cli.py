@@ -213,6 +213,48 @@ def run_compile(
             target.write_text(payload_json, encoding="utf-8")
         written.append(target)
 
+    # ── DELETE THE FILES THIS COMPILE NO LONGER PRODUCES ──────────────────
+    # Removing the LAST intent of a kind from a folder must remove that kind's
+    # tfvars file. Writing the files a compile produces is not enough: the
+    # previous file stays on disk, Terraform auto-loads it, and the deleted
+    # object is silently re-asserted.
+    #
+    # CI never saw this — `terraform/*/*.auto.tfvars.json` is gitignored, so a
+    # clean checkout has no stale file and `var.<kind>` correctly falls back to
+    # its `default = {}`. The damage is local: `terraform plan` reports
+    # `No changes` for a deletion CI would perform. Found live 2026-08-05 while
+    # testing the zone deletion path, where a real deletion looked like a no-op
+    # on this machine while being correct in the pipeline. Verification that
+    # lies is worse than none, because a confident wrong answer is
+    # indistinguishable from a right one.
+    #
+    # ONLY files this tool owns are removed: the exact `tfvars_filename` of a
+    # registered kind. An unknown `*.auto.tfvars.json` is left ALONE — someone
+    # may hand-maintain one, and deleting a file we never wrote is not cleanup,
+    # it is data loss.
+    removed: List[Path] = []
+    if write:
+        owned = {h.tfvars_filename for h in REGISTRY.values() if h.tfvars_filename}
+        produced = {t.resolve() for t in written}
+        # Every scope directory under the out root, not just the ones this run
+        # wrote to. Scoping the sweep to `written` would miss the sharpest case:
+        # a folder losing its LAST intent of ANY kind writes nothing there, so
+        # that directory would never be visited and every stale file in it would
+        # survive — precisely the deletion this exists to make work.
+        #
+        # Safe because one compile processes the WHOLE intent tree, so
+        # `produced` is complete for every scope. Directories holding no owned
+        # file (modules/, bootstrap-*, github-oidc) are untouched by the name
+        # check below, so there is no skip-list to keep in step.
+        scope_dirs = {t.parent for t in written}
+        if out_root.is_dir():
+            scope_dirs |= {d for d in out_root.iterdir() if d.is_dir()}
+        for scope_dir in sorted(scope_dirs):
+            for stale in sorted(scope_dir.glob("*.auto.tfvars.json")):
+                if stale.name in owned and stale.resolve() not in produced:
+                    stale.unlink()
+                    removed.append(stale)
+
     verb = "wrote" if write else "would write"
     print(
         f"OK — compiled {len(compiled)} request(s) into {len(written)} file(s); {verb}:",
@@ -220,6 +262,8 @@ def run_compile(
     )
     for t in written:
         print(f"  - {t}", file=out)
+    for r in removed:
+        print(f"  - {r} (REMOVED — no {r.name.split('.')[0]} remain in this scope)", file=out)
     return 0
 
 
