@@ -160,8 +160,16 @@ jobs:
             # -detailed-exitcode: 0 = no changes, 2 = changes present (NORMAL for
             # a PR — do not treat as failure), anything else = a real error.
             rc=0
+            # -parallelism=1 REQUIRED, same reason as apply.yml: the scm provider
+            # cannot handle concurrent token acquisition. A plan REFRESHES every
+            # resource, so a folder with ~19 tag objects plus rules, zones and
+            # routers issues exactly the concurrent burst that breaks it —
+            # intermittent `403 Forbidden {"msg":"Access denied"}` on a tag read,
+            # which looks like a permissions problem and is not. Observed in CI
+            # 2026-08-05; the guard existed on apply from the start and was never
+            # carried to plan.
             terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode \
-              2>&1 | tee "plan-$folder.txt" || rc=$?
+              -parallelism=1 2>&1 | tee "plan-$folder.txt" || rc=$?
             case "$rc" in
               0|2) ;;
               *)

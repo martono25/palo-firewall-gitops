@@ -39,6 +39,18 @@ nothing; the field is `log`). Five loaders, each needing its own allowed set
 derived from its dataclass, and getting one wrong rejects a currently valid
 intent.
 
+### Fixed: `terraform plan` lacked the provider's concurrency guard
+
+`apply.yml` has passed `-parallelism=1` from the start, with a comment that the
+scm provider cannot handle concurrent token acquisition. Neither plan step did.
+
+A plan REFRESHES every resource, so a folder with ~19 tag objects plus rules,
+zones and routers issues exactly that concurrent burst. It surfaces as an
+intermittent `403 Forbidden {"msg":"Access denied"}` reading an `scm_tag` — which
+reads as a permissions problem and is not one, and which passes on a re-run, so
+it looks like flakiness rather than a missing flag. Caught in CI on this PR;
+`pr-validate` and `drift-detect` now match `apply`.
+
 - 616 tests (+5).
 
 ## [1.23.0] — 2026-08-05
