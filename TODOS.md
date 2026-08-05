@@ -143,6 +143,42 @@ session scratchpad. Worth promoting into the repo (e.g. `spike/zone-probe/`) if
 this pattern gets reused for `InterfaceRequest`, which faces the same
 provider-fidelity question for `scm_ethernet_interface`.
 
+## v2.0 — rule provisioning
+
+### Rules are FOLDER-SCOPE ONLY — probed 2026-08-05, design decided
+
+`spike/rule-device-scope`. `scm_security_rule` at `device=<serial>` is REJECTED
+(`API_I00013 "Device ... doesn't exist"`) while the SAME device-scope write of an
+ethernet interface, on the SAME firewall, in the SAME apply, SUCCEEDS. Resource-
+specific, not a property of the device.
+
+**Three of four SCM resources now behave this way** — zone, logical router and
+security rule all refuse device scope while documenting it; only
+`scm_ethernet_interface` accepts it. Folder-only is the correct DEFAULT for a new
+network or policy resource, and device scope must be probed before anything is
+built on it.
+
+**Consequences, and they simplify the work:**
+
+* There is no point adding `device:` to `AccessRequest`. The targeting model
+  stays `environment → folder → every firewall beneath it`, which is also the
+  model app teams should see (ADR-0006: they should not know SCM topology).
+* **Folder granularity is the unit of policy isolation.** A requirement for
+  firewall-specific policy can only be met by giving that firewall its own
+  folder — which makes RE-PARENTING (already v2.0) the mechanism that matters,
+  and raises its priority relative to the rest.
+* The open question is no longer "can we target a firewall" but "**should
+  `AccessRequest` be able to name a FOLDER**". Today one environment maps 1:1 to
+  one folder, deliberately, so an app team cannot address a second folder without
+  a platform PR. A second prod folder (region, tenant) currently needs a second
+  environment name.
+
+**Also confirmed while checking:** a rule CAN reference the new `dmz` zone today,
+with no code change — via a `catalog/apps.yaml` entry carrying `zone: dmz`.
+Compiles to `from: ['dmz'] -> to: ['internet']` in `prod-edge`. So a new segment
+costs a platform PR to the app catalog, which is control rather than a gap, but
+it is a choice currently made implicitly rather than stated.
+
 ## Intent kinds
 
 ### ~~Cross-kind ORDERING — the last unbuilt piece of ADR-0002~~ — BUILT v1.17.0
