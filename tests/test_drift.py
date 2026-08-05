@@ -9,7 +9,7 @@ from test_classify import _change
 
 
 def mtags(req_id):
-    return tuple(managed_tags(req_id=req_id, section=Section.SPECIFIC_ALLOW, ticket="T-1", expires=None))
+    return tuple(managed_tags(req_id=req_id, section=Section.SPECIFIC_ALLOW, ticket="T-1"))
 
 
 def desired(*names, folder="prod-edge"):

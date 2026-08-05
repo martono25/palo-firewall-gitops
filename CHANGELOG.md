@@ -3,6 +3,53 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.22.0] — 2026-08-05
+
+### The expiry tag is no longer written to rules
+
+`metadata.expires` used to become `gitops:expires:<date>` — a real `scm_tag`
+object, attached to the rule, pushed to the firewall. It is now not written at
+all.
+
+**It is CI expiry, not rule expiry.** Nothing on the device acts on it: PAN-OS
+stores the tag and ignores it. So it shipped a date that LOOKED like a control
+and was not one, which is the expensive kind of metadata — a reader in the SCM UI
+reasonably assumes something enforces it, and the evidence bundle asserts an
+expiry nothing honours.
+
+A rule's tags describe what the rule IS. Expiry describes what this pipeline
+intends to do with the request later: a property of the request, not of the
+firewall object. It stays in the intent YAML and the evidence bundle.
+
+Real device-enforced expiry does exist — `scm_security_rule.schedule` pointing at
+an `scm_schedule` with `non_recurring` date ranges. A tag was never going to be
+it. Not wired; a separate decision.
+
+`parse_managed_meta` still READS the tag, so rules tagged before this change are
+understood rather than treated as malformed — which fails closed loudly and would
+turn a cosmetic change into an incident.
+
+Applied to the live pilot: three rules lost the tag, both tag objects are gone
+(21 -> 19), and the device confirms zero `gitops:expires` with `managed`, `req`,
+`section` and `ticket` all still present.
+
+**Consequence, accepted knowingly:** an expired-rule check can no longer be
+answered from live state alone. It must read intent YAML, which says what SHOULD
+be there rather than what IS.
+
+### Found doing it: tag removal and tag destruction are unordered
+
+Terraform destroyed the `scm_tag` before updating the rules that referenced it,
+because after the change the rule's config no longer references it — the edge
+that ordered creation vanishes exactly when destruction needs it. SCM refused
+(`409 NON_ZERO_REFS`), so nothing was corrupted, but the apply failed and
+`-target` does not help. **This is latent for any tag VALUE change**, e.g. a
+corrected ticket number; it has never been hit only because no tag value has ever
+changed on a live rule. Filed with the analysis, including why the obvious
+`depends_on` fix is the pattern this module already removed once.
+
+- 610 tests (+3).
+
 ## [1.21.1] — 2026-08-05
 
 ### `007955000893662` removed from both catalogs

@@ -427,6 +427,51 @@ same false-negative rejection `baseline_zones` was added to fix.
 **Priority:** P3
 **Depends on:** None.
 
+### Removing a tag from a rule and destroying that tag OBJECT is UNORDERED
+
+**Found 2026-08-05 while removing the expiry tag, and it is latent for any tag
+change — not specific to expiry.**
+
+When a tag value stops being used, one apply contains two actions: UPDATE the
+rules to drop the reference, and DESTROY the now-unused `scm_tag`. Terraform has
+no reason to order them, because after the change the rule's config no longer
+REFERENCES `scm_tag.this[<tag>]` — the dependency edge that ordered creation
+disappears exactly when it is needed for destruction. It destroyed first:
+
+```
+409 NON_ZERO_REFS
+"Node cannot be deleted because of references from
+ container -> prod-edge -> pre-rulebase -> security -> rules -> REQ-2026-0727 -> tag"
+```
+
+SCM fails closed, so nothing was corrupted — the same guard the zone deletion
+test found. Here it turns into an apply failure instead of a safeguard.
+
+**`-target` does not help:** targeting the rules pulls the tag in as a
+dependency and plans the destroy anyway.
+
+**The migration workaround was:** `terraform state rm` the tag objects, apply the
+rule updates, then delete the orphaned tag objects via the API. Fine once, not a
+design.
+
+**Why there is no clean declarative fix:** the needed edge is "destroy the tag
+AFTER the rules that referenced it are updated", and Terraform only derives edges
+from references that still exist. A blanket `depends_on = [scm_tag.this]` on the
+rules would create it — and is exactly the pattern this module removed once
+already, because it made every rule depend on every object instance and a
+`destroy -target` of one address cascaded into destroying ALL rules.
+
+**Likely answer:** stop destroying tag objects in the same apply as the rules
+that release them. An unused `scm_tag` is inert, and a separate sweep (the
+folder-interfaces / verify-catalog shape) could remove them once nothing
+references them. That trades a failed apply for a little garbage.
+
+**This bites any tag VALUE change**, e.g. a corrected ticket number. It has not
+been hit before only because no tag value has ever changed on a live rule.
+
+**Effort:** M
+**Priority:** P2
+
 ## Drift
 
 ### State-based drift cannot tell an orphan from a hand-added object

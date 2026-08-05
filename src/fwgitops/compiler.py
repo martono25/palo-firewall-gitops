@@ -250,11 +250,14 @@ def compile_request(
         services=_names_in_order(svc_objs),
         action=ar.spec.action,
         log_end=ar.spec.log,
+        # NO expiry tag. `metadata.expires` is CI lifecycle, not a property of
+        # the firewall rule — nothing on the device acts on it, so writing it
+        # there shipped a date that looked like a control and was not one. It
+        # stays in the intent and the evidence bundle. See tags.managed_tags.
         tags=managed_tags(
             req_id=ar.metadata.id,
             section=section,
             ticket=ar.metadata.ticket,
-            expires=ar.metadata.expires,
         ),
         application=list(ar.spec.application),
         profile_group=ar.spec.profile,
