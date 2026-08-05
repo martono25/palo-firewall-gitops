@@ -145,39 +145,54 @@ provider-fidelity question for `scm_ethernet_interface`.
 
 ## v2.0 — rule provisioning
 
-### Rules are FOLDER-SCOPE ONLY — probed 2026-08-05, design decided
+### ~~Rules are FOLDER-SCOPE ONLY~~ — RETRACTED. Device scope works.
 
-`spike/rule-device-scope`. `scm_security_rule` at `device=<serial>` is REJECTED
-(`API_I00013 "Device ... doesn't exist"`) while the SAME device-scope write of an
-ethernet interface, on the SAME firewall, in the SAME apply, SUCCEEDS. Resource-
-specific, not a property of the device.
+**This was wrong for one day and is corrected here rather than deleted.**
 
-**Three of four SCM resources now behave this way** — zone, logical router and
-security rule all refuse device scope while documenting it; only
-`scm_ethernet_interface` accepts it. Folder-only is the correct DEFAULT for a new
-network or policy resource, and device scope must be probed before anything is
-built on it.
+Three spikes concluded that zones, logical routers and security rules were
+folder-scope only, each on the same evidence: a device-scope create refused with
+`"Device <serial> doesn't exist"` while an ethernet interface succeeded on the
+same firewall in the same run.
 
-**Consequences, and they simplify the work:**
+The firewall was in a broken registration state. After it was offboarded and
+re-onboarded into SCM, **every resource accepts a device-scope write** —
+interface, zone, logical router, address, tag and security rule. Reproduced three
+times with readback and cleanup.
 
-* There is no point adding `device:` to `AccessRequest`. The targeting model
-  stays `environment → folder → every firewall beneath it`, which is also the
-  model app teams should see (ADR-0006: they should not know SCM topology).
-* **Folder granularity is the unit of policy isolation.** A requirement for
-  firewall-specific policy can only be met by giving that firewall its own
-  folder — which makes RE-PARENTING (already v2.0) the mechanism that matters,
-  and raises its priority relative to the rest.
-* The open question is no longer "can we target a firewall" but "**should
-  `AccessRequest` be able to name a FOLDER**". Today one environment maps 1:1 to
-  one folder, deliberately, so an app team cannot address a second folder without
-  a platform PR. A second prod folder (region, tenant) currently needs a second
-  environment name.
+**Why the control did not catch it.** Every probe used `scm_ethernet_interface`
+as its positive control, and it passed every time — because it was the one
+resource still working while the device was broken. "Interface works, rule does
+not" therefore read as RESOURCE-SPECIFIC when it was DEVICE PARTIALLY BROKEN. A
+positive control proves the path is alive; it does not prove the environment is
+healthy, and it is worth least exactly when the passing case is the anomaly.
 
-**Also confirmed while checking:** a rule CAN reference the new `dmz` zone today,
-with no code change — via a `catalog/apps.yaml` entry carrying `zone: dmz`.
-Compiles to `from: ['dmz'] -> to: ['internet']` in `prod-edge`. So a new segment
-costs a platform PR to the app catalog, which is control rather than a gap, but
-it is a choice currently made implicitly rather than stated.
+**The error message was literally true.** It said the device was not registered
+for configuration. It was dismissed as misleading because the device reported
+`is_connected: true` and every GET worked — read paths and config-write paths do
+not share that registration. **When an error names a precondition, test the
+precondition** instead of arguing from adjacent evidence that it must be wrong.
+
+**Fixed in code:** `_load_zone_spec` and `_load_route_spec` rejected `device:` on
+the strength of this. Both now accept it, and the `allow_device` mechanism was
+removed rather than left as dead code carrying a wrong rationale. It can return
+if a resource is ever shown to be folder-only — with evidence gathered against a
+healthy device.
+
+### Rule targeting for v2.0 — now an open DESIGN question, not a constraint
+
+Device scope is available, so `AccessRequest` targeting is a choice again rather
+than a limit. What has not changed is the ARGUMENT for the current model:
+app teams should not need to know SCM topology (ADR-0006), which is why
+`environment` resolves 1:1 to a folder.
+
+The options are now:
+* keep `environment` only — rules reach firewalls by folder inheritance;
+* add `folder:` for platform-authored rules, keeping `environment` for app teams;
+* add `device:` as well, which SCM now permits.
+
+Worth deciding deliberately rather than by what the API happens to allow. A
+device-scope rule is a per-firewall policy override, which is powerful and also
+the thing that makes a fleet stop being uniform.
 
 ## Intent kinds
 

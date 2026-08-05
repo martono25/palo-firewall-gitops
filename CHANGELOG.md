@@ -3,6 +3,50 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.26.0] — 2026-08-05
+
+### RETRACTION: device scope works for every resource
+
+Three spikes concluded that zones, logical routers and security rules were
+folder-scope only. **All three were wrong.** The firewall was in a broken
+registration state; after it was offboarded and re-onboarded into SCM, every
+resource accepts a device-scope write — interface, zone, logical router, address,
+tag and security rule. Reproduced three times with readback and cleanup.
+
+`_load_zone_spec` and `_load_route_spec` rejected `device:` on the strength of
+that conclusion, so valid intents were being refused at PR time. Both now accept
+it. The `allow_device` mechanism is removed rather than left as dead code
+carrying a wrong rationale; it can return if a resource is ever shown to be
+folder-only, with evidence gathered against a healthy device.
+
+**Why the control did not catch it.** Every probe used `scm_ethernet_interface`
+as a positive control and it passed every time — because it was the one resource
+still working while the device was broken. "Interface works, zone does not" read
+as *resource-specific* when it was *device partially broken*. A positive control
+proves the path is alive; it does not prove the environment is healthy, and it is
+worth least when the passing case is itself the anomaly.
+
+**The error message was literally true.** `"Device <serial> doesn't exist"` meant
+the device was not registered for configuration. It was dismissed as misleading
+because the device reported `is_connected: true` and every GET worked — read and
+config-write paths do not share that registration.
+
+The three spike READMEs carry retractions at the top with the original text left
+intact below, so the reasoning that produced the wrong answer stays legible.
+
+### Also: the re-onboard wiped SCM's device-scope overrides
+
+The firewall's running config was untouched (interfaces still addressed and
+zoned), but SCM lost all three device-scope interface objects — `device=` scope
+showed only the inherited folder objects with `layer3={}` and no addressing, and
+`is_first_push_done` was back to `false`.
+
+**A push in that state would have stripped the IPs off a working firewall.**
+`terraform apply` on the device root recreated the overrides first; only then is
+a push safe.
+
+- 622 tests.
+
 ## [1.25.0] — 2026-08-05
 
 ### Unknown `spec:` keys are rejected
