@@ -616,3 +616,88 @@ def test_apply_order_fails_closed_when_kinds_are_interleaved(tmp_path, capsys):
     err = capsys.readouterr().err
     assert "no whole-root apply order" in err
     assert "per-kind applies" in err
+
+
+# ── deleting the last intent of a kind must delete its tfvars file ────────
+def _zone_intent(zone="dmz"):
+    return (
+        "apiVersion: fw-intent/v1\n"
+        "kind: ZoneRequest\n"
+        "metadata: {id: ZONE-9, requester: m@corp, ticket: J-9, justification: x,"
+        " requested: 2026-08-05}\n"
+        f"spec: {{environment: prod, zone: {zone}, type: layer3, interfaces: []}}\n"
+    )
+
+
+def test_removing_the_last_intent_of_a_kind_removes_its_tfvars_file(tmp_path):
+    """Writing the files a compile produces is not enough. The PREVIOUS file
+    stays on disk, Terraform auto-loads it, and the deleted object is silently
+    re-asserted — a real deletion reads as `No changes`.
+
+    CI never saw this (the files are gitignored, so a clean checkout has none),
+    which is what makes it worth a test: it only bites the person verifying a
+    deletion by hand, and it gives them a confident wrong answer.
+    """
+    intents = tmp_path / "intent" / "prod"
+    intents.mkdir(parents=True)
+    (intents / "ZONE.yaml").write_text(_zone_intent())
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP)
+    out = tmp_path / "terraform"
+
+    assert run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False) == 0
+    zones = out / "prod-edge" / "zones.auto.tfvars.json"
+    assert zones.exists()
+
+    (intents / "ZONE.yaml").unlink()
+    (intents / "RULE.yaml").write_text(VALID_INTENT)          # keep the folder alive
+    assert run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False) == 0
+    assert not zones.exists(), "stale zones tfvars survived — the zone would be re-asserted"
+
+
+def test_a_scope_that_loses_every_intent_is_swept_too(tmp_path):
+    """The sharpest case, and the one a `written`-scoped sweep would miss: when
+    a folder loses its LAST intent of ANY kind, the compile writes nothing there,
+    so that directory is never visited unless the sweep looks wider."""
+    intents = tmp_path / "intent" / "prod"
+    intents.mkdir(parents=True)
+    (intents / "ZONE.yaml").write_text(_zone_intent())
+    (tmp_path / "other").mkdir()
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP)
+    out = tmp_path / "terraform"
+
+    assert run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False) == 0
+    zones = out / "prod-edge" / "zones.auto.tfvars.json"
+    assert zones.exists()
+
+    # every intent gone for prod-edge, but ANOTHER folder still compiles, so the
+    # run does not take the "no intent files" early exit
+    (intents / "ZONE.yaml").unlink()
+    other = tmp_path / "intent" / "staging"
+    other.mkdir()
+    (other / "ZONE.yaml").write_text(_zone_intent(zone="dmz2").replace(
+        "environment: prod", "environment: staging"))
+    env_map.write_text(ENV_MAP + "staging:\n  folder: staging-edge\n"
+                       "  from_zone: local\n  to_zone: internet\n")
+    assert run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False) == 0
+    assert not zones.exists(), "a scope that lost every intent kept its stale tfvars"
+    assert (out / "staging-edge" / "zones.auto.tfvars.json").exists()
+
+
+def test_the_sweep_never_deletes_a_file_the_compiler_does_not_own(tmp_path):
+    """Only a registered kind's exact tfvars filename is removable. Someone may
+    hand-maintain another `*.auto.tfvars.json` in the same root, and deleting a
+    file we did not write is not cleanup, it is data loss."""
+    intents = tmp_path / "intent" / "prod"
+    intents.mkdir(parents=True)
+    (intents / "RULE.yaml").write_text(VALID_INTENT)
+    env_map = tmp_path / "environments.yaml"
+    env_map.write_text(ENV_MAP)
+    out = tmp_path / "terraform"
+    assert run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False) == 0
+
+    foreign = out / "prod-edge" / "operator-overrides.auto.tfvars.json"
+    foreign.write_text('{"hand": "maintained"}\n')
+    assert run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False) == 0
+    assert foreign.exists(), "the sweep deleted a file the compiler never wrote"

@@ -485,38 +485,57 @@ service, or accept `protocol: icmp` and compile it to `service: any` +
 **Priority:** P2
 
 
-### Zone deletion path — PROBED 2026-08-05, one step outstanding
+### ~~Zone deletion path~~ — TESTED END TO END 2026-08-05, FAILS CLOSED
 
-**What:** what happens when a ZoneRequest is removed from Git.
+Run for real against the pilot, both branches, with the zone AND a referencing
+rule committed on the device first.
 
-**Found so far, running it for real against the pilot:**
+**Referenced zone: SCM refuses at the API. Nothing reaches the firewall.**
 
-1. **The plan is correct in CI and WRONG locally.** `terraform/*/*.auto.tfvars.json`
-   is gitignored, so a CI run starts from a clean checkout, the compiler emits no
-   `zones.auto.tfvars.json`, `var.zones` falls back to its `default = {}`, and the
-   zone is planned for destruction — right.
+```
+409 Conflict  API_I00013
+"Another entity is currently referencing this object. Therefore operation is
+ not possible. Reference: container -> prod-edge -> pre-rulebase -> security
+ -> rules -> handmade-refs-dmz -> from"
+   type: NON_ZERO_REFS
+```
 
-   Locally the compiler leaves the PREVIOUS `zones.auto.tfvars.json` on disk. It
-   writes the files a compile produces and never removes the ones it no longer
-   produces, so `terraform plan` still reads the stale file and reports
-   **`No changes`**. Deleting the last intent of a kind therefore looks like a
-   no-op to anyone verifying locally — which is exactly when someone checks. Not
-   a production defect; it makes local verification lie, which is its own cost.
-   Kind-generic: same for the last route, interface or rule in a folder.
+Terraform's destroy fails loudly, the zone survives intact in SCM and on the
+device, the resource stays in state, and a subsequent push is a clean no-op.
+**The half-applied candidate config this item was opened about does not happen** —
+the delete never gets far enough to be committed, because SCM rejects it before
+the device is involved. The error even names the exact referencing path, which is
+more than the platform's own checks could give.
 
-2. **The compiler cannot see an out-of-band reference, by construction.**
-   `check_zone_consistency` covers rules IN GIT. A rule added by hand in SCM that
-   references the zone is invisible to it. That is the case this item was opened
-   about and it is not closed.
+That matters because `check_zone_consistency` covers rules IN GIT only; a rule
+added by hand is invisible to it, by construction. SCM is the backstop for the
+case the compiler cannot see, and it holds.
 
-**OUTSTANDING — the actual destructive test.** Delete the zone while a hand-added
-rule still references it, and observe: does SCM refuse the delete, does the
-device commit reject, and what is left staged when it does? Needs an apply that
-DESTROYS on the live pilot, so it is a deliberate, authorised step rather than
-something to slip into a general run.
+**Unreferenced zone: deletes cleanly, and the interface survives unzoned.**
 
-**Effort:** S (the setup exists and is proven; one authorised destroy remains)
-**Priority:** P2
+```
+before:  ethernet1/2  17  1  dmz   N/A  0  10.100.1.110/24
+after:   ethernet1/2  17  1  <none> N/A  0  10.100.1.110/24
+```
+
+The interface keeps its address and loses only its zone membership. PAN-OS drops
+traffic on an unzoned interface, so that end state fails closed too — but it IS a
+live, addressed interface in no zone, which is worth knowing before deleting a
+zone in anger.
+
+**Watch the timing.** The push job reported `success` while the device still had
+the zone; it cleared ~90s later. The same false-signal window this project has
+hit repeatedly — a green push is not evidence, only the device is.
+
+**Fixed alongside (v1.18.0):** the compiler now deletes tfvars files a compile no
+longer produces. Previously the stale `zones.auto.tfvars.json` stayed on disk,
+Terraform auto-loaded it, and a real deletion read as `No changes` LOCALLY while
+CI (clean checkout, gitignored tfvars) did the right thing. Verification that
+lies is worse than none.
+
+**Still open:** nothing for zones. The equivalent path for `RouteRequest` is
+untested, and a route is the object an outage runs through — the same experiment
+is worth repeating there.
 
 ## Architecture
 
