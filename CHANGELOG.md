@@ -3,6 +3,35 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.30.1] — 2026-08-06
+
+### `RouteRequest` deletion tested — nothing refuses it, and the device never heard
+
+The prediction held. SCM destroyed the logical router **without complaint**,
+where the same operation on a referenced zone returns `409 NON_ZERO_REFS`. A
+route has no reference-based backstop: a router with one fewer route is still a
+valid object.
+
+Better than feared on one point: `prod-edge` held an OVERRIDE router, and
+destroying it reverted to the inherited `ngfw-shared` router with **VRF interface
+membership intact** — `$eth-local` and `$eth-internet` survive because the parent
+declares them. The failure mode is "loses its default route", not "loses its
+VRF".
+
+**The device half was blocked, and how it blocked is the finding.** The push was
+refused by SCM's admin-scope guard because other admins have staged changes on
+this firewall. So the deletion sat applied in SCM while the device kept
+forwarding on the old route.
+
+**That gap is the real result.** SCM's reference check protects the API layer.
+NOTHING protects the SCM-vs-device layer: a destroy can succeed in SCM and never
+reach the firewall, leaving Git and SCM saying "no default route" while the
+device still has one — silently, persistently, and the next successful push by
+anyone applies it, including someone pushing something unrelated.
+
+Restored immediately; both roots plan clean and the device kept its route
+throughout.
+
 ## [1.30.0] — 2026-08-05
 
 ### Deletions are visible to the classifier
