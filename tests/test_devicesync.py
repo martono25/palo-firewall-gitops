@@ -18,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fwgitops.cli import run_device_sync  # noqa: E402
 from fwgitops.devicesync import (  # noqa: E402
-    BEHIND, IN_SYNC, NEVER_PUSHED, UNKNOWN, compare, latest_committed, running_by_device,
+    BEHIND, FIRST_PUSH_PENDING, IN_SYNC, UNKNOWN, compare, latest_committed,
+    running_by_device,
 )
 
 DEV = {"serial_number": "007955000894453", "name": "007955000894453",
@@ -39,15 +40,33 @@ def test_a_device_running_the_newest_version_is_clean():
     assert r.state == IN_SYNC and not r.is_problem
 
 
-def test_never_pushed_beats_a_matching_version():
-    """A re-onboard resets `is_first_push_done` while the OLD running version
-    remains. Comparing versions alone would call that in-sync — it is not: SCM
-    has no per-admin baseline for the device and refuses an admin-scoped push,
-    which is exactly what blocked the route-deletion test."""
+def test_first_push_pending_is_a_NOTE_not_a_failure():
+    """CORRECTION to v1.31.0, measured rather than assumed.
+
+    `is_first_push_done` was treated as a sync signal. On this tenant it stayed
+    `false` across TWO successful pushes (jobs 170 and 172, both CommitAndPush /
+    FIN / OK, running version advancing v70 -> v71 -> v72) while the device was
+    verified over SSH to be running exactly the intended config.
+
+    So a device can be demonstrably current and still report false. Blocking on
+    it is a FALSE POSITIVE on a healthy firewall, which is how a check gets
+    ignored. Still reported, because SCM refuses an ADMIN-SCOPED push while it is
+    false — real, and not the same as "running stale config".
+    """
     dev = {**DEV, "is_first_push_done": False}
     r = compare([dev], {"007955000894453": 70}, {"prod-edge": 70})[0]
-    assert r.state == NEVER_PUSHED and r.is_problem
-    assert "must be a full one" in r.detail
+    assert r.state == FIRST_PUSH_PENDING
+    assert not r.is_problem, "a current firewall must not be reported as out of sync"
+    assert r.is_note
+    assert "the firewall is CURRENT" in r.detail
+
+
+def test_behind_wins_over_first_push_pending():
+    """If the version really is behind, that is the finding — the flag must not
+    downgrade a genuinely stale firewall to a note."""
+    dev = {**DEV, "is_first_push_done": False}
+    r = compare([dev], {"007955000894453": 68}, {"prod-edge": 70})[0]
+    assert r.state == BEHIND and r.is_problem
 
 
 def test_a_missing_version_is_UNKNOWN_not_assumed_fine():
@@ -96,6 +115,17 @@ def test_the_command_exits_0_when_everything_is_current(capsys):
         [DEV], [{"device": "007955000894453", "version": 70}], [{"id": 70}]))
     assert rc == 0
     assert "running the newest committed config" in capsys.readouterr().out
+
+
+def test_the_command_exits_0_for_first_push_pending_but_says_so(capsys):
+    """The real pilot state after re-onboarding: current, but SCM will refuse an
+    admin-scoped push. Worth printing, not worth failing a scheduled job over."""
+    dev = {**DEV, "is_first_push_done": False}
+    rc = run_device_sync(session=_Session(
+        [dev], [{"device": "007955000894453", "version": 72}], [{"id": 72}]))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "NOTE" in out and "is_first_push_done" in out
 
 
 def test_an_empty_inventory_is_an_ERROR_not_a_pass(capsys):

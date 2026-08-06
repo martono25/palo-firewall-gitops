@@ -1238,17 +1238,21 @@ def run_device_sync(*, session=None, out=None, err=None) -> int:
 
     results = compare(devices, running, latest)
     problems = [r for r in results if r.is_problem]
+    notes = [r for r in results if getattr(r, "is_note", False)]
     for r in sorted(results, key=lambda x: x.serial):
         ver = f"v{r.running_version}" if r.running_version is not None else "v?"
         want = f"v{r.latest_version}" if r.latest_version is not None else "v?"
         print(f"  {r.serial:20} {r.state:13} running={ver:5} committed={want:5} "
               f"folder={r.folder}", file=out)
+    for r in notes:
+        print(f"NOTE  {r.serial}: {r.detail}", file=out)
     if problems:
         print(f"OUT OF SYNC — {len(problems)} of {len(results)} device(s):", file=err)
         for r in problems:
             print(f"  - {r.serial}: {r.detail}", file=err)
         return 2
-    print(f"OK — {len(results)} device(s) running the newest committed config", file=out)
+    print(f"OK — {len(results)} device(s) running the newest committed config"
+          + (f", {len(notes)} note(s) above" if notes else ""), file=out)
     return 0
 
 
