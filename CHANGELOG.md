@@ -3,6 +3,34 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.31.1] — 2026-08-06
+
+### Correction: `is_first_push_done` is not a sync signal
+
+v1.31.0 treated it as one and blocked on it. **Measured, and it is wrong.**
+
+On this tenant the flag stayed `false` across TWO successful pushes — folder-scoped
+job 170 and device-scoped job 172, both `CommitAndPush` / `FIN` / `OK`, with the
+running version advancing v70 → v71 → v72 — while the firewall was verified over
+SSH to be running exactly the intended config. `last_device_update_time` never
+moved either.
+
+So a device can be demonstrably current and still report `false`. Blocking on it
+is a **false positive on a healthy firewall**, which is how a check gets ignored —
+the same reasoning that keeps `targetable: false` an acknowledgement rather than a
+failure in `verify-catalog`.
+
+Now a NOTE, exit 0, because it does correlate with something real: SCM refuses an
+**admin-scoped** push while it is false, so this pipeline's normal push fails until
+a full `--all-admins` push runs. That is worth saying and is not the same as "the
+firewall is running stale config".
+
+**The version comparison is the authoritative signal**, and a genuinely behind
+device still fails — a test pins that the flag cannot downgrade a stale firewall
+to a note.
+
+- 659 tests (+2).
+
 ## [1.31.0] — 2026-08-06
 
 ### `fwgitops device-sync` — is the firewall running what SCM holds?

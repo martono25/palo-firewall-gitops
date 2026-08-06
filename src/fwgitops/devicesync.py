@@ -30,10 +30,24 @@ version for its folder. The mapping is `running.version` <-> `candidate.id`,
 evidenced on this tenant: version 70 running, candidate id 70, timestamps four
 seconds apart. Stated here so it is falsifiable rather than assumed.
 
-`is_first_push_done: false` is a THIRD state, and distinct: a device that has
-never been pushed to in its CURRENT registration. A re-onboard resets it, and
-SCM then refuses an admin-scoped partial push — it has no per-admin baseline to
-diff against, so the first push must be a full one.
+`is_first_push_done` IS NOT A SYNC SIGNAL — measured, not assumed. It was
+treated as one in v1.31.0 and that was wrong. On this tenant it stayed `false`
+across TWO successful pushes (folder-scoped job 170, device-scoped job 172,
+both `CommitAndPush` / `FIN` / `OK`, running version advancing v70 -> v71 -> v72),
+while the device was verified over SSH to be running exactly the intended config.
+`last_device_update_time` never moved either.
+
+So a device can be demonstrably current and still report `is_first_push_done:
+false`. Blocking on it produced a FALSE POSITIVE on a healthy firewall, which is
+how a check gets ignored — the same reasoning that keeps `targetable: false` an
+acknowledgement in `verify-catalog`.
+
+It is still reported, because it does correlate with something real: SCM refuses
+an ADMIN-SCOPED push while it is false, so a pipeline whose pushes are
+admin-scoped will fail until a full push runs. That is worth knowing and is not
+the same as "the firewall is running stale config".
+
+THE AUTHORITATIVE SIGNAL IS THE VERSION COMPARISON.
 """
 
 from __future__ import annotations
@@ -44,7 +58,9 @@ from typing import Any, Dict, Iterable, List, Optional
 #: A device in sync, behind, or never pushed to.
 IN_SYNC = "in-sync"
 BEHIND = "behind"
-NEVER_PUSHED = "never-pushed"
+#: Current by version, but SCM has not recorded a first push. Reported, NOT a
+#: failure: measured to persist across successful pushes (see the module note).
+FIRST_PUSH_PENDING = "first-push-pending"
 UNKNOWN = "unknown"
 
 
@@ -59,7 +75,12 @@ class DeviceSync:
 
     @property
     def is_problem(self) -> bool:
-        return self.state in (BEHIND, NEVER_PUSHED, UNKNOWN)
+        return self.state in (BEHIND, UNKNOWN)
+
+    @property
+    def is_note(self) -> bool:
+        """True for something worth saying that is not the firewall being stale."""
+        return self.state == FIRST_PUSH_PENDING
 
 
 def running_by_device(rows: Any) -> Dict[str, int]:
@@ -93,16 +114,6 @@ def compare(devices: Iterable[dict], running: Dict[str, int],
             continue
         folder = d.get("folder")
 
-        if d.get("is_first_push_done") is False:
-            out.append(DeviceSync(
-                serial, folder, NEVER_PUSHED,
-                running.get(serial), latest_by_folder.get(folder),
-                "SCM reports is_first_push_done=false — this device has never been "
-                "pushed to in its current registration (a re-onboard resets it). SCM "
-                "refuses an ADMIN-SCOPED push in this state, because it has no "
-                "per-admin baseline to diff against: the first push must be a full one."))
-            continue
-
         latest = latest_by_folder.get(folder)
         ver = running.get(serial)
         if ver is None or latest is None:
@@ -118,6 +129,15 @@ def compare(devices: Iterable[dict], running: Dict[str, int],
                 f"version {latest}. Config exists in SCM that the firewall is NOT "
                 f"enforcing — and the next successful push by anyone will apply it, "
                 f"including someone pushing an unrelated change."))
+        elif d.get("is_first_push_done") is False:
+            out.append(DeviceSync(
+                serial, folder, FIRST_PUSH_PENDING, ver, latest,
+                f"running the newest committed version (v{ver}) — the firewall is "
+                f"CURRENT — but SCM still reports is_first_push_done=false. SCM refuses "
+                f"an ADMIN-SCOPED push in this state, so this pipeline's normal push "
+                f"will fail until a full (--all-admins) push runs. Measured on this "
+                f"tenant: the flag did NOT clear after two successful pushes, so it is "
+                f"reported and not treated as stale config."))
         else:
             out.append(DeviceSync(serial, folder, IN_SYNC, ver, latest,
                                   "running the newest committed version"))
