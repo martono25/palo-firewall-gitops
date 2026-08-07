@@ -753,10 +753,16 @@ FEATURE rather than an observed behaviour:
   baseline tree HAS the request object, so a bundle is buildable; it needs a
   status (`removed`) and a decision about what "applied" means for a deletion.
 
-* **Still open — the per-kind deletion CONTRACT (an ADR).** What removal MEANS
-  per kind is now encoded in tiers but not stated: zone -> binding released;
-  interface override -> reverts to inheritance (proven); route -> stops
-  forwarding; rule -> access withdrawn.
+* ~~**The per-kind deletion CONTRACT (an ADR).**~~ **DONE — ADR-0008.** States
+  what removal means per kind from MEASURED behaviour, not prediction, and
+  decides the stance: **the platform guarantees a VISIBLE deletion, not a SAFE
+  one.** The only thing that ever refused a deletion was SCM's reference check,
+  which exists for referenced objects and nothing else — incidental protection,
+  not designed. Claiming safety would be claiming a control that does not exist.
+
+  Also decides that a NEW KIND must have its removal behaviour measured before it
+  ships; until then its removals are CRITICAL. So `NatRequest` removals are
+  CRITICAL by default — the rule working, not an oversight.
 
 **Priority:** P2 (v2.0), alongside `NatRequest` and rule ordering — all three are
 compiler/intent-model work rather than plumbing.
