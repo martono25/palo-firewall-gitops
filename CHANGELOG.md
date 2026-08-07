@@ -3,6 +3,38 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.32.0] — 2026-08-06
+
+### ADR-0008 — what removing an intent means, per kind
+
+Deletion worked, in the sense that objects disappeared. It worked as a BEHAVIOUR
+nobody had written down: no test asserted it, nothing said what removal was
+supposed to mean, and the per-kind differences — which are large — were unknown
+until measured.
+
+They are measured now, on the live pilot, and the ADR states the contract those
+measurements support. The asymmetry is the point: a **route** deletion is an
+outage with no error and no backstop, while a **zone** deletion is refused
+outright while anything references it. Two kinds, opposite failure modes, and
+nothing in the platform distinguished them until v1.30.0.
+
+**The stance it decides: the platform guarantees a VISIBLE deletion, not a SAFE
+one.** The only thing that ever refused a deletion was SCM's reference check,
+which exists for referenced objects and nothing else — incidental protection, not
+designed. Claiming safety would be claiming a control that does not exist, which
+is the failure already removed from `expires` and from `DESIGN.md`. What IS
+guaranteed: a removal is tiered, reported and reviewable before it applies.
+
+**A new kind must have its removal behaviour measured before it ships.** Until
+then its removals are CRITICAL — so `NatRequest` removals are CRITICAL by
+default, which is the rule working rather than an oversight. This mirrors the
+existing requirement that a kind be checked for tag support before drift coverage
+is promised for it.
+
+Two gaps recorded as gaps rather than papered over: `AccessRequest` removal is
+still INFERRED rather than measured, and `device-sync` cannot see the window
+between "destroyed in SCM" and "delivered to the device".
+
 ## [1.31.2] — 2026-08-06
 
 ### `RouteRequest` deletion, device half — it black-holes traffic silently
