@@ -3,6 +3,47 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.31.2] — 2026-08-06
+
+### `RouteRequest` deletion, device half — it black-holes traffic silently
+
+The half that was blocked is done. **Nothing refuses it at any layer**: SCM
+destroyed the logical router without complaint (a referenced zone returns `409
+NON_ZERO_REFS`), the push was accepted, the device applied it. No error anywhere.
+
+On the device, ~40s after the push job reported success:
+
+```
+before:  0.0.0.0/0  static  10.100.2.1  metric 10  ethernet1/3
+after:   (absent)
+```
+
+**Connected routes and VRF membership survived** — `ethernet1/3` and
+`ethernet1/4` kept `lr:default` — because destroying the `prod-edge` override
+reverts to the inherited `ngfw-shared` router, which declares the same interfaces
+and no routes.
+
+So the failure is precisely scoped and precisely silent: intra-subnet traffic
+keeps working, everything off-subnet is black-holed, and the config is valid at
+every layer. That is why the removal classifier tiers a route removal HIGH — it
+is the only Day-1 kind whose deletion is an outage with no error and no backstop.
+
+Restored; the route came back with age `00:00:28`, proving a real reinstall.
+
+### Correction: `device-sync` cannot see an applied-but-unpushed change
+
+Found by using it during the test. The router was destroyed in SCM and
+`device-sync` still reported `running=v72 committed=v72` — current.
+
+Terraform writes to SCM's CANDIDATE; only a push commits it and creates a
+version. There is nothing to compare, so the case the module header was written
+around is the one it misses. It does catch "committed but not delivered" — a
+device offline during a push — which is real, just narrower than claimed.
+
+Largely covered elsewhere by construction: `apply.yml` pushes immediately after
+applying, so a refused push fails the job loudly. It bites out-of-band applies,
+which is exactly how it arose here. Docstring corrected, gap filed.
+
 ## [1.31.1] — 2026-08-06
 
 ### Correction: `is_first_push_done` is not a sync signal

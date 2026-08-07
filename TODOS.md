@@ -690,48 +690,31 @@ lies is worse than none.
 need nothing further; what is deferred is the DELETION PATH AS A DESIGNED
 FEATURE rather than an observed behaviour:
 
-* **`RouteRequest` deletion — RUN 2026-08-06. SCM half proven; device half
-  BLOCKED.** The prediction held: **nothing refuses it.** SCM destroyed the
-  logical router without complaint, where the same operation on a referenced zone
-  returned `409 NON_ZERO_REFS`.
+* ~~**`RouteRequest` deletion — untested.**~~ **DONE 2026-08-06, both halves.**
 
-  **What it reverts to is better than feared.** `prod-edge` held an OVERRIDE
-  router; destroying it reverted to the inherited `ngfw-shared` router
-  (`20394038`) with **VRF interface membership intact** — `$eth-local` and
-  `$eth-internet` survive because the PARENT declares them — and an empty route
-  table. So the failure mode is "loses its default route", not "loses its VRF".
+  **Nothing refuses it, at any layer.** SCM destroyed the logical router without
+  complaint (a referenced zone returns `409 NON_ZERO_REFS`); the push was
+  accepted; the device applied it. No error anywhere.
 
-  **The device half could not be reached**, and how it failed is the finding:
-  `fwgitops push` was refused by SCM's admin-scope guard because OTHER admins
-  had staged changes on this firewall. So the deletion sat in SCM, applied, while
-  the device still forwarded on the old route.
+  **On the device, ~40s after the push job reported success:**
 
-  **That gap was the real result of this test — and it is now CLOSED.**
-  `fwgitops device-sync` (v1.31.0) compares each firewall's RUNNING config
-  version against the newest committed version for its folder, using the
-  documented endpoints `/config/operations/v1/config-versions/running` and
-  `.../candidate`. Wired into the scheduled drift job. Exit 2 on behind /
-  never-pushed / unreadable — not a note, because config that exists in SCM and
-  is not enforced on the firewall is the platform's core claim being false.
+  ```
+  before:  0.0.0.0/0  static  10.100.2.1  metric 10  ethernet1/3
+  after:   (absent)
+  ```
 
-  Restored immediately; both roots plan clean and the device kept its route.
+  Connected routes survived (`10.100.2.0/24`, `10.100.3.0/24` and their /32
+  locals), and **VRF membership survived** — `ethernet1/3` and `ethernet1/4` kept
+  `lr:default` — because destroying the `prod-edge` override reverts to the
+  inherited `ngfw-shared` router, which declares the same interfaces and no
+  routes.
 
-  **Remaining:** observe the device when the deletion actually lands. Needs the
-  staged changes from other admins to be resolved first (see below).
-* ~~**Deletion is invisible to the risk pipeline.**~~ **FIXED v1.30.0.**
-  `fwgitops classify --baseline <tree>` classifies REMOVALS alongside additions
-  and they participate in the same gate. Wired into the PR gate, which
-  materialises the base revision with `git archive`.
+  So the failure is precisely scoped and precisely silent: **intra-subnet traffic
+  keeps working, everything off-subnet is black-holed**, and the config is valid
+  at every layer. Restored; route back with age `00:00:28`, proving reinstall.
 
-  The tiers are NOT the mirror of creation, which is the point: removing an
-  `allow` withdraws access (LOW — it can break what depended on it, but opens
-  nothing); removing a `deny` may let traffic match a permissive rule below it
-  (HIGH). Route, zone and interface removals are HIGH — each has an
-  outage-shaped failure. An unknown kind is CRITICAL, because a default that
-  permits is how a class of change goes unassessed.
-
-  Found building it: an empty intent tree returned early with "no intent files
-  found" and exit 0 — so a PR deleting EVERY intent bypassed the gate entirely.
+  This is why the removal classifier tiers it HIGH: it is the only Day-1 kind
+  whose deletion produces an outage with no error and no backstop.
 
 * ~~**Uncommitted third-party changes are staged on the pilot.**~~ **WRONG —
   RETRACTED 2026-08-06.** `config-versions/candidate` returns COMMITTED VERSION
@@ -749,6 +732,21 @@ FEATURE rather than an observed behaviour:
   re-onboard reset it, so SCM has no per-admin baseline for the device and
   refuses an admin-scoped partial push — the first push after onboarding must be
   a full one. `device-sync` now reports exactly this state.
+
+* **`device-sync` cannot see an APPLIED-BUT-UNPUSHED change.** Found by using it
+  during this test: the router was destroyed in SCM and `device-sync` still
+  reported `running=v72 committed=v72`. Terraform writes to SCM's CANDIDATE, and
+  only a push creates a version — so there is nothing to compare.
+
+  It catches "committed but not delivered" (device offline during a push), which
+  is real but narrower than the header claimed. The missed case is covered
+  elsewhere by construction: `apply.yml` pushes immediately after applying, so a
+  refused push fails the job loudly. It bites out-of-band applies — a human
+  running `terraform apply` by hand, which is exactly how it arose here.
+
+  Closing it needs a candidate-vs-running comparison, and
+  `config-versions/candidate` cannot supply one (it is version history).
+  **Effort:** M · **Priority:** P2
 
 * **Still open — evidence for a removal.** Bundles are built per request, so a
   deletion still produces no audit record beyond git history and the plan. The
