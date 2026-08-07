@@ -48,6 +48,30 @@ admin-scoped will fail until a full push runs. That is worth knowing and is not
 the same as "the firewall is running stale config".
 
 THE AUTHORITATIVE SIGNAL IS THE VERSION COMPARISON.
+
+── WHAT THIS DOES NOT CATCH (measured 2026-08-06) ────────────────────────
+An APPLIED-BUT-UNPUSHED change is INVISIBLE here. Terraform writes to SCM's
+CANDIDATE; only a push commits it and creates a new version. So during the
+route-deletion test the router was destroyed in SCM and this command still
+reported `running=v72 committed=v72` — current — because no version had been
+created for the pending destroy.
+
+That is narrower than the gap this module's header claims to close, and the
+difference matters:
+
+  * CAUGHT   — committed but not delivered: a push created version N+1 and the
+               device is still on N (offline during the push, partial delivery).
+  * MISSED   — applied in SCM, never pushed: candidate differs from running, no
+               version exists to compare.
+
+The missed case is largely covered elsewhere by construction: apply.yml pushes
+immediately after applying, so a refused push FAILS THE JOB loudly. It bites for
+out-of-band applies — a human running `terraform apply` by hand, which is exactly
+what produced it during the test.
+
+Closing it properly needs a candidate-vs-running comparison, and SCM's
+`config-versions/candidate` cannot supply one: it is version history. Recorded in
+TODOS rather than guessed at.
 """
 
 from __future__ import annotations
