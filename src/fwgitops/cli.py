@@ -1933,6 +1933,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="read a folder's live objects of one kind from SCM (read-only)")
     sn.add_argument("kind", help="intent kind, e.g. ZoneRequest / InterfaceRequest")
     sn.add_argument("folder", nargs="?", default=None, help="SCM folder to read")
+    sn.add_argument("--scope-dir",
+                    help="a Terraform root DIRECTORY name (e.g. `prod-edge` or "
+                         "`device-<serial>`); resolved to the right scope via "
+                         "Scope.from_dirname. Lets a caller iterate terraform/*/ "
+                         "without re-implementing the naming convention.")
     sn.add_argument("--device", default=None,
                     help="read a FIREWALL's scope instead of a folder (serial). A firewall "
                          "is the last level of the hierarchy but is addressed device=, "
@@ -2059,6 +2064,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "apply-order":
         return run_apply_order(args.out)
     if args.command == "snapshot":
+        if args.scope_dir:
+            # Resolve a Terraform root DIRECTORY to its scope. The drift job
+            # iterates terraform/*/ and previously passed each name as a FOLDER,
+            # which SCM rejects for the device root ("Folder
+            # device-<serial> doesn't exist"). Scope.from_dirname owns the
+            # mapping so it cannot drift from Scope.dirname.
+            from fwgitops.compiler import Scope
+            if args.folder or args.device:
+                print("error: --scope-dir replaces <folder> / --device; give one form",
+                      file=sys.stderr)
+                return 1
+            scope = Scope.from_dirname(args.scope_dir)
+            return run_snapshot(args.kind, scope.value if scope.kind == "folder" else None,
+                                args.out,
+                                device=scope.value if scope.kind == "device" else None)
         if bool(args.folder) == bool(args.device):
             print("error: give exactly one of <folder> or --device <serial> — a firewall "
                   "is the last level of the hierarchy but is addressed device=, never "
