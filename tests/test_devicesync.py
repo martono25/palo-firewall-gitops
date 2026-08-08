@@ -142,3 +142,58 @@ def test_a_read_failure_is_an_ERROR_not_a_pass(capsys):
             raise RuntimeError("connection reset")
     assert run_device_sync(session=_Broken()) == 1
     assert "connection reset" in capsys.readouterr().err
+
+
+# ── state drift at DEVICE scope ───────────────────────────────────────────
+def test_a_device_scope_row_defines_at_device_not_in_a_folder(tmp_path, capsys):
+    """A device-scope OVERRIDE is defined at `device:<serial>` and the snapshot
+    row carries `device` with NO `folder` at all. Requiring `folder` rejected
+    every device snapshot outright:
+
+        error: ... [0] must have 'folder' and 'name'
+
+    so state drift was never checked for a firewall's own overrides.
+    """
+    import json
+    import sys
+    from pathlib import Path as _Path
+
+    sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "src"))
+    from fwgitops.cli import run_drift
+
+    snap = tmp_path / "s.json"
+    snap.write_text(json.dumps([{
+        "kind": "InterfaceRequest", "name": "ethernet1/2",
+        "device": "007955000894453", "scope": "device:007955000894453",
+        "layer3": {}}]))
+    env = tmp_path / "env.yaml"
+    env.write_text("prod:\n  folder: prod-edge\n  from_zone: l\n  to_zone: i\n")
+    (tmp_path / "intent").mkdir()
+
+    rc = run_drift(tmp_path / "intent", env, state_snapshot_paths=[snap])
+    err = capsys.readouterr().err
+    assert "must have 'folder' and 'name'" not in err, \
+        "a device row has no folder — that is not malformed"
+    assert rc in (0, 3), f"expected a drift verdict, got rc={rc}: {err}"
+
+
+def test_only_the_scopes_the_snapshot_COVERS_are_compared(tmp_path, capsys):
+    """The caller checks one root at a time — the scheduled job loops
+    `terraform/*/` — so a device snapshot contains nothing about `prod-edge`.
+    Comparing the whole declared set against it reported every other scope's
+    objects as "declared in Git, absent from SCM": drift that is not there, on a
+    firewall perfectly in step."""
+    from fwgitops.drift import ActualObject, detect_object_drift
+
+    declared = {
+        ("device:007955000894453", "ethernet1/2"): {"name": "ethernet1/2"},
+        ("prod-edge", "dmz"): {"name": "dmz"},
+    }
+    actual = [ActualObject(kind="InterfaceRequest", folder="device:007955000894453",
+                           name="ethernet1/2", scope="device:007955000894453",
+                           fields={"name": "ethernet1/2"})]
+    covered = {a.scope_folder for a in actual}
+    scoped = {k: v for k, v in declared.items() if k[0] in covered}
+    assert detect_object_drift(scoped, actual).is_clean
+    # and without the filter, the untouched folder object looks missing
+    assert not detect_object_drift(declared, actual).is_clean

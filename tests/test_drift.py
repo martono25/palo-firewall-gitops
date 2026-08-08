@@ -198,3 +198,71 @@ def test_every_state_drift_kind_can_produce_declared_state():
     for handler in kinds_with_drift_engine("state"):
         assert callable(handler.tfvars), f"{handler.kind} cannot produce declared state"
         assert handler.state_api_path, f"{handler.kind} has no snapshot source"
+
+
+# ── state drift had never worked for anything but rules ───────────────────
+def test_declared_state_handles_an_AGGREGATING_kind():
+    """A RouteRequest is not an SCM object — routes collapse into a logical
+    router, so `tfvars([one_route])` returns a router keyed by the ROUTER name,
+    not the request id. Indexing by `name_of(obj)` raised
+    `KeyError: 'REQ-2026-0803'` the moment routes reached the declared set.
+
+    Calling tfvars per object would also compare a router holding ONE route
+    against SCM's router holding all of them — drift that is not there.
+    """
+    import yaml
+
+    from fwgitops.catalog import FolderHierarchy, RouterCatalog
+    from fwgitops.drift import declared_state
+    from fwgitops.intent import load_intent
+    from fwgitops.kinds import REGISTRY, compile_any
+    from fwgitops.resolve import EnvMap
+
+    env = EnvMap.from_dict({"prod": {"folder": "prod-edge", "from_zone": "l", "to_zone": "i"}})
+    routers = RouterCatalog.from_dict({"routers": {
+        "prod-edge": {"default": {"vrfs": {"default": {"interfaces": ["$eth-local"]}}}}}})
+    hier = FolderHierarchy.from_dict(
+        {"folders": {"prod-edge": {"children": [], "targetable": True}}})
+
+    def route(rid, dest):
+        return load_intent({
+            "apiVersion": "fw-intent/v1", "kind": "RouteRequest",
+            "metadata": {"id": rid, "requester": "m@corp", "ticket": "J-1",
+                         "justification": "x", "requested": "2026-08-08"},
+            "spec": {"folder": "prod-edge", "destination": dest, "nexthop": "10.0.0.1"},
+        }, env_map=env, router_catalog=routers, folder_hierarchy=hier)
+
+    objs = [compile_any(route("R-1", "0.0.0.0/0"), env),
+            compile_any(route("R-2", "10.9.0.0/16"), env)]
+    state = declared_state(REGISTRY["RouteRequest"], objs)
+
+    # ONE router, keyed by the SCM object's name — not two entries keyed by id.
+    assert list(state) == [("prod-edge", "default")]
+    vrf = state[("prod-edge", "default")]["vrf"][0]
+    names = [r["name"] for r in vrf["routing_table"]["ip"]["static_route"]]
+    assert names == ["R-1", "R-2"], "both routes must aggregate into the one router"
+
+
+def test_a_nested_null_is_not_reported_as_modified():
+    """`_flatten` does not descend into lists, so a router's `vrf` is compared
+    whole — and the compiled form carries explicit nulls (`interface: None`)
+    where SCM omits the key. Without normalising, an untouched router reported as
+    `modified` on every run.
+
+    "A None in the declaration means we did not ask for this" is already the
+    contract for top-level fields; this is the same statement one level down.
+    """
+    from fwgitops.drift import ActualObject, detect_object_drift
+
+    declared = {("prod-edge", "default"): {
+        "vrf": [{"name": "default", "interface": None,
+                 "routing_table": {"ip": {"static_route": [
+                     {"name": "R-1", "destination": "0.0.0.0/0", "metric": 10,
+                      "interface": None, "admin_dist": None}]}}}]}}
+    actual = [ActualObject(
+        kind="RouteRequest", folder="prod-edge", name="default", scope="prod-edge",
+        fields={"vrf": [{"name": "default",
+                         "routing_table": {"ip": {"static_route": [
+                             {"name": "R-1", "destination": "0.0.0.0/0",
+                              "metric": 10}]}}}]})]
+    assert detect_object_drift(declared, actual).is_clean
