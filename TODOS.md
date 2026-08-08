@@ -748,6 +748,16 @@ FEATURE rather than an observed behaviour:
   `config-versions/candidate` cannot supply one (it is version history).
   **Effort:** M · **Priority:** P2
 
+* **Evidence bundles cover `AccessRequest` ONLY.** `build_bundle(request:
+  AccessRequest, ...)`, so interface, zone and route changes produce no audit
+  record at all — 5 bundles for 10 intents on the live tree. A route change is
+  arguably MORE audit-relevant than a rule, since it decides where all unmatched
+  traffic goes, and the deletion test showed its removal is a silent outage.
+
+  The registry already drives compile, classify, tfvars and drift per kind; the
+  bundle builder is the one place still hard-wired to one kind.
+  **Effort:** M · **Priority:** P2
+
 * **Still open — evidence for a removal.** Bundles are built per request, so a
   deletion still produces no audit record beyond git history and the plan. The
   baseline tree HAS the request object, so a bundle is buildable; it needs a
