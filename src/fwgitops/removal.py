@@ -124,3 +124,71 @@ def classify_removal(removal: Removal) -> RiskVerdict:
         classifier_version=REMOVAL_CLASSIFIER_VERSION,
         checks_fired=tuple(fired),
     )
+
+
+# ── MODIFICATIONS ─────────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class Modification:
+    """An intent present in both trees whose SPEC changed."""
+
+    kind: str
+    req_id: str
+    before: Any          # the baseline request
+    after: Any           # the current request
+    path: Optional[str] = None
+
+
+def find_modifications(baseline: Dict[Tuple[str, str], "Removal"],
+                       current: Dict[Tuple[str, str], "Removal"]) -> List[Modification]:
+    """Entries in both trees whose `spec` differs.
+
+    Compares the LOADED spec, not the raw YAML: reformatting, comment edits and
+    key reordering are not changes to the firewall, and flagging them would make
+    the ticket rule fire on edits that alter nothing.
+    """
+    out: List[Modification] = []
+    for key, cur in sorted(current.items()):
+        base = baseline.get(key)
+        if base is None:
+            continue                                    # an addition
+        if getattr(base.request, "spec", None) != getattr(cur.request, "spec", None):
+            out.append(Modification(kind=key[0], req_id=key[1],
+                                    before=base.request, after=cur.request,
+                                    path=cur.path))
+    return out
+
+
+def stale_ticket_problems(mods: Iterable[Modification]) -> List[str]:
+    """Modified intents still carrying the ticket that authorised the OLD state.
+
+    WHY THIS IS A REJECTION, NOT A NOTE. `metadata` describes a REQUEST — a
+    one-time event — while the file is a RULE, a long-lived object. Editing the
+    object does not update the event record, so the evidence bundle for today's
+    change names whoever asked for the ORIGINAL one.
+
+    Measured on 2026-08-08: widening `REQ-2026-0727` from a /24 to a /16 produced
+    a bundle reading `ticket: JIRA-20727, requested: 2026-07-26, justification:
+    "App tier resolves names via the internal DNS resolver"` — a ticket that does
+    not cover the change, a date six weeks earlier, and a justification for a
+    narrower rule. Only `intent_sha256` moved.
+
+    The bundle claims NIST CM-3 (request -> review -> approve -> implement) and
+    named the wrong request. That is a FALSE STATEMENT in a compliance artifact,
+    not a missing field, so it fails the change rather than annotating it.
+
+    Only a SPEC change requires a new ticket. Editing a justification or a
+    comment alters nothing on the firewall and needs no change record.
+    """
+    problems: List[str] = []
+    for m in mods:
+        before_t = getattr(getattr(m.before, "metadata", None), "ticket", None)
+        after_t = getattr(getattr(m.after, "metadata", None), "ticket", None)
+        if before_t == after_t:
+            problems.append(
+                f"{m.req_id} ({m.kind}): `spec` changed but `metadata.ticket` is still "
+                f"{after_t!r}. A change needs its own change ticket — otherwise the "
+                f"evidence bundle for this change names the request that authorised the "
+                f"PREVIOUS one. Update `metadata.ticket` (and `requested`, and "
+                f"`justification` if the reason differs) to describe THIS change."
+            )
+    return problems

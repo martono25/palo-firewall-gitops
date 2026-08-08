@@ -16,6 +16,27 @@ Terraform, the SCM API, or PAN-OS internals. Just follow the steps.
 
 ---
 
+## Updating or removing an existing rule
+
+**To change a rule**, edit its file and **give it a new `ticket`**. The request id
+stays the same — it is the rule's name on the firewall — but the ticket must
+describe THIS change, not the one that created the rule.
+
+That is enforced: a PR that changes `spec` while leaving the old ticket in place
+is rejected. Without it, the audit record for your change would name the request
+that authorised the previous version — a different person, a different date, and
+a justification for a different rule.
+
+**To remove a rule**, delete its file. There is no "delete request" to write; the
+PR diff shows the whole rule being removed, and the pipeline classifies the
+removal on its own terms (removing a `deny` is treated more seriously than
+removing an `allow`).
+
+**To see a rule's history**, follow its file: `git log --follow
+intent/<env>/<app>/REQ-....yaml`.
+
+---
+
 ## Before you start
 
 - A **GitHub account** that has been added to the `martono25/palo-firewall-gitops`
