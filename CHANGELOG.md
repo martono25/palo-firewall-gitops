@@ -3,6 +3,63 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.34.0] — 2026-08-08
+
+### Evidence bundles are committed, so the audit trail stops expiring
+
+`evidence.py` has always declared the design property:
+
+```
+evidence/<folder>/<REQ-id>.json   (committed; Git = SSoT)
+```
+
+The apply workflow only UPLOADED them as a run artifact, with no
+`retention-days` set — so the audit record expired on GitHub's default retention
+and never entered the source of truth. A stated design property the pipeline did
+not keep, which is the same class of defect as `expires` claiming an enforcement
+nothing performed.
+
+Now committed back to `main` after a successful apply, with the run URL in the
+commit body.
+
+**Safe against a trigger loop by construction:** this workflow's `paths:` filter
+lists `intent/`, `catalog/` and `terraform/` only, so a push touching `evidence/`
+matches nothing and starts no run. A test asserts `evidence/` never appears in
+that filter — adding it would make every apply commit, retrigger and re-push to
+the firewall.
+
+**A push race is retried; a rebase CONFLICT is not swallowed.** Applies queue on
+a concurrency group, so two runs can race. A conflict means two runs disagree
+about the same bundle, which is worth a human rather than an auto-resolve that
+silently drops one change's record.
+
+### What this makes possible
+
+Because the bundle path is one file per rule, overwritten each apply, a rule's
+change history is now its bundle's git history:
+
+```
+git log evidence/prod-edge/REQ-2026-0727.json
+```
+
+one commit per change, each naming the ticket that authorised it (enforced in
+v1.33.0), the risk tier, and the intent/tfvars hashes. That answers "how many
+times has this rule been changed, and by whose request" from the repository
+alone.
+
+### Still not covered, and stated rather than implied
+
+**Bundles exist for `AccessRequest` only.** Interface, zone and route changes
+produce none — verified against the live tree: 5 bundles for 10 intents. A route
+change is arguably more audit-relevant than a rule, since it decides where all
+unmatched traffic goes. Filed.
+
+Nothing is seeded into `evidence/` by this change: bundles generated locally
+would carry `status: applied` with null approval and apply provenance, which is
+worse than absent. The first CI apply writes the real ones.
+
+- 669 tests (+5).
+
 ## [1.33.0] — 2026-08-08
 
 ### A modified intent must carry its own change ticket
