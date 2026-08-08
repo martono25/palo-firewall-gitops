@@ -3,6 +3,42 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.34.1] — 2026-08-08
+
+### Fixed: a slow SCM read failed the scheduled drift job
+
+The first drift run after v1.34.0 failed with:
+
+```
+error: reading SCM config versions failed: The read operation timed out
+```
+
+Not drift — a transport hiccup. SCM's `config-versions` endpoints time out
+intermittently under load; the same thing happened locally on 2026-08-06 during a
+burst of pushes, and succeeded on the next attempt. A scheduled check that fails
+because the API was slow is one people stop reading, which is the failure mode
+this project has argued against for `targetable: false` and `is_first_push_done`.
+
+**A timed-out GET is now retried** (3 attempts, linear backoff), with the token
+re-read between attempts in case a slow call outlived it.
+
+**A timed-out WRITE is never retried.** Repeating a POST could create a second
+object after the first quietly succeeded; repeating a DELETE could destroy
+something recreated in between. A write that times out is ambiguous, and guessing
+is worse than failing.
+
+**Retries are exhausted, not infinite** — after three attempts it still fails.
+The point is to survive a hiccup, not to turn an unreachable API into a pass.
+
+Mutation-verified in both directions: retrying writes fails the write test;
+removing retries fails the read tests.
+
+*(Found while writing the tests: the OAuth token fetch is also a `POST`, so
+counting HTTP methods alone conflated it with the API call under test. The tests
+filter by URL.)*
+
+- 672 tests (+3).
+
 ## [1.34.0] — 2026-08-08
 
 ### Evidence bundles are committed, so the audit trail stops expiring

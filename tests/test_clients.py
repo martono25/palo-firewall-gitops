@@ -208,3 +208,77 @@ def test_push_body_uses_plural_folders_key():
     sent = json.loads(bodies[-1])
     assert sent["folders"] == ["GitOps"]     # plural key — live tenant schema
     assert "folder" not in sent
+
+
+# ── a timed-out GET is retried; a write never is ──────────────────────────
+def _session(responses, calls):
+    """Session whose transport replays `responses`, recording each call."""
+    import socket
+
+    from fwgitops.scmapi import ScmCredentials, ScmSession
+
+    def transport(method, url, headers, body):
+        # (method, url) — the OAuth token fetch is ALSO a POST, so counting
+        # methods alone conflates it with the API call under test.
+        calls.append((method, url))
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    return ScmSession(
+        ScmCredentials(client_id="i", client_secret="s", scope="tsg_id:1"),
+        transport=transport,
+        sleep=lambda _s: None,
+    )
+
+
+def test_a_timed_out_GET_is_retried():
+    """SCM's config-versions endpoints time out intermittently under load —
+    observed 2026-08-06 during a burst of pushes, and again on 2026-08-08 when it
+    failed the scheduled drift job outright. That is a transport hiccup, not
+    drift, and a scheduled check that fails on the API being slow is one people
+    stop reading."""
+    import socket
+
+    calls = []
+    s = _session([(200, b'{"access_token":"t","expires_in":3600}'),
+                  socket.timeout("read timed out"),
+                  (200, b'{"data":[]}')], calls)
+    assert s.request("GET", "/config/operations/v1/config-versions/running") == {"data": []}
+    api = [m for m, u in calls if "config-versions" in u]
+    assert api == ["GET", "GET"], "the GET should have been retried once"
+
+
+def test_retries_are_EXHAUSTED_not_infinite_and_still_fail():
+    """The point is to survive a hiccup, not to convert an unreachable API into a
+    pass. `device-sync` must still exit non-zero when SCM cannot be read."""
+    import socket
+
+    import pytest as _pytest
+
+    calls = []
+    s = _session([(200, b'{"access_token":"t","expires_in":3600}')]
+                 + [socket.timeout("read timed out")] * 5, calls)
+    with _pytest.raises((socket.timeout, TimeoutError)):
+        s.request("GET", "/config/operations/v1/config-versions/running")
+    api = [m for m, u in calls if "config-versions" in u]
+    assert len(api) == 3, "READ_RETRIES total attempts, then fail"
+
+
+def test_a_timed_out_WRITE_is_NEVER_retried():
+    """Retrying a POST could create a second object after the first quietly
+    succeeded; retrying a DELETE could destroy something recreated in between.
+    A write that times out is ambiguous, and guessing is worse than failing."""
+    import socket
+
+    import pytest as _pytest
+
+    calls = []
+    s = _session([(200, b'{"access_token":"t","expires_in":3600}'),
+                  socket.timeout("read timed out"),
+                  (200, b'{"id":"should-never-be-reached"}')], calls)
+    with _pytest.raises((socket.timeout, TimeoutError)):
+        s.request("POST", "/config/network/v1/zones", body={"name": "z"})
+    api = [m for m, u in calls if "/config/network/v1/zones" in u]
+    assert api == ["POST"], "a write must be attempted exactly once"

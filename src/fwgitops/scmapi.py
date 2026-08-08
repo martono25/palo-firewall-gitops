@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -34,6 +35,14 @@ DEFAULT_AUTH_URL = "https://auth.apps.paloaltonetworks.com/auth/v1/oauth2/access
 DEFAULT_HOST = "api.sase.paloaltonetworks.com"
 
 #: Refresh a little before actual expiry so a long apply never races the clock.
+#: A timed-out GET is retried this many times in total. Reads are idempotent;
+#: writes are never retried (see `ScmSession.request`).
+READ_RETRIES = 3
+#: Linear backoff, multiplied by the attempt number.
+RETRY_BACKOFF_SECONDS = 2.0
+#: Methods safe to repeat after a timeout.
+_IDEMPOTENT = frozenset({"GET", "HEAD"})
+
 EXPIRY_MARGIN_SECONDS = 60
 
 _SCOPE_RE = re.compile(r"^tsg_id:\S+$")
@@ -119,6 +128,8 @@ class ScmSession:
     credentials: ScmCredentials = field(repr=False)  # carries client_secret
     transport: Transport = _urllib_transport
     now: Callable[[], float] = time.time
+    #: Seam so a retry test does not actually wait, matching the `now` seam.
+    sleep: Callable[[float], None] = time.sleep
     _token: Optional[str] = field(default=None, init=False, repr=False)
     _expires_at: float = field(default=0.0, init=False, repr=False)
 
@@ -166,21 +177,42 @@ class ScmSession:
     def request(
         self, method: str, path: str, body: Optional[dict] = None, params: Optional[dict] = None
     ) -> dict:
-        """Make an authenticated call. `path` is relative to the API host."""
+        """Make an authenticated call. `path` is relative to the API host.
+
+        A TIMED-OUT GET IS RETRIED; nothing else is. SCM's config-versions
+        endpoints time out intermittently under load — observed locally on
+        2026-08-06 during a burst of pushes, and again on 2026-08-08 when it
+        failed the scheduled drift job outright. That is a transport hiccup, not
+        drift, and a scheduled check that fails on the API being slow is one
+        people stop reading.
+
+        ONLY IDEMPOTENT METHODS. Retrying a POST could create a second object
+        after the first quietly succeeded, and retrying a DELETE could destroy
+        something recreated in between. A read costs nothing to repeat.
+
+        Still FAILS after the attempts are exhausted: the point is to survive a
+        hiccup, not to convert an unreachable API into a pass.
+        """
         url = f"https://{self.credentials.host}{path}"
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
         raw_body = json.dumps(body).encode("utf-8") if body is not None else None
-        status, raw = self.transport(
-            method,
-            url,
-            {
-                "Authorization": f"Bearer {self.token()}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            raw_body,
-        )
+        headers = {
+            "Authorization": f"Bearer {self.token()}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        attempts = READ_RETRIES if method.upper() in _IDEMPOTENT else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                status, raw = self.transport(method, url, headers, raw_body)
+                break
+            except (socket.timeout, TimeoutError) as e:
+                if attempt == attempts:
+                    raise
+                self.sleep(RETRY_BACKOFF_SECONDS * attempt)
+                # Re-read the token: a slow call may have outlived it.
+                headers["Authorization"] = f"Bearer {self.token()}"
         payload = _json(raw)
         if status >= 400:
             raise ScmApiError(status, json.dumps(payload))
