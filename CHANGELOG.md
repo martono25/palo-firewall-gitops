@@ -3,6 +3,34 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.34.2] — 2026-08-08
+
+### Fixed: the drift job could not read a DEVICE-scoped root
+
+With the read timeout fixed, the next drift run failed differently — and this one
+was a real bug, not a hiccup:
+
+```
+error: SCM read failed: 400 API_I00013
+"Folder device-007955000894453 doesn't exist. Please create it before running the command"
+```
+
+The job iterates `terraform/*/` and passed each directory name to `snapshot` as a
+FOLDER. For the device root that name is `device-<serial>`, which SCM rejects —
+**the folder-vs-device confusion this project keeps meeting, arriving through a
+workflow instead of an intent.** So state drift has never actually been checked
+for the device root.
+
+`Scope.from_dirname()` is the inverse of `Scope.dirname`, and `snapshot` gains
+`--scope-dir` so a caller can iterate `terraform/*/` without re-implementing the
+convention. The `device-` prefix is now defined once, in `Scope`; a test fails if
+the workflow reintroduces it or drops `--scope-dir`.
+
+Verified against the live tenant: snapshots now succeed for both `prod-edge` and
+`device-007955000894453`.
+
+- 675 tests (+3).
+
 ## [1.34.1] — 2026-08-08
 
 ### Fixed: a slow SCM read failed the scheduled drift job

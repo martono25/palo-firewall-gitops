@@ -137,7 +137,12 @@ jobs:
             snaps=()
             for kind in $(fwgitops kinds --state-drift); do
               out="state-$kind-$folder.json"
-              fwgitops snapshot "$kind" "$folder" --out "$out"
+              # --scope-dir, not a positional folder: for the device root the
+              # directory is `device-<serial>`, which SCM rejects as a folder
+              # ("Folder device-... doesn't exist"). fwgitops owns that mapping
+              # via Scope.from_dirname; duplicating the `device-` prefix here is
+              # what broke this job on 2026-08-08.
+              fwgitops snapshot "$kind" --scope-dir "$folder" --out "$out"
               snaps+=(--state-snapshot "$out")
             done
             rc=0

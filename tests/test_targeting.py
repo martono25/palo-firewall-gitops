@@ -348,3 +348,43 @@ def test_the_scope_key_matches_across_classify_drift_and_snapshot():
     in_folder = CompiledZone(folder="prod-edge", name="z", zone_type="layer3", interfaces=[])
     assert _scope_key(on_device) == scope_of(on_device).key == f"device:{DEVICE}"
     assert _scope_key(in_folder) == scope_of(in_folder).key == "prod-edge"
+
+
+# ── a Terraform root DIRECTORY resolves back to its scope ─────────────────
+def test_scope_round_trips_through_its_directory_name():
+    """`Scope.dirname` names the Terraform root; `from_dirname` is its inverse.
+
+    The scheduled drift job iterates `terraform/*/` and passed each directory to
+    `snapshot` as a FOLDER. For the device root that is `device-<serial>`, which
+    SCM rejects — "Folder device-007955000894453 doesn't exist" — the
+    folder-vs-device confusion this project keeps meeting, arriving through a
+    workflow instead of an intent. Broke drift-detect on 2026-08-08.
+    """
+    from fwgitops.compiler import Scope
+
+    for scope in (Scope(kind="folder", value="prod-edge"),
+                  Scope(kind="device", value=DEVICE)):
+        assert Scope.from_dirname(scope.dirname) == scope
+
+
+def test_a_device_directory_is_not_read_as_a_folder():
+    from fwgitops.compiler import Scope
+
+    s = Scope.from_dirname(f"device-{DEVICE}")
+    assert s.kind == "device" and s.value == DEVICE
+
+
+def test_the_drift_workflow_uses_scope_dir_not_a_bare_folder():
+    """The mapping lives in `Scope`, not in YAML. A hand-written `device-` prefix
+    in the workflow is the duplication that caused the failure."""
+    import re
+    from pathlib import Path as _Path
+
+    wf = (_Path(__file__).resolve().parents[1]
+          / ".github" / "workflows" / "drift-detect.yml").read_text()
+    snap = [ln for ln in wf.splitlines() if "fwgitops snapshot" in ln and not ln.strip().startswith("#")]
+    assert snap, "the drift job must still take snapshots"
+    for ln in snap:
+        assert "--scope-dir" in ln, f"snapshot must resolve the root directory: {ln.strip()}"
+    assert not re.search(r'^\s*[^#]*"device-', wf, re.M), \
+        "the `device-` prefix must not be re-implemented in the workflow"

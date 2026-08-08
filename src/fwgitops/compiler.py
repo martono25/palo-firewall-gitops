@@ -130,6 +130,27 @@ class Scope:
             "device": self.value if self.kind == "device" else None,
         }
 
+    #: The prefix `dirname` uses for a firewall. Defined once so the inverse
+    #: below cannot drift from it — a hand-written `device-` in a workflow is
+    #: exactly the duplication that produced the 2026-08-08 drift failure.
+    DEVICE_DIR_PREFIX = "device-"
+
+    @classmethod
+    def from_dirname(cls, name: str) -> "Scope":
+        """Inverse of `dirname`.
+
+        The scheduled drift job iterates `terraform/*/` and passed each directory
+        name to `snapshot` as a FOLDER. For the device root that is
+        `device-<serial>`, which SCM rejects: "Folder device-007955000894453
+        doesn't exist" — the folder-vs-device confusion this project keeps
+        meeting, arriving through a workflow rather than an intent.
+
+        Resolving here rather than in YAML keeps one definition of the mapping.
+        """
+        if name.startswith(cls.DEVICE_DIR_PREFIX):
+            return cls(kind="device", value=name[len(cls.DEVICE_DIR_PREFIX):])
+        return cls(kind="folder", value=name)
+
     def __str__(self) -> str:
         return self.key
 
