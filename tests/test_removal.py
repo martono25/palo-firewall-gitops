@@ -152,3 +152,78 @@ def test_removals_key_on_kind_AND_id():
     base = {("ZoneRequest", "X"): Removal("ZoneRequest", "X", object())}
     assert find_removals(base, [("AccessRequest", "X")])
     assert not find_removals(base, [("ZoneRequest", "X")])
+
+
+# ── a modified intent must carry its own change ticket ────────────────────
+def _rule_t(rid, ticket, cidr="10.20.1.0/24", action="allow"):
+    return (
+        "apiVersion: fw-intent/v1\n"
+        "kind: AccessRequest\n"
+        f"metadata: {{id: {rid}, requester: m@corp, ticket: {ticket},"
+        " justification: x, requested: 2026-08-06}\n"
+        "spec:\n"
+        "  environment: prod\n"
+        f"  action: {action}\n"
+        f"  source: [{{cidr: {cidr}}}]\n"
+        "  destination: [{cidr: 10.20.9.9/32}]\n"
+        "  service: [{protocol: tcp, port: \"443\"}]\n"
+    )
+
+
+def test_widening_a_rule_without_a_new_ticket_is_REJECTED(tmp_path, capsys):
+    """`metadata` describes a REQUEST — a one-time event — while the file is a
+    RULE, a long-lived object. Editing the object does not update the event
+    record, so the evidence bundle for today's change names whoever asked for the
+    ORIGINAL one.
+
+    Measured 2026-08-08 on REQ-2026-0727: widening /24 -> /16 produced a bundle
+    reading `ticket: JIRA-20727, requested: 2026-07-26` with a justification for
+    the narrower rule. Only `intent_sha256` moved. The bundle claims NIST CM-3
+    and named the wrong request — a false statement in a compliance artifact, so
+    it fails the change rather than annotating it.
+    """
+    rc = _classify(tmp_path,
+                   {"A.yaml": _rule_t("R-1", "JIRA-1")},
+                   {"A.yaml": _rule_t("R-1", "JIRA-1", cidr="10.20.0.0/16")})
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "reuse the previous change ticket" in err
+    assert "JIRA-1" in err
+
+
+def test_the_same_change_WITH_a_new_ticket_is_accepted(tmp_path, capsys):
+    rc = _classify(tmp_path,
+                   {"A.yaml": _rule_t("R-1", "JIRA-1")},
+                   {"A.yaml": _rule_t("R-1", "JIRA-2", cidr="10.20.0.0/16")})
+    assert rc == 0
+
+
+def test_a_metadata_only_edit_does_NOT_demand_a_new_ticket(tmp_path, capsys):
+    """Only a SPEC change alters the firewall. Demanding a ticket for a
+    justification reword or a comment would make the rule fire on edits that
+    change nothing — and a check that fires on nothing is one people route
+    around."""
+    before = _rule_t("R-1", "JIRA-1")
+    after = before.replace("justification: x", "justification: a clearer reason")
+    assert _classify(tmp_path, {"A.yaml": before}, {"A.yaml": after}) == 0
+
+
+def test_comparison_is_SEMANTIC_not_textual(tmp_path, capsys):
+    """Reformatting is not a change to the firewall. Comparing raw YAML would
+    flag key reordering and whitespace, which is how a guard becomes noise."""
+    before = _rule_t("R-1", "JIRA-1")
+    after = before.replace(
+        '  source: [{cidr: 10.20.1.0/24}]\n',
+        '  source:\n    - cidr: 10.20.1.0/24\n')
+    assert _classify(tmp_path, {"A.yaml": before}, {"A.yaml": after}) == 0
+
+
+def test_an_unchanged_intent_alongside_a_changed_one_is_not_flagged(tmp_path, capsys):
+    """Only the modified intent needs a new ticket — untouched neighbours must
+    not be dragged in."""
+    rc = _classify(
+        tmp_path,
+        {"A.yaml": _rule_t("R-1", "JIRA-1"), "B.yaml": _rule_t("R-2", "JIRA-9")},
+        {"A.yaml": _rule_t("R-1", "JIRA-2", cidr="10.20.0.0/16"),
+         "B.yaml": _rule_t("R-2", "JIRA-9")})
+    assert rc == 0

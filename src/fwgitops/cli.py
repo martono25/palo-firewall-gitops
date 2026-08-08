@@ -47,7 +47,7 @@ from fwgitops.kinds import (
     of_kind,
 )
 from fwgitops.io import discover_intents, read_yaml
-from fwgitops.removal import classify_removal
+from fwgitops.removal import classify_removal, stale_ticket_problems
 from fwgitops.resolve import EnvMap, ResolveError
 from fwgitops.tfcontract import check_contract, check_object_attributes, is_terraform_root
 
@@ -606,9 +606,23 @@ def run_classify(
     # comparing trees keeps this pure, unlike reading git here.
     removed_count = 0
     if baseline_root is not None:
-        removals, code = _load_removals(baseline_root, intent_root, env_map, cats, err)
+        removals, mods, code = _load_changeset(baseline_root, intent_root, env_map,
+                                               cats, err)
         if removals is None:
             return code
+
+        # A MODIFIED intent must carry its own change ticket. Without this the
+        # evidence bundle for today's change names the request that authorised
+        # the PREVIOUS one — a false statement in an artifact that claims NIST
+        # CM-3. Rejected (exit 2) rather than tiered, because it is an invalid
+        # intent, not a risky one.
+        stale = stale_ticket_problems(mods)
+        if stale:
+            print(f"REJECTED — {len(stale)} modified intent(s) reuse the previous "
+                  f"change ticket:", file=err)
+            for p in stale:
+                print(f"  - {p}", file=err)
+            return 2
         removed_count = len(removals)
         for r in removals:
             v = classify_removal(r)
@@ -635,18 +649,18 @@ def run_classify(
     return 0
 
 
-def _load_removals(baseline_root: Path, intent_root: Path, env_map, cats, err):
-    """(removals, exit_code). `removals` is None when the baseline is unusable.
+def _load_changeset(baseline_root: Path, intent_root: Path, env_map, cats, err):
+    """(removals, modifications, exit_code). Both None when the baseline is unusable.
 
     FAIL CLOSED. An unreadable or invalid baseline returns an error rather than
     "no removals" — silently reporting zero removals because the comparison
     broke is precisely the blindness this feature removes.
     """
-    from fwgitops.removal import Removal, find_removals
+    from fwgitops.removal import Removal, find_modifications, find_removals
 
     if not baseline_root.exists():
         print(f"error: baseline intent tree not found: {baseline_root}", file=err)
-        return None, 1
+        return None, None, 1
 
     def index(root: Path, strict: bool):
         out: Dict[Tuple[str, str], Removal] = {}
@@ -670,9 +684,9 @@ def _load_removals(baseline_root: Path, intent_root: Path, env_map, cats, err):
     try:
         base = index(baseline_root, strict=True)
     except Exception:  # noqa: BLE001 - already reported above
-        return None, 2
+        return None, None, 2
     current = index(intent_root, strict=False)
-    return find_removals(base, current.keys()), 0
+    return find_removals(base, current.keys()), find_modifications(base, current), 0
 
 
 def _compile_intents(intent_root, env_map_path, cats, err):

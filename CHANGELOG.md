@@ -3,6 +3,48 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.33.0] — 2026-08-08
+
+### A modified intent must carry its own change ticket
+
+`metadata` describes a REQUEST — a one-time event. The file is a RULE — a
+long-lived object whose name on the firewall IS the request id. Editing the
+object never updated the event record, so nothing stopped a rule being changed
+under the ticket that authorised its previous version.
+
+**Measured on `REQ-2026-0727`:** widening the source from `10.20.3.0/24` to
+`10.20.0.0/16` — materially more permissive — produced an evidence bundle
+reading:
+
+```
+ticket         JIRA-20727        <- authorised the /24, six weeks earlier
+requested      2026-07-26        <- not this change
+justification  "App tier resolves names via the internal DNS resolver"
+intent_sha256  e6a4dd09…         <- the only field that moved
+```
+
+The bundle claims NIST **CM-3** (request → review → approve → implement) and
+named the wrong request. That is a false statement in a compliance artifact, not
+a missing field — so a PR that changes `spec` while reusing the ticket is now
+**rejected** (exit 2), not annotated.
+
+Two deliberate limits, so the rule fires on real changes only:
+
+- **Only a `spec` change requires a new ticket.** Rewording a justification or a
+  comment alters nothing on the firewall.
+- **The comparison is SEMANTIC, not textual** — it diffs the loaded spec, so
+  reformatting, key reordering and whitespace are not changes. A guard that
+  fires on nothing is one people route around.
+
+Mutation-verified both ways: disabling the check fails the rejection test;
+comparing raw documents instead of specs fails the semantic tests.
+
+Answers a question the model could not previously answer — *how many times has
+this rule been changed?* — once bundles are committed: each change carries its
+own ticket, so `git log` over the rule's bundle is its change history.
+
+- 664 tests (+5).
+
 ## [1.32.0] — 2026-08-06
 
 ### ADR-0008 — what removing an intent means, per kind
