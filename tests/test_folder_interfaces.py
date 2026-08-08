@@ -190,3 +190,24 @@ interfaces:
                                folders_path=tmp_path / "folders.yaml")
     assert rc == 2
     assert not (out / "prod-edge" / "interface_vars.auto.tfvars.json").exists()
+
+
+def test_folder_variables_are_DECLARED_config_for_drift():
+    """`$eth-dmz` is written by `fwgitops folder-interfaces` and managed by
+    Terraform — it is declared, just in the catalog rather than in an intent.
+
+    Drift's declared set is intent-derived, so without this it reported
+    `prod-edge/$eth-dmz` as "present in SCM, neither declared nor a known
+    baseline object" on every run, forever. One catalog method builds the shape
+    for both the writer and the checker, so they cannot disagree.
+    """
+    objs = _cat().folder_variable_objects("prod-edge")
+    assert set(objs) == {"$eth-dmz"}
+    o = objs["$eth-dmz"]
+    assert o["folder"] == "prod-edge" and o["device"] is None
+    assert o["default_value"] == "ethernet1/2"
+    assert o["layer3"] == {}, "null satisfies none of layer3/layer2/tap"
+
+
+def test_a_folder_that_materialises_nothing_declares_nothing():
+    assert _cat().folder_variable_objects("ngfw-shared") == {}

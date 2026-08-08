@@ -208,6 +208,20 @@ def _flatten(prefix: str, value: Any) -> Dict[str, Any]:
     return {prefix: value}
 
 
+def _without_nulls(value: Any) -> Any:
+    """Drop keys whose value is None, at any depth.
+
+    An omitted optional and an explicit null are the same statement to this API:
+    "not asserted". Normalising both sides keeps that contract consistent inside
+    nested structures, where `_flatten` cannot reach.
+    """
+    if isinstance(value, dict):
+        return {k: _without_nulls(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_without_nulls(v) for v in value]
+    return value
+
+
 def detect_object_drift(
     declared: Dict[Tuple[str, str], Dict[str, Any]],
     actual: Iterable[ActualObject],
@@ -256,7 +270,16 @@ def detect_object_drift(
         for fname, declared_value in sorted(flat_want.items()):
             if declared_value is None:
                 continue  # not asserted by the declaration
-            if flat_have.get(fname) != declared_value:
+            # THE SAME RULE, ONE LEVEL DOWN. `_flatten` does not descend into
+            # lists, so a value like a router's `vrf` is compared whole — and the
+            # compiled form carries explicit nulls inside it (`interface: None`,
+            # `admin_dist: None`) where SCM simply omits the key. Without this,
+            # an untouched router reports as `modified` on every run.
+            #
+            # "A None in the declaration means we did not ask for this" is
+            # already the contract for top-level fields; nested nulls are the
+            # same statement about a nested field.
+            if _without_nulls(flat_have.get(fname)) != _without_nulls(declared_value):
                 modified.append(FieldDiff(obj=obj, field_name=fname,
                                           declared=declared_value,
                                           actual=flat_have.get(fname)))
@@ -282,12 +305,29 @@ def declared_state(handler: Any, objs: Iterable[Any]) -> Dict[Tuple[str, str], D
     drift in the registry while nothing wired it: the registry made a claim the
     code did not keep.
     """
-    out: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    # GROUPED BY SCOPE, then ONE tfvars call per group. Two reasons, and the
+    # second was a live bug:
+    #
+    #   * SOME KINDS AGGREGATE. A RouteRequest is not an SCM object — routes
+    #     collapse into a logical router, so `tfvars([one_route])` returns a
+    #     router keyed by the ROUTER name, not by the request id. Indexing by
+    #     `name_of(obj)` raised KeyError: 'REQ-2026-0803'.
+    #   * Calling tfvars per object would also compare a router holding ONE
+    #     route against SCM's router holding all of them, which is drift that
+    #     is not there.
+    #
+    # Keying on what tfvars PRODUCES is also the more honest comparison: state
+    # drift compares SCM objects, and the SCM object is the router, not the
+    # request that contributed a route to it.
+    by_scope: Dict[str, List[Any]] = {}
     for obj in objs:
-        scope = handler.scope_of(obj).key
-        name = handler.name_of(obj)
-        payload = handler.tfvars([obj])
-        # tfvars is {"<key>": {name: fields}} — take the one object back out.
+        by_scope.setdefault(handler.scope_of(obj).key, []).append(obj)
+
+    out: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for scope, group in by_scope.items():
+        payload = handler.tfvars(group)
+        # tfvars is {"<variable>": {object_name: fields}}
         inner = next(iter(payload.values()))
-        out[(scope, name)] = inner[name]
+        for name, fields in inner.items():
+            out[(scope, name)] = fields
     return out

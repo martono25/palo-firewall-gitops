@@ -3,6 +3,56 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.35.0] — 2026-08-08
+
+### State drift had never actually worked for anything but rules
+
+Fixing the device-scope snapshot (v1.34.2) let the scheduled job get further,
+and it kept failing — each time on a different, real defect underneath. Four in
+one chain, each hidden by the one before it:
+
+**1. `_compile_intents` returned `AccessRequest` only.** Shared by evidence and
+drift; right for evidence (bundles are rules-only), wrong for drift — the
+declared set contained no interfaces, zones or routes, so every locally-defined
+Day-1 object in SCM was reported as *"present in SCM, neither declared nor a
+known baseline object"*. Callers that want one kind now filter for themselves;
+`run_enrich` already did.
+
+**2. `declared_state` assumed one object per intent.** A `RouteRequest` is not an
+SCM object — routes aggregate into a logical router — so `tfvars([one_route])`
+returns a router keyed by the ROUTER name, and indexing by the request id raised
+`KeyError: 'REQ-2026-0803'`. Now grouped by scope with one `tfvars` call per
+group, which also stops a router holding one route being compared against SCM's
+router holding all of them.
+
+**3. Drift compared the whole declared set against a PARTIAL snapshot.** The job
+checks one root at a time, so a device snapshot says nothing about `prod-edge` —
+and every other scope's objects were reported as *"declared in Git, absent from
+SCM"*. Only the scopes a snapshot actually covers are compared now; the queried
+scope is on every row, so the snapshot itself says what it covers.
+
+**4. Nested nulls read as modifications.** `_flatten` does not descend into
+lists, so a router's `vrf` is compared whole while the compiled form carries
+explicit nulls where SCM omits the key. An untouched router reported `modified`
+every run. *"A None in the declaration means we did not ask for this"* was
+already the contract for top-level fields; it now holds at depth.
+
+**Also: folder interface variables are declared config.** `$eth-dmz` is written
+by `fwgitops folder-interfaces` and managed by Terraform — declared in the
+catalog rather than in an intent — so drift reported it as unexpected forever.
+One catalog method now builds the shape for both the writer and the checker.
+
+Verified against the live tenant: all six checks clean across both roots.
+
+```
+prod-edge                device-007955000894453
+  InterfaceRequest: no drift    InterfaceRequest: no drift
+  RouteRequest:     no drift    RouteRequest:     no drift
+  ZoneRequest:      no drift    ZoneRequest:      no drift
+```
+
+- 681 tests (+6).
+
 ## [1.34.2] — 2026-08-08
 
 ### Fixed: the drift job could not read a DEVICE-scoped root

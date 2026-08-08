@@ -719,10 +719,18 @@ def _compile_intents(intent_root, env_map_path, cats, err):
         try:
             ar = load_intent(doc, env_map=env_map, **cats)
             ch = compile_any(ar, env_map)
-            if REGISTRY["AccessRequest"].has_evidence and isinstance(
-                ch, REGISTRY["AccessRequest"].compiled_type
-            ):
-                items.append((path, ar, ch))
+            # EVERY kind, not just AccessRequest. This used to keep rules only,
+            # which is right for evidence (bundles are rules-only) and WRONG for
+            # drift: the declared set then contained no interfaces, zones or
+            # routes, so every locally-defined Day-1 object in SCM was reported
+            # as "present in SCM, neither declared nor a known baseline object".
+            #
+            # It stayed hidden because the two cases that would have shown it
+            # were each blocked by something else: device-scope snapshots failed
+            # outright until v1.34.2, and at folder scope the zones and routers
+            # were inherited, which drift skips. Callers that want one kind
+            # filter for themselves — `run_enrich` already does.
+            items.append((path, ar, ch))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
         except ResolveError as e:
@@ -793,14 +801,32 @@ def run_drift(
             if kind is None:
                 return 1
             for i, x in enumerate(rows):
-                if not isinstance(x, dict) or "folder" not in x or "name" not in x:
-                    print(f"error: {path} [{i}] must have 'folder' and 'name'", file=err)
+                # WHERE THE OBJECT IS DEFINED, which is not always a folder. A
+                # device-scope OVERRIDE is defined at `device:<serial>` and the
+                # row carries `device` with no `folder` at all — so requiring
+                # `folder` rejected every device snapshot, and state drift was
+                # therefore never checked for a firewall's own overrides.
+                #
+                # An INHERITED object read at device scope carries both: the
+                # ancestor in `folder` and `device:<serial>` in `scope`. Keeping
+                # the defining location here is what lets `is_inherited`
+                # (scope != folder) stay correct at either scope.
+                defining = None
+                if isinstance(x, dict):
+                    if x.get("folder"):
+                        defining = str(x["folder"])
+                    elif x.get("device"):
+                        defining = f"device:{x['device']}"
+                if defining is None or not isinstance(x, dict) or "name" not in x:
+                    print(f"error: {path} [{i}] must have 'name' and one of "
+                          f"'folder' / 'device' — a device-scope override is defined "
+                          f"at device:<serial>, not in a folder", file=err)
                     return 1
                 fields = {k: v for k, v in x.items() if k not in ("id", "tfid", "scope")}
                 actual_by_kind.setdefault(kind, []).append(ActualObject(
-                    kind=kind, folder=str(x["folder"]), name=str(x["name"]),
+                    kind=kind, folder=defining, name=str(x["name"]),
                     fields=fields,
-                    # SCM returns the DEFINING folder; `scope` records which was
+                    # SCM returns the DEFINING location; `scope` records which was
                     # queried. They differ for an inherited object.
                     scope=str(x["scope"]) if x.get("scope") else None,
                 ))
@@ -812,11 +838,36 @@ def run_drift(
             # kinds an undeclared local object is unaccounted for by definition.
             baseline = (env_map.baseline_zones_by_folder()
                         if kind == "ZoneRequest" else None)
-            report = detect_object_drift(
-                declared_state(handler, of_kind(compiled_all, kind)),
-                actual,
-                baseline=baseline,
-            )
+            # ONLY THE SCOPES THIS SNAPSHOT COVERS. The caller checks one root
+            # at a time — the scheduled job loops `terraform/*/` — so a device
+            # snapshot contains nothing about `prod-edge`. Comparing the WHOLE
+            # declared set against it reported every other scope's objects as
+            # "declared in Git, absent from SCM": drift that is not there, on a
+            # firewall that is perfectly in step.
+            #
+            # The queried scope is on every row (`scope`), so the snapshot itself
+            # says what it covers. An object in a scope nobody snapshotted is not
+            # evidence of anything.
+            covered = {a.scope_folder for a in actual}
+            declared_all = declared_state(handler, of_kind(compiled_all, kind))
+
+            # FOLDER INTERFACE VARIABLES ARE DECLARED TOO — in
+            # catalog/interfaces.yaml rather than in an intent. `fwgitops
+            # folder-interfaces` writes them and Terraform manages them, so
+            # without this the check reported `prod-edge/$eth-dmz` as "present in
+            # SCM, neither declared nor a known baseline object" on every run.
+            # Built from the same catalog method that emits them, so the two
+            # cannot disagree about their shape.
+            ifcat = cats.get("interface_catalog")
+            if kind == "InterfaceRequest" and ifcat is not None:
+                for scope in covered:
+                    if scope.startswith("device:"):
+                        continue          # a `$`-variable is a FOLDER object
+                    for name, fields in ifcat.folder_variable_objects(scope).items():
+                        declared_all.setdefault((scope, name), fields)
+
+            declared = {k: v for k, v in declared_all.items() if k[0] in covered}
+            report = detect_object_drift(declared, actual, baseline=baseline)
             print(f"{kind}: {report.summary()}", file=out)
             drifted = drifted or not report.is_clean
 
@@ -930,27 +981,8 @@ def run_folder_interfaces(
                   f"name here would collide with a device-scope interface of the same "
                   f"name and one would be silently dropped.", file=err)
             return 2
-        payload = {"folder_interfaces": {
-            name: {
-                "name": name,
-                "folder": folder,
-                "device": None,
-                "default_value": default_value,
-                "comment": "folder interface variable — managed by fwgitops",
-                # EMPTY, NOT NULL. The provider requires exactly one of
-                # layer3/layer2/tap/aggregate_group; null satisfies none and the
-                # plan fails with "No attribute specified when one (and only
-                # one) ... is required". `{}` declares the interface layer3 with
-                # nothing configured, which is what a folder VARIABLE should be.
-                #
-                # Deliberately NO addressing. An address is a property of ONE
-                # firewall's wiring (it must match that firewall's ENI); putting
-                # one here would hand every firewall inheriting this folder the
-                # same IP. Addressing stays a device-scope InterfaceRequest.
-                "layer3": {},
-            }
-            for name, default_value in sorted(variables.items())
-        }}
+        # Built by the catalog so drift recognises exactly what is written here.
+        payload = {"folder_interfaces": cat.folder_variable_objects(folder)}
         target = out_root / folder / FOLDER_VARS_FILENAME
         problems = check_object_attributes(
             target.parent, "folder_interfaces", payload["folder_interfaces"])

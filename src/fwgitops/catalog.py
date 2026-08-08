@@ -533,6 +533,29 @@ class InterfaceCatalog:
                 out[self.folder_names[role]] = by_folder[folder]
         return out
 
+    def folder_variable_objects(self, folder: str) -> Dict[str, Dict[str, Any]]:
+        """The `$`-variables this folder materialises, in provider shape.
+
+        ONE definition, used by `fwgitops folder-interfaces` (which writes them)
+        and by drift (which must recognise them). They are declared config — just
+        declared in this catalog rather than in an intent — so without this the
+        drift check reported `prod-edge/$eth-dmz` as "present in SCM, neither
+        declared nor a known baseline object" on every run, forever.
+        """
+        return {
+            name: {
+                "name": name,
+                "folder": folder,
+                "device": None,
+                "default_value": default_value,
+                "comment": "folder interface variable — managed by fwgitops",
+                # `{}` not None: the provider requires exactly one of
+                # layer3/layer2/tap, and null satisfies none.
+                "layer3": {},
+            }
+            for name, default_value in sorted(self.folder_variables(folder).items())
+        }
+
     def create_in_conflicts(self, devices_of_folder) -> List[str]:
         """Where a folder's own firewalls contradict the port it declares.
 
