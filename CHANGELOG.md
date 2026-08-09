@@ -3,6 +3,57 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.36.1] — 2026-08-09
+
+### Every apply rewrote every evidence record, and claimed the wrong run made it
+
+`fwgitops evidence` regenerates all bundles on every apply, and `generated_at`
+always moves — so every file differed from its committed version and the
+workflow committed all of them, each stamped with that run's `run_url` and
+`merge_commit`. A record for a request nobody touched claimed to have been
+applied by a run that applied something else.
+
+That is the CM-3 misattribution already fixed for stale tickets in v1.33.0,
+arriving through the WRITER instead of the intent: same false statement in a
+compliance artifact, different route in. v1.36.0 doubled its blast radius by
+taking the bundle count from five to ten.
+
+It also silently broke a property this project states out loud, in
+`test_evidence_durability`: *one file per request, so each commit to it is one
+change, carrying the ticket that authorised it.* With every apply rewriting
+every file, `git log evidence/<scope>/<REQ>.json` was a log of APPLIES — not of
+changes to that request, which is the audit question the layout exists to
+answer. The path was only ever half of that property; the writer is the other
+half, and nothing had asserted it.
+
+**An unchanged record is now left exactly as committed**, byte for byte.
+Identity is `schema · kind · status · intent_sha256 · object_sha256`. Two
+deliberate exclusions:
+
+* **The risk verdict.** A later classifier re-tiering config nobody touched is
+  real, but it is policy drift and belongs in its own report — backdating it
+  into a change record would claim this apply evaluated a ruleset that did not
+  exist yet.
+* **`tfvars_sha256`.** It hashes the whole FILE, and requests share files: every
+  rule in a folder writes `rules.auto.tfvars.json`, and every route for a VRF
+  aggregates into one router. Keying identity on it would rewrite every rule's
+  record whenever any neighbour changed — the same churn through the back door.
+
+So `object_sha256` is new: this request's own compiled contribution, hashed. It
+is what "did this change?" actually means here, and it is worth having on its
+own as tamper-evidence independent of what shares the file.
+
+`status` IS in the identity, so `applied` → `failed` for identical config still
+rewrites — failures are evidence too.
+
+`fwgitops evidence` now reports written vs unchanged rather than a single count.
+A run that says nothing about files it deliberately did not touch looks like a
+run that lost them.
+
+Mutation-tested three ways: unconditional write, identity keyed on the shared
+tfvars file, and `status` dropped from identity — each makes a specific test
+fail. 694 tests.
+
 ## [1.36.0] — 2026-08-09
 
 ### Evidence bundles for every kind — half the changes had no audit record

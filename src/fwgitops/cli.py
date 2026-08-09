@@ -1501,13 +1501,25 @@ def run_evidence(
     filter is gone: every registered kind is bundled, and a kind that cannot be
     bundled would now fail loudly rather than be skipped silently.
 
+    A bundle whose change is unchanged is LEFT AS COMMITTED — see
+    `evidence.write_bundle_if_changed`. Rewriting it would stamp a request nobody
+    touched with the run that applied something else, and would turn
+    `git log evidence/<scope>/<REQ>.json` into a log of applies rather than of
+    changes to that request.
+
     Exit codes:  0 ok · 1 usage/IO/build error · 2 invalid intent.
     """
     import os
     from datetime import datetime, timezone
 
     from fwgitops.classify import PolicyContext
-    from fwgitops.evidence import CIContext, EvidenceError, build_bundle, sha256_file, write_bundle
+    from fwgitops.evidence import (
+        CIContext,
+        EvidenceError,
+        build_bundle,
+        sha256_file,
+        write_bundle_if_changed,
+    )
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
@@ -1526,6 +1538,7 @@ def run_evidence(
     ci = CIContext.from_env(os.environ)
     now = datetime.now(timezone.utc)
     written: List[Path] = []
+    unchanged: List[Path] = []
     for path, ar, ch in items:
         handler = handler_for_request(ar)
         # The tfvars file this kind writes, in this object's OWN scope — a
@@ -1543,11 +1556,19 @@ def run_evidence(
         except EvidenceError as e:
             print(f"error: could not build evidence for {handler.name_of(ch)}: {e}", file=err)
             return 1
-        written.append(write_bundle(bundle, out_root))
+        path, is_new = write_bundle_if_changed(bundle, out_root)
+        (written if is_new else unchanged).append(path)
 
-    print(f"wrote {len(written)} evidence bundle(s) to {out_root}:", file=out)
+    # UNCHANGED is reported, not silent. The point of leaving a record alone is
+    # that its git history stays a history of CHANGES to that request; a run that
+    # says nothing about the files it deliberately did not touch looks like a run
+    # that lost them.
+    print(f"{len(written)} bundle(s) written, {len(unchanged)} unchanged, "
+          f"in {out_root}:", file=out)
     for p in written:
-        print(f"  - {p}", file=out)
+        print(f"  + {p}", file=out)
+    for p in unchanged:
+        print(f"  = {p}  (unchanged — record kept from the apply that made it)", file=out)
     return 0
 
 
