@@ -110,6 +110,44 @@ factor is VM-Series on AWS.
 | `.github/ISSUE_TEMPLATE/` | Broad-requester intake: Issue Forms → Action → intent PR |
 | `.github/workflows/` | CI: provision \| compile → classify → plan → gate → apply |
 
+## Incident response: `fwgitops where`
+
+A firewall log gives an IP. The question is *which request permitted this, who
+asked for it, and under what ticket* — and `grep` answers it **wrong**, not
+slowly: the log says `10.20.9.10`, the intent says `10.20.9.0/24`, so grep
+returns nothing. Nothing is the worst available answer, because it is
+indistinguishable from "no rule permits this".
+
+```
+$ fwgitops where 10.20.1.55
+
+RULES — what permits or denies it
+  AccessRequest  REQ-2026-0725  (prod-edge)
+      matched : address_objects[0].value = 10.20.1.0/24
+      why     : 10.20.1.0/24 contains 10.20.1.55
+      ticket  : JIRA-20725  (martono@corp, 2026-07-25)
+      request : Web tier ships logs/metrics to the central observability collector
+      intent  : intent/prod/observability/REQ-2026-0725.yaml
+      evidence: evidence/prod-edge/REQ-2026-0725.json
+
+ROUTES — what carries it
+  RouteRequest  REQ-2026-0803  (prod-edge)   <- CARRIES IT
+```
+
+Also accepts a CIDR, a zone/app/interface name, a request id, a ticket, or a
+requester. `--json` for piping into an incident timeline.
+
+Three things it is careful about:
+
+- **What PERMITS and what CARRIES are separate questions.** A default route
+  matches every address, so a flat match count would report "1 match" for
+  traffic nothing permits — the opposite of the truth. When no rule mentions the
+  address, that is stated, not implied by absence.
+- **It searches the COMPILED state.** An intent may name an app whose addresses
+  live in the catalog, so the CIDR appears nowhere in the intent file.
+- **Nothing found is an ANSWER**, not an error (exit 4): it means the config came
+  from somewhere else, and it points at `fwgitops drift`.
+
 ## Open questions
 
 See the [Open Questions](docs/DESIGN.md#open-questions) section of the design doc. The
