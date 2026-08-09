@@ -224,3 +224,84 @@ def test_ci_context_from_github_env():
 def test_ci_context_tolerates_missing_env():
     ci = CIContext.from_env({})
     assert ci.run_url is None and ci.merge_commit is None
+
+
+# ── An unchanged change must not rewrite its record ────────────────────────
+def _write(tmp_path, **kw):
+    from fwgitops.evidence import write_bundle_if_changed
+    return write_bundle_if_changed(bundle(**kw), tmp_path)
+
+
+def test_an_unchanged_bundle_is_left_exactly_as_committed(tmp_path):
+    """The misattribution this closes: every apply regenerated every bundle, and
+    `generated_at` always moves, so the workflow committed all of them — each
+    stamped with that run's `run_url` and `merge_commit`. A record for a request
+    nobody touched claimed to have been applied by a run that applied something
+    else."""
+    from fwgitops.evidence import CIContext
+
+    p, first = _write(tmp_path)
+    before = p.read_bytes()
+
+    # A LATER run: different time, different CI run, same change.
+    _, second = _write(
+        tmp_path,
+        generated_at=datetime(2026, 9, 1, 0, 0, 0, tzinfo=timezone.utc),
+        ci=CIContext(pr_url="https://gh/pr/99", merge_commit="feedface",
+                     run_url="https://gh/runs/1000", gate="firewall-apply"))
+    assert first is True and second is False
+    assert p.read_bytes() == before, "an untouched request must keep its own run"
+
+
+def test_a_changed_spec_does_rewrite_the_record(tmp_path):
+    """The other half — preserving must not become ignoring."""
+    p, _ = _write(tmp_path)
+    before = p.read_bytes()
+    other = valid_doc()
+    other["spec"]["source"] = [{"cidr": "10.0.0.0/8"}]     # widened
+    ar2 = load_intent(other)
+    _, written = __import__("fwgitops.evidence", fromlist=["x"]).write_bundle_if_changed(
+        build_bundle(request=ar2, compiled=compile_request(ar2, env_map()),
+                     status="applied", generated_at=WHEN), tmp_path)
+    assert written is True
+    assert p.read_bytes() != before
+
+
+def test_a_new_status_rewrites_even_when_the_change_is_identical(tmp_path):
+    """`applied` -> `failed` for the same config is a new OUTCOME, and failures
+    are evidence too. Identity includes status precisely so this is not
+    swallowed."""
+    _write(tmp_path)
+    p, written = _write(tmp_path, status="failed", failure_reason="push refused")
+    assert written is True
+    assert json.loads(p.read_text())["status"] == "failed"
+
+
+def test_a_reclassification_alone_does_not_rewrite_the_record(tmp_path):
+    """A later classifier re-tiering config nobody touched is policy drift, not a
+    change. Backdating it into the record would claim this apply evaluated a
+    ruleset that did not exist yet."""
+    p, _ = _write(tmp_path)
+    before = p.read_bytes()
+    _, written = _write(tmp_path, risk=RiskVerdict(tier="CRITICAL", classifier_version="9.9"))
+    assert written is False and p.read_bytes() == before
+
+
+def test_the_object_hash_is_per_request_not_per_file(tmp_path):
+    """`tfvars_sha256` is the whole FILE, and every rule in a folder shares
+    `rules.auto.tfvars.json`. Keying identity on it would rewrite every rule's
+    record whenever any neighbour changed — reintroducing the churn through the
+    back door."""
+    p, _ = _write(tmp_path)
+    before = p.read_bytes()
+    # A neighbouring request changed the shared file; THIS request did not.
+    _, written = _write(tmp_path, tfvars_sha256=sha256_bytes(b"someone else changed it"))
+    assert written is False and p.read_bytes() == before
+
+
+def test_an_unreadable_existing_bundle_is_rewritten_not_preserved(tmp_path):
+    p, _ = _write(tmp_path)
+    p.write_text("{ truncated")
+    _, written = _write(tmp_path)
+    assert written is True
+    assert json.loads(p.read_text())["req_id"] == "REQ-2026-0417"

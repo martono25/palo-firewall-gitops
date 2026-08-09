@@ -274,6 +274,40 @@ def test_evidence_covers_EVERY_intent_in_the_shipped_tree(tmp_path):
         assert b["risk"]["tier"] != "not_classified", f"{p.name}: unclassified"
 
 
+def test_a_second_apply_rewrites_nothing_when_no_intent_changed(tmp_path, monkeypatch, capsys):
+    """END TO END: the workflow commits `evidence/`, so a run that rewrites every
+    bundle commits every bundle. Before this fix that happened on EVERY apply,
+    stamping ten records with a run that touched one of them — and turning
+    `git log evidence/<scope>/<REQ>.json` from a change history into an apply
+    history.
+
+    Asserts on BYTES, because "no diff" is exactly what the commit step checks.
+    """
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    out = tmp_path / "ev"
+    args = (repo / "intent", repo / "catalog" / "environments.yaml", out)
+    kw = dict(tfvars_root=repo / "terraform",
+              service_catalog_path=repo / "catalog" / "services.yaml",
+              app_catalog_path=repo / "catalog" / "apps.yaml")
+
+    monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    monkeypatch.setenv("GITHUB_SHA", "aaaaaaa")
+    assert run_evidence(*args, **kw) == 0
+    before = {p: p.read_bytes() for p in sorted(out.rglob("*.json"))}
+    assert before
+
+    # A LATER apply — different run, different merge commit, same intents.
+    monkeypatch.setenv("GITHUB_RUN_ID", "2")
+    monkeypatch.setenv("GITHUB_SHA", "bbbbbbb")
+    assert run_evidence(*args, **kw) == 0
+    after = {p: p.read_bytes() for p in sorted(out.rglob("*.json"))}
+    assert after == before, "a second apply must not rewrite an unchanged record"
+    o = capsys.readouterr().out
+    assert "0 bundle(s) written" in o and "unchanged" in o
+
+
 def test_evidence_rejects_invalid_intent_exits_2(tmp_path, capsys):
     bad = VALID_INTENT.replace("action: allow", "action: nope")
     intent_root, env_map, _ = _setup(tmp_path, intent_body=bad)

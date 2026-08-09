@@ -183,6 +183,7 @@ def build_bundle(
         controls.append(DUAL_CONTROL)
 
     md = request.metadata
+    obj = _jsonable(handler.evidence_object(compiled))
     bundle: Dict[str, Any] = {
         "schema": EVIDENCE_SCHEMA,
         "kind": handler.kind,
@@ -203,8 +204,16 @@ def build_bundle(
         "compiled": {
             "compiler_version": __version__,
             "scope": {"kind": scope.kind, "value": scope.value},
-            "object": _jsonable(handler.evidence_object(compiled)),
+            "object": obj,
+            # THIS REQUEST'S OWN contribution, hashed. `tfvars_sha256` below is
+            # the whole FILE, which several requests share — every rule in a
+            # folder writes `rules.auto.tfvars.json`, and every route for a VRF
+            # aggregates into one router — so the file hash moves when a
+            # neighbour changes and says nothing about this request. The object
+            # hash is what "did this change?" actually means here.
+            "object_sha256": sha256_bytes(_canonical(obj)),
             "tfvars_file": handler.tfvars_filename,
+            #: The whole file, SHARED with other requests in the same scope.
             "tfvars_sha256": tfvars_sha256,
         },
         "risk": {
@@ -272,10 +281,82 @@ def bundle_path(root: Path, bundle: Dict[str, Any]) -> Path:
 
 
 def write_bundle(bundle: Dict[str, Any], root: Path) -> Path:
+    """Write unconditionally. Prefer `write_bundle_if_changed` on the apply path."""
     target = bundle_path(root, bundle)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(dumps(bundle), encoding="utf-8")
     return target
+
+
+#: What makes two bundles records of the SAME change. Everything outside this
+#: set — `generated_at`, the CI run, the risk verdict — describes the RUN or the
+#: RULESET, not the change, and must not by itself rewrite an existing record.
+_IDENTITY = (
+    ("schema",),
+    ("kind",),
+    ("status",),
+    ("request", "intent_sha256"),
+    ("compiled", "object_sha256"),
+)
+
+
+def _at(bundle: Dict[str, Any], path: Tuple[str, ...]) -> Any:
+    cur: Any = bundle
+    for key in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
+def describes_same_change(new: Dict[str, Any], old: Dict[str, Any]) -> bool:
+    """Do these two bundles record the same change, applied for the same reason?
+
+    Deliberately EXCLUDES the risk verdict. The bundle records the decision that
+    gated THIS apply; a later classifier re-tiering config nobody touched is a
+    real question, but it is policy drift and belongs in its own report, not in a
+    change record backdated to an apply that never re-evaluated it.
+    """
+    return all(_at(new, p) == _at(old, p) for p in _IDENTITY)
+
+
+def write_bundle_if_changed(bundle: Dict[str, Any], root: Path) -> Tuple[Path, bool]:
+    """Write only when this is a NEW change. Returns (path, written).
+
+    WHY THIS EXISTS. `fwgitops evidence` regenerates every bundle on every apply,
+    and `generated_at` always moves, so every bundle differed from its committed
+    version and the workflow committed all of them — each stamped with that run's
+    `run_url` and `merge_commit`. A record for a request nobody touched claimed
+    to have been applied by a run that applied something else. That is the CM-3
+    misattribution already fixed for stale tickets, arriving through the writer
+    instead of the intent.
+
+    It also broke a property this project states out loud, in
+    `test_evidence_durability`: *one file per request, so each commit to it is
+    one change, carrying the ticket that authorised it*. With every apply
+    rewriting every file, `git log evidence/<scope>/<REQ>.json` was a log of
+    APPLIES, not of changes to that request — the audit question it exists to
+    answer.
+
+    So an unchanged bundle is left EXACTLY as committed, byte for byte. The
+    record keeps the run that actually made the change.
+    """
+    target = bundle_path(root, bundle)
+    if target.is_file():
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            existing = None      # unreadable: rewrite rather than preserve garbage
+        if isinstance(existing, dict) and describes_same_change(bundle, existing):
+            return target, False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(dumps(bundle), encoding="utf-8")
+    return target, True
+
+
+def _canonical(value: Any) -> bytes:
+    """Byte-stable serialisation for hashing. Same ordering rule as `dumps`."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def _iso(dt: datetime) -> str:
