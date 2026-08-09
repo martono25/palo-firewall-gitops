@@ -3,6 +3,28 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.41.1] — 2026-08-09
+
+### Correction: `scaffold-root --check` does not ignore defaults
+
+v1.41.0 said the check "compares attribute NAMES and not DEFAULTS", called that a
+hole in ADR-0004's guard, and recorded it in `TODOS.md`. **That is wrong.**
+
+`--check` compares the root's `variables.tf` against a freshly rendered one in
+FULL — `current.read_text() != render_variables(module_dir, …)` — and
+`render_variables` copies the module's variable blocks verbatim, types and
+`optional(...)` defaults included. It strips only the top-level `default` and
+substitutes the map/folder defaults a root needs.
+
+So the root was never drifting. The **module** carried
+`optional(string, "bottom")` and the root mirrored it faithfully. A mirror cannot
+detect that its subject is wrong, and the guard never claimed it could.
+
+The `relative_position` test added in v1.41.0 is still right and still useful —
+it asserts the VALUE across the module and every root, which is a different
+property from agreement — but its stated reason was wrong. Docs, TODOS and the
+test docstring corrected; no behaviour change.
+
 ## [1.41.0] — 2026-08-09
 
 ### Rule ordering is wired — because "unspecified" is finally a value
@@ -38,12 +60,16 @@ With the compiler already emitting null, a plan against the live folder **still*
 showed `+ relative_position = "bottom"` on all five rules.
 
 `optional(string, "bottom")` substitutes its default when the value is **null**,
-so the null was being turned back into `"bottom"` at the variable boundary — and
-it was in the ROOT's `variables.tf` as well as the module's. `scaffold-root
---check` passed the whole time, because it compares attribute NAMES and not
-DEFAULTS: a root can mirror the module structurally while re-defaulting a null.
-That is a hole in the guard ADR-0004 leans on. Pinned by a test for
-`relative_position`; the general case is left open and recorded.
+so the null was being turned back into `"bottom"` at the variable boundary — in
+the ROOT's `variables.tf` as well as the module's.
+
+`scaffold-root --check` passed the whole time **and was right to**: it compares
+the root against a freshly rendered one in full, and `render_variables` copies
+the module's blocks verbatim, defaults included. The root was not drifting — the
+MODULE carried the bad default and the root mirrored it faithfully. A mirror
+cannot detect that its subject is wrong, and no guard here claimed it could.
+(v1.41.0 shipped saying the check ignored defaults. It does not; corrected in
+v1.41.1.)
 
 Both roots now plan clean against live SCM — `No changes` — which is the property
 that makes this safe: nothing moves.

@@ -176,10 +176,13 @@ def test_relative_position_has_NO_default_in_the_module_or_any_root():
 
     CAUGHT BY A PLAN, not by a test: with the compiler already emitting null, a
     plan against the live folder showed `+ relative_position = "bottom"` on all
-    five rules — the exact silent policy rewrite the spike warned about. It was
-    in the ROOT's variables.tf as well as the module's, and
-    `scaffold-root --check` passed throughout, because it compares attribute
-    NAMES and not DEFAULTS."""
+    five rules — the exact silent policy rewrite the spike warned about.
+
+    `scaffold-root --check` passed throughout and was RIGHT to. It compares the
+    root against a freshly rendered one in full, defaults included, and the root
+    mirrored the module faithfully — the MODULE held the bad default. A mirror
+    cannot detect that its subject is wrong, which is why this test asserts the
+    VALUE rather than the agreement."""
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / "terraform"
     files = [root / "modules" / "security_folder" / "variables.tf"]
