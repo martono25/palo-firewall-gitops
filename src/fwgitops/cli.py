@@ -48,7 +48,12 @@ from fwgitops.kinds import (
     of_kind,
 )
 from fwgitops.io import discover_intents, read_yaml
-from fwgitops.removal import classify_removal, stale_ticket_problems
+from fwgitops.removal import (
+    classify_removal,
+    parse_removes_trailers,
+    removal_ticket_problems,
+    stale_ticket_problems,
+)
 from fwgitops.resolve import EnvMap, ResolveError
 from fwgitops.tfcontract import check_contract, check_object_attributes, is_terraform_root
 
@@ -474,6 +479,7 @@ def run_classify(
     gate: Optional[str] = None,
     state_snapshot_paths: Optional[List[Path]] = None,
     baseline_root: Optional[Path] = None,
+    change_message_path: Optional[Path] = None,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
@@ -624,6 +630,21 @@ def run_classify(
             for p in stale:
                 print(f"  - {p}", file=err)
             return 2
+        # A REMOVAL must carry its own change ticket too, for the same reason a
+        # modification must — and it cannot state it in the intent, because the
+        # intent is what is being deleted. The `Removes:` trailer is where it
+        # goes. Checked HERE, on the PR, while the author is still present to fix
+        # it; the apply path checks again because that is what actually writes
+        # the record.
+        unauthorised = removal_ticket_problems(
+            removals, _removes_trailers(change_message_path, err) or {})
+        if unauthorised:
+            print(f"REJECTED — {len(unauthorised)} removal(s) without an authorising "
+                  f"ticket:", file=err)
+            for p in unauthorised:
+                print(f"  - {p}", file=err)
+            return 2
+
         removed_count = len(removals)
         for r in removals:
             v = classify_removal(r)
@@ -657,6 +678,7 @@ def _load_changeset(baseline_root: Path, intent_root: Path, env_map, cats, err):
     "no removals" — silently reporting zero removals because the comparison
     broke is precisely the blindness this feature removes.
     """
+    from fwgitops.evidence import sha256_file
     from fwgitops.removal import Removal, find_modifications, find_removals
 
     if not baseline_root.exists():
@@ -679,7 +701,13 @@ def _load_changeset(baseline_root: Path, intent_root: Path, env_map, cats, err):
             kind = doc.get("kind")
             out[(kind, req.metadata.id)] = Removal(
                 kind=kind, req_id=req.metadata.id, request=req,
-                path=_display_path(path))
+                # RELATIVE TO ITS OWN ROOT, not the CWD. The baseline tree is a
+                # scratch directory (`git archive` into /tmp), so `_display_path`
+                # would put `/tmp/base-intent/prod/…` into the evidence record —
+                # a path that has never existed in the repository and cannot be
+                # looked up by anyone reading the bundle later.
+                path=str(Path(path).relative_to(root)),
+                sha256=sha256_file(path))
         return out
 
     try:
@@ -1486,6 +1514,8 @@ def run_evidence(
     tfvars_root: Path = Path("terraform"),
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
+    baseline_root: Optional[Path] = None,
+    change_message_path: Optional[Path] = None,
     out=None,
     err=None,
 ) -> int:
@@ -1514,8 +1544,10 @@ def run_evidence(
 
     from fwgitops.classify import PolicyContext
     from fwgitops.evidence import (
+        STATUS_REMOVED,
         CIContext,
         EvidenceError,
+        RemovalContext,
         build_bundle,
         sha256_file,
         write_bundle_if_changed,
@@ -1529,7 +1561,12 @@ def run_evidence(
     items, code = _compile_intents(intent_root, env_map_path, cats, err)
     if items is None:
         return code
-    if not items:
+    # NO EARLY RETURN ON AN EMPTY TREE. Deleting every intent leaves `items`
+    # empty, and returning here would produce no record for the LARGEST POSSIBLE
+    # removal while exiting 0 — the exact early-return that once let an empty
+    # tree bypass the risk gate (`test_deleting_EVERY_intent_is_still_classified`).
+    # The same shape, one stage further along.
+    if not items and baseline_root is None:
         print(f"no intent files found under {intent_root}", file=out)
         return 0
 
@@ -1539,6 +1576,7 @@ def run_evidence(
     now = datetime.now(timezone.utc)
     written: List[Path] = []
     unchanged: List[Path] = []
+    removed: List[Path] = []
     for path, ar, ch in items:
         handler = handler_for_request(ar)
         # The tfvars file this kind writes, in this object's OWN scope — a
@@ -1559,17 +1597,94 @@ def run_evidence(
         path, is_new = write_bundle_if_changed(bundle, out_root)
         (written if is_new else unchanged).append(path)
 
+    # ── REMOVALS ──────────────────────────────────────────────────────────
+    # A deleted intent is absent from `items`, so without a baseline there is
+    # nothing here to build a record from — and until v1.37.0 that meant a
+    # removal produced no audit record at all, while `classify` had been tiering
+    # it since v1.30.0. Assessed but unrecorded is a strange place to stop.
+    #
+    # The record is a TOMBSTONE WRITTEN IN PLACE, over the object's existing
+    # bundle (ADR-0008 amendment, Q1a): one file per request is what makes
+    # `git log evidence/<scope>/<REQ>.json` that request's whole life, create to
+    # removal. The removed object is embedded from the baseline, so the record
+    # still says WHAT went — reading git history is not required.
+    if baseline_root is not None:
+        env_map = EnvMap.from_dict(read_yaml(env_map_path))
+        removals, _mods, code = _load_changeset(baseline_root, intent_root, env_map,
+                                                cats, err)
+        if removals is None:
+            return code
+        trailers = _removes_trailers(change_message_path, err)
+        if trailers is None:
+            return 1
+        problems = removal_ticket_problems(removals, trailers)
+        if problems:
+            print(f"REJECTED — {len(problems)} removal(s) without an authorising "
+                  f"ticket:", file=err)
+            for p in problems:
+                print(f"  - {p}", file=err)
+            return 2
+        for r in removals:
+            handler = handler_for_request(r.request)
+            try:
+                gone = handler.compile(r.request, env_map)
+            except CompileError as e:
+                print(f"error: could not compile removed {r.req_id} from the baseline "
+                      f"to record what was destroyed: {e}", file=err)
+                return 1
+            try:
+                bundle = build_bundle(
+                    request=r.request, compiled=gone, handler=handler,
+                    status=STATUS_REMOVED, generated_at=now,
+                    intent_path=str(Path(_display_path(intent_root)) / r.path),
+                    intent_sha256=r.sha256,
+                    risk=classify_removal(r), ci=ci,
+                    removal=RemovalContext(ticket=trailers[r.req_id],
+                                           commit=ci.merge_commit),
+                )
+            except EvidenceError as e:
+                print(f"error: could not build removal evidence for {r.req_id}: {e}",
+                      file=err)
+                return 1
+            path, is_new = write_bundle_if_changed(bundle, out_root)
+            (removed if is_new else unchanged).append(path)
+
     # UNCHANGED is reported, not silent. The point of leaving a record alone is
     # that its git history stays a history of CHANGES to that request; a run that
     # says nothing about the files it deliberately did not touch looks like a run
     # that lost them.
-    print(f"{len(written)} bundle(s) written, {len(unchanged)} unchanged, "
-          f"in {out_root}:", file=out)
+    print(f"{len(written)} bundle(s) written, {len(removed)} tombstoned, "
+          f"{len(unchanged)} unchanged, in {out_root}:", file=out)
     for p in written:
         print(f"  + {p}", file=out)
+    for p in removed:
+        print(f"  x {p}  (removed — tombstone over the object's own record)", file=out)
     for p in unchanged:
         print(f"  = {p}  (unchanged — record kept from the apply that made it)", file=out)
+    if baseline_root is None:
+        # SAY SO. A run with no baseline cannot see removals, and reporting only
+        # what it did see is how "no removals" and "did not look" become
+        # indistinguishable — the failure mode this whole area keeps producing.
+        print("note: no --baseline, so REMOVALS were not examined and produced no "
+              "record. The apply workflow passes one; a local run must too.", file=out)
     return 0
+
+
+def _removes_trailers(change_message_path: Optional[Path], err):
+    """`req_id -> ticket` from the change message, or None on an IO error.
+
+    An ABSENT path yields an empty mapping, not an error — the caller then
+    rejects any removal for want of a trailer, which is the fail-closed outcome.
+    An UNREADABLE path is an error: that is a broken pipeline, not an unauthorised
+    change, and the two deserve different messages.
+    """
+    if change_message_path is None:
+        return {}
+    try:
+        return parse_removes_trailers(change_message_path.read_text(encoding="utf-8"))
+    except OSError as e:
+        print(f"error: could not read change message {change_message_path}: {e}", file=err)
+        return None
 
 
 def run_push(
@@ -1883,6 +1998,14 @@ def build_parser() -> argparse.ArgumentParser:
                          "a deleted intent is absent from the current tree, so without this "
                          "nothing classifies it and the gate never sees it. CI materialises "
                          "it with `git archive`.")
+    cl.add_argument("--change-message", dest="change_message", default=None, type=Path,
+                    help="file holding the text that will land on main (with squash "
+                         "merges, the PR title + body). Read for `Removes: <REQ-id> "
+                         "(TICKET)` trailers. A removal needs its OWN change ticket: the "
+                         "intent's ticket authorised CREATING the object, and the file "
+                         "it lived in is being deleted, so there is nowhere else to put "
+                         "it. Rejected here rather than at apply, when the PR author is "
+                         "still present.")
     cl.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path,
                     help="service name catalog (Phase 2)")
     cl.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path,
@@ -1892,6 +2015,17 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("intent_root", nargs="?", default="intent", type=Path,
                    help="directory of intent YAML (default: intent)")
     e.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path)
+    e.add_argument("--baseline", dest="baseline_root", default=None, type=Path,
+                   help="the BASE revision's intent tree (CI materialises it with "
+                        "`git archive`). Without it a REMOVAL produces no record at "
+                        "all: a deleted intent is absent from the current tree, so "
+                        "there is nothing left to build one from.")
+    e.add_argument("--change-message", dest="change_message", default=None, type=Path,
+                   help="file holding the text that lands on main (with squash merges, "
+                        "the PR title + body). Read for `Removes: <REQ-id> (TICKET)` "
+                        "trailers — a removal needs its OWN change ticket, because the "
+                        "intent's own ticket authorised CREATING the object and the "
+                        "file it lived in is gone.")
     e.add_argument("--out", default=Path("evidence"), type=Path,
                    help="output root; writes <out>/<folder>/<req_id>.json")
     e.add_argument("--status", default="applied", choices=("applied", "rejected", "failed"),
@@ -2034,7 +2168,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_classify(
             args.intent_root, args.env_map, gate=args.gate,
             state_snapshot_paths=args.state_snapshots,
-            baseline_root=args.baseline,
+            baseline_root=args.baseline, change_message_path=args.change_message,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "evidence":
@@ -2042,6 +2176,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.intent_root, args.env_map, args.out, status=args.status,
             tfvars_root=args.tfvars_root,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+            baseline_root=args.baseline_root, change_message_path=args.change_message,
         )
     if args.command == "drift":
         return run_drift(

@@ -73,6 +73,13 @@ jobs:
       SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The BASELINE intent tree is needed to record a REMOVAL: a deleted
+          # intent is absent from the checkout, so with a shallow clone there is
+          # nothing left to build its evidence from. `classify` has tiered
+          # removals since v1.30.0 — assessed but unrecorded was a strange place
+          # to stop.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v7
         with:
@@ -224,8 +231,38 @@ jobs:
       # Evidence (Phase 2): one NIST-mapped bundle per applied change, carrying
       # the risk verdict, intent/tfvars hashes, and CI provenance (GITHUB_* env).
       # Uploaded as a run artifact — the audit record for this apply.
+      # Materialise the PREVIOUS revision's intent tree and the text that landed
+      # on main. `github.event.before` is the commit this push replaced, which
+      # for a squash-merged PR is the pre-merge tip; the head commit message is
+      # the squashed PR title + body, which is where the `Removes:` trailer that
+      # `pr-validate` checked ends up.
+      - name: Materialise the baseline intent tree
+        if: github.event_name == 'push'
+        env:
+          # VIA env, never spliced into the script — see pr-validate.yml. A commit
+          # message is still text someone else wrote.
+          BEFORE: ${{ github.event.before }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$HEAD_MESSAGE" > /tmp/change-message.txt
+          if [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            mkdir -p /tmp/base-intent
+            git archive "$BEFORE" intent | tar -x -C /tmp/base-intent
+            echo "BASELINE=/tmp/base-intent/intent" >> "$GITHUB_ENV"
+          else
+            echo "::warning::base commit unavailable — REMOVALS will produce no evidence"
+          fi
+
       - name: Generate evidence bundles
-        run: fwgitops evidence intent --out evidence --status applied
+        run: |
+          set -euo pipefail
+          if [ -n "${BASELINE:-}" ]; then
+            fwgitops evidence intent --out evidence --status applied \
+              --baseline "$BASELINE" --change-message /tmp/change-message.txt
+          else
+            fwgitops evidence intent --out evidence --status applied
+          fi
 
       - name: Upload evidence bundles
         uses: actions/upload-artifact@v7

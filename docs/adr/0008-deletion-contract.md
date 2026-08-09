@@ -1,6 +1,6 @@
 # ADR-0008 — What removing an intent means, per kind
 
-- **Status:** Accepted (2026-08-06)
+- **Status:** Accepted (2026-08-06) · **Amended 2026-08-09** (evidence for removals)
 - **Date:** 2026-08-06
 - **Deciders:** Martono, Claude
 
@@ -73,10 +73,8 @@ not an oversight to fix by special-casing it.
 object is genuinely destroyed rather than silently re-asserted from a stale file.
 That fix is load-bearing for this contract.
 
-**Removals still produce no evidence bundle.** Bundles are built per request, and
-a deletion has no request in the current tree — though the baseline tree does
-hold it, so one is buildable. Open, and it needs a decision about what "applied"
-means for a deletion before it can be built rather than guessed.
+**Removals produce an evidence bundle** — ~~open~~ **decided and built, v1.37.0.**
+See the amendment below.
 
 **Two gaps are known and not closed by this ADR:**
 
@@ -105,3 +103,72 @@ become frequent.
 **Model deletion as an explicit intent (`kind: Revocation`).** Rejected: Git
 already records removal precisely, and an explicit revocation object would need
 its own lifecycle — including how to delete *it*.
+
+
+---
+
+## Amendment — 2026-08-09: evidence for a removal
+
+The original said bundles for removals were "open, and it needs a decision about
+what *applied* means for a deletion before it can be built rather than guessed."
+Three decisions, taken rather than guessed.
+
+### A1 — A removal TOMBSTONES the object's own record, in place
+
+`evidence/<scope>/<REQ-id>.json` is overwritten with `status: removed`.
+
+The alternative — a separate `evidence/removed/` tree — was rejected because it
+forks a request into two files, and a later re-created `REQ-2026-0727` would
+collide with its own tombstone. Deleting the bundle outright was rejected
+outright: an audit trail that disappears at the moment someone goes looking for
+it is the `expires` failure and the artifact-TTL failure a third time.
+
+One file per request is what makes `git log evidence/<scope>/<REQ>.json` that
+request's whole life — created, changed, removed. The removed object is
+**embedded from the baseline tree**, so the record still says WHAT went; reading
+git history is not required to answer that.
+
+### A2 — `removed` means destroyed in SCM AND pushed
+
+The same bar `applied` meets. A destroy whose push is refused is `failed`, not
+`removed`.
+
+This is not theoretical: the route-deletion test on 2026-08-06 destroyed the
+logical router in SCM and had the push refused, leaving SCM saying "no default
+route" while the device still forwarded on one. A record claiming `removed` on a
+successful `terraform destroy` alone would have been FALSE for that window.
+
+A separate delivered-to-device status was rejected — it invents a distinction
+creates do not have, and delivery is `device-sync`'s question, not the bundle's.
+
+### A3 — A removal carries its OWN change ticket, via a `Removes:` trailer
+
+    Removes: REQ-2026-0727 (JIRA-31555)
+
+**The problem.** A MODIFIED intent proves its own authorisation: since v1.33.0
+`stale_ticket_problems` requires `metadata.ticket` to move with the spec. A
+REMOVAL cannot, because the fix is deleting the file — there is nowhere left to
+write the new ticket. Left alone, the record for an August deletion would carry
+`ticket: JIRA-20727, requested: 2026-07-26` — the ticket that authorised
+**creating** the object. That is the same false statement in a CM-3 artifact
+that v1.33.0 removed, arriving through deletion instead of modification.
+
+**Why a trailer.** It puts the authorisation where the change lives, and needs no
+new object lifecycle. A tombstone INTENT (`state: removed` plus a fresh ticket)
+was rejected for the same reason `kind: Revocation` was rejected in the original
+ADR: it needs its own answer to "when does *that* get deleted?".
+
+**Where it is read.** Whatever text lands on `main`. With squash merges that is
+the PR title + body, so `pr-validate` checks the PR body — deliberately NOT the
+individual commit messages, which would pass a PR whose trailer never reaches
+main — and `apply` re-reads it from the merged commit.
+
+**Fail-closed.** A removal with no trailer is REJECTED (exit 2), on the PR, while
+the author is still there to fix it. A trailer naming a different request does
+not authorise this one.
+
+### What this does not change
+
+The stance in decision (3) stands: **the platform guarantees a VISIBLE deletion,
+not a SAFE one.** A removal is now also RECORDED. Recorded is not safe, and this
+amendment should not be read as making the earlier claim stronger than it was.
