@@ -50,7 +50,10 @@ def test_rule_components_default_when_omitted():
     assert sp.application == ["any"]
     assert sp.profile is None
     assert sp.log_forwarding is None
-    assert sp.position == "bottom"
+    # UNSPECIFIED, not "bottom". The two used to be the same value, which is what
+    # blocked wiring ordering into Terraform: writing a concrete position MOVES
+    # the rule, so a default that reads as a request reorders policy silently.
+    assert sp.position is None
 
 
 def test_rule_components_explicit():

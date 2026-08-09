@@ -67,7 +67,9 @@ def test_rule_component_defaults_compiled():
     assert r.profile_group is None
     assert r.log_setting is None
     assert r.rulebase == "pre"
-    assert r.relative_position == "bottom"
+    # UNSPECIFIED. Writing a concrete relative_position MOVES the rule
+    # (spike/ordering-existing), so an unasked-for default must not reach tfvars.
+    assert r.relative_position is None
     assert r.target_rule is None
 
 
@@ -510,3 +512,35 @@ def test_a_tcp_request_is_completely_unchanged_by_the_icmp_path():
     assert ch.rule.services == [ch.service_objects[0].name]
     assert ch.rule.application == ["any"], "unchanged default"
     assert "application-default" not in ch.rule.services
+
+
+def test_an_unspecified_position_is_null_in_tfvars_not_bottom():
+    """The whole reason ordering could not be wired. A concrete relative_position
+    MOVES the rule, so a rule nobody positioned must send nothing."""
+    from fwgitops.compiler import to_tfvars
+    tf = to_tfvars([compiled()])
+    r = list(tf["security_rules"].values())[0]
+    assert r["relative_position"] is None
+
+
+def test_before_after_are_NOT_sent_to_terraform():
+    """They need a UUID anchor, and resolving one inside the rules' own for_each
+    is a self-reference Terraform rejects with `Error: Cycle`. Sending `before`
+    with no anchor would be a move with no target, so relative ordering stays
+    with enrich — which resolves the anchor over REST after apply."""
+    from fwgitops.compiler import to_tfvars
+    from fwgitops.intent import load_intent
+    doc = valid_doc(); doc["spec"]["position"] = "before:REQ-OTHER"
+    ch = compile_request(load_intent(doc), env_map())
+    assert ch.rule.relative_position == "before"      # kept for enrich + evidence
+    assert ch.rule.target_rule == "REQ-OTHER"
+    assert to_tfvars([ch])["security_rules"][ch.rule.name]["relative_position"] is None
+
+
+def test_top_and_bottom_ARE_sent_to_terraform():
+    from fwgitops.compiler import to_tfvars
+    from fwgitops.intent import load_intent
+    for pos in ("top", "bottom"):
+        doc = valid_doc(); doc["spec"]["position"] = pos
+        ch = compile_request(load_intent(doc), env_map())
+        assert to_tfvars([ch])["security_rules"][ch.rule.name]["relative_position"] == pos

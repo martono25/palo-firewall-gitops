@@ -3,6 +3,66 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.41.0] — 2026-08-09
+
+### Rule ordering is wired — because "unspecified" is finally a value
+
+`spec.position` defaulted to `"bottom"`, so *"I did not ask"* and *"put it at the
+bottom"* were the same value. That is what blocked ordering from reaching
+Terraform: writing a concrete `relative_position` MOVES the rule, and
+`spike/ordering-existing` measured a first-time write re-stacking a live rulebase
+into an order that was not even the for_each order —
+
+```
+before: charlie, bravo, alpha
+after:  alpha, charlie, bravo
+```
+
+— while the plan showed only `+ relative_position = "bottom"`. Rule order is
+policy; a permissive rule above a deny is a different firewall.
+
+**An unspecified position is now `None`, and stays null all the way to the
+provider.** A rule nobody positioned sends nothing and is never moved. Only a
+rule whose intent explicitly says `position:` carries a value.
+
+`top`/`bottom` are wired into the module. **`before`/`after` deliberately are
+not** — they need a UUID anchor, and resolving one inside the rules' own
+`for_each` is a self-reference Terraform rejects with `Error: Cycle`, so relative
+ordering stays with `enrich`, which resolves it over REST after apply. The
+compiled rule still carries `before`/`after` for enrich and for evidence; only
+the tfvars emission is filtered.
+
+### The plan caught what 748 passing tests could not
+
+With the compiler already emitting null, a plan against the live folder **still**
+showed `+ relative_position = "bottom"` on all five rules.
+
+`optional(string, "bottom")` substitutes its default when the value is **null**,
+so the null was being turned back into `"bottom"` at the variable boundary — and
+it was in the ROOT's `variables.tf` as well as the module's. `scaffold-root
+--check` passed the whole time, because it compares attribute NAMES and not
+DEFAULTS: a root can mirror the module structurally while re-defaulting a null.
+That is a hole in the guard ADR-0004 leans on. Pinned by a test for
+`relative_position`; the general case is left open and recorded.
+
+Both roots now plan clean against live SCM — `No changes` — which is the property
+that makes this safe: nothing moves.
+
+### One more that shipped invisibly for a commit
+
+Making `position` optional left `None` falling through to `raise EnrichError`
+in `_apply_ordering` — which would have failed EVERY apply, since almost no
+intent specifies a position. The whole suite passed, because nothing exercised
+enrich with an unspecified position. Fixed, with the test that should have caught
+it.
+
+**Not fixed, and not claimed:** Terraform still cannot SEE ordering drift.
+`relative_position` is a create/update instruction, not a stored property, so a
+rule reordered out-of-band produces `No changes` on the next plan.
+
+Mutation-tested three ways: the position default restored, `before`/`after` sent
+to Terraform, and the module's `optional(string, "bottom")` put back. 752 tests.
+
 ## [1.40.1] — 2026-08-09
 
 ### The push-skip logic skipped a push it should have made

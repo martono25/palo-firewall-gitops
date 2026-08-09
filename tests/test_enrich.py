@@ -206,3 +206,28 @@ def test_enrich_still_fails_closed_on_a_missing_rule():
     c = FakeRuleClient({})           # nothing staged
     with pytest.raises(EnrichError, match="not found in folder"):
         enrich_folder(c, "prod-edge", [_change(_rule("R"))])
+
+
+def test_an_UNSPECIFIED_position_moves_nothing_and_does_not_error():
+    """`None` means the requester expressed no opinion. It is not `bottom`, and
+    it must not reach the unknown-ordering error — which would fail EVERY apply,
+    since almost no intent specifies a position.
+
+    This gap shipped invisibly for one commit: making `position` optional left
+    `None` falling through to `raise EnrichError`, and the whole suite still
+    passed because nothing exercised enrich with an unspecified position."""
+    from fwgitops.compiler import SecurityRule
+    from fwgitops.enrich import _apply_ordering
+
+    moves = []
+
+    class _C:
+        def move_rule(self, *a, **k):
+            moves.append((a, k))
+
+    rule = SecurityRule(
+        name="REQ-X", folder="f", from_zones=["a"], to_zones=["b"],
+        sources=["s"], destinations=["d"], services=["v"],
+        action="allow", log_end=True, tags=[], relative_position=None)
+    assert _apply_ordering(_C(), "id-1", rule, {}) is False
+    assert moves == [], "an unspecified position must issue no move"

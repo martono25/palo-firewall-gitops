@@ -152,12 +152,19 @@ variable "security_rules" {
     disabled     = optional(bool, false)
     tags         = list(string)
     # ── ADR-0003 rule components (optional; defaults = plain L4 allow) ──
-    application       = optional(list(string), ["any"])
-    profile_group     = optional(string) # null -> no security profile
-    log_setting       = optional(string) # null -> local logs only
-    rulebase          = optional(string, "pre")
-    relative_position = optional(string, "bottom") # top|bottom|before|after
-    target_rule       = optional(string)           # anchor for before/after
+    application   = optional(list(string), ["any"])
+    profile_group = optional(string) # null -> no security profile
+    log_setting   = optional(string) # null -> local logs only
+    rulebase      = optional(string, "pre")
+    # NO DEFAULT. `optional(string, "bottom")` substitutes the default when the
+    # value is NULL, so an unspecified position was silently turned back into
+    # "bottom" AT THE MODULE BOUNDARY — and a first-time write of a concrete
+    # position RE-STACKS the rulebase (spike/ordering-existing). Caught by a plan
+    # against the live folder on 2026-08-09: `+ relative_position = "bottom"` on
+    # all five rules, which is precisely the silent policy rewrite the spike
+    # warned about. The compiler's null must survive to the provider.
+    relative_position = optional(string) # top|bottom (before/after: see enrich)
+    target_rule       = optional(string) # anchor for before/after
     # ── v1.0 rule completeness ──
     # Set explicitly, per the provider's own scm_security_rule example. Omitting
     # `category` / `source_user` is not "leave alone": the provider models

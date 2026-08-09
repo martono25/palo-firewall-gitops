@@ -72,7 +72,9 @@ class SecurityRule:
     #: Rulebase (pre|post) — where managed policy lives above device-local rules.
     rulebase: str = "pre"
     #: Ordering within the rulebase: top | bottom | before | after.
-    relative_position: str = "bottom"
+    #: None = the requester expressed no opinion. Never defaulted to a concrete
+    #: value: writing one MOVES the rule (spike/ordering-existing).
+    relative_position: Optional[str] = None
     #: Anchor rule for before/after ordering; None for top/bottom.
     target_rule: Optional[str] = None
     # ── v1.0 rule completeness (all set via enrich; provider drops them too) ──
@@ -226,12 +228,16 @@ def _service_for(svc: Service, folder: str) -> ServiceObject:
     )
 
 
-def _parse_position(position: str) -> Tuple[str, Optional[str]]:
+def _parse_position(position: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Intent position -> (relative_position, target_rule) for scm_security_rule.
 
+    None in means None out: an UNSPECIFIED position must stay unspecified all the
+    way down, because anything that writes a concrete value moves the rule.
     'top'/'bottom' -> (that, None); 'before:R'/'after:R' -> ('before'|'after', 'R').
     The intent loader has already validated the shape.
     """
+    if position is None:
+        return None, None
     if position in ("top", "bottom"):
         return position, None
     rel, _, tgt = position.partition(":")
@@ -408,7 +414,18 @@ def _rule_dict(r: SecurityRule) -> Dict[str, Any]:
         "profile_group": r.profile_group,
         "log_setting": r.log_setting,
         "rulebase": r.rulebase,
-        "relative_position": r.relative_position,
+        # TOP/BOTTOM ONLY. `before`/`after` need a UUID anchor, and resolving one
+        # inside this for_each is a self-reference Terraform rejects with
+        # `Error: Cycle` — so relative ordering stays with `fwgitops enrich`,
+        # which resolves the anchor over REST after apply. Sending `before`
+        # without an anchor would be a move with no target.
+        #
+        # None (unspecified) passes through as null, which is what makes wiring
+        # this safe at all: writing a concrete position MOVES the rule, so a rule
+        # nobody positioned must send nothing.
+        "relative_position": (r.relative_position
+                              if r.relative_position in ("top", "bottom") else None),
+        # Still carried for evidence and enrich; NOT wired into the module.
         "target_rule": r.target_rule,
         # Emitted since v1.15.0 (provider 1.0.12-beta.4 writes them). The
         # registry example for scm_security_rule sets category and source_user

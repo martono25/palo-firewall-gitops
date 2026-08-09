@@ -177,7 +177,13 @@ class Spec:
     #: External log-forwarding profile name. None -> local logs only.
     log_forwarding: Optional[str] = None
     #: Ordering: top | bottom | before:<rule> | after:<rule>. Default bottom.
-    position: str = "bottom"
+    #: None means UNSPECIFIED — the requester expressed no opinion, so nothing
+    #: downstream may act on ordering for this rule. It is NOT the same as
+    #: `bottom`, and conflating them is what blocked wiring ordering into
+    #: Terraform: a first-time write of `relative_position` RE-STACKS the
+    #: rulebase (spike/ordering-existing, 2026-08-04), so a default that looks
+    #: like a request would silently reorder policy on the next apply.
+    position: Optional[str] = None
     # ── v1.0 rule completeness ──
     #: Free-text rule documentation (audit). None -> no description.
     description: Optional[str] = None
@@ -1010,7 +1016,7 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     _validate_name(profile, c.profile_catalog, f"{path}.profile", c)
     log_forwarding, logfwd_ok = _opt_str(sp, "log_forwarding", path, c)
     _validate_name(log_forwarding, c.log_forwarding_catalog, f"{path}.log_forwarding", c)
-    position = _load_position(sp, path, c)
+    position, position_ok = _load_position(sp, path, c)
 
     # ── v1.0 rule-completeness fields ──
     description, desc_ok = _opt_str(sp, "description", path, c)
@@ -1022,7 +1028,7 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
 
     if environment is None or action not in _ACTIONS or source is None or destination is None \
             or service is None or not isinstance(log, bool) \
-            or application is None or position is None or not profile_ok or not logfwd_ok \
+            or application is None or not position_ok or not profile_ok or not logfwd_ok \
             or not desc_ok or not ls_ok or not ns_ok or not nd_ok \
             or source_user is None or category is None:
         return None
@@ -1151,19 +1157,31 @@ def _load_application(sp: dict, path: str, c: _Collector) -> Optional[List[str]]
     return apps
 
 
-def _load_position(sp: dict, path: str, c: _Collector) -> Optional[str]:
-    """Ordering directive: top | bottom | before:<rule> | after:<rule>."""
-    val = sp.get("position", "bottom")
+def _load_position(sp: dict, path: str, c: _Collector) -> Tuple[Optional[str], bool]:
+    """Ordering directive: top | bottom | before:<rule> | after:<rule>.
+
+    ABSENT means UNSPECIFIED (None), not `bottom`. It used to default to
+    `bottom`, which made "I did not ask" indistinguishable from "put it at the
+    bottom" — and that is precisely what blocked ordering from being wired into
+    Terraform. A first-time write of `relative_position` RE-STACKS the rulebase
+    (spike/ordering-existing), so a default that reads as a request would
+    silently reorder policy for every rule on the next apply.
+    """
+    # (value, ok) — the file's idiom for an OPTIONAL field, because None is now a
+    # legitimate value and can no longer double as the failure signal.
+    if "position" not in sp:
+        return None, True
+    val = sp.get("position")
     if isinstance(val, str) and val.strip():
         v = val.strip()
         if v in ("top", "bottom"):
-            return v
+            return v, True
         rel, sep, tgt = v.partition(":")
         if sep and rel in ("before", "after") and tgt.strip():
-            return f"{rel}:{tgt.strip()}"
+            return f"{rel}:{tgt.strip()}", True
     c.add(f"{path}.position",
           f"invalid position {val!r}; use top | bottom | before:<rule> | after:<rule>")
-    return None
+    return None, False
 
 
 def _load_endpoints(

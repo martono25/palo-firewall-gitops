@@ -166,3 +166,32 @@ def test_a_literal_service_is_passed_through_not_resolved_as_an_object():
     assert "literal_services" in main
     assert "application-default" in main
     assert "contains(local.literal_services, v) ? v : scm_service.this[v].name" in main
+
+
+def test_relative_position_has_NO_default_in_the_module_or_any_root():
+    """`optional(string, "bottom")` substitutes the default when the value is
+    NULL, so an unspecified position was silently turned back into "bottom" at
+    the variable boundary — and a first-time write of a concrete position
+    RE-STACKS the rulebase (spike/ordering-existing).
+
+    CAUGHT BY A PLAN, not by a test: with the compiler already emitting null, a
+    plan against the live folder showed `+ relative_position = "bottom"` on all
+    five rules — the exact silent policy rewrite the spike warned about. It was
+    in the ROOT's variables.tf as well as the module's, and
+    `scaffold-root --check` passed throughout, because it compares attribute
+    NAMES and not DEFAULTS."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "terraform"
+    files = [root / "modules" / "security_folder" / "variables.tf"]
+    files += [p / "variables.tf" for p in root.iterdir()
+              if p.is_dir() and p.name not in ("modules",) and (p / "variables.tf").is_file()]
+    checked = 0
+    for f in files:
+        for line in f.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith("relative_position") and "=" in stripped:
+                assert 'optional(string, ' not in stripped, (
+                    f"{f}: relative_position must have NO default — a null must "
+                    f"survive to the provider, or every rule is moved")
+                checked += 1
+    assert checked >= 2, f"expected the module and at least one root, checked {checked}"
