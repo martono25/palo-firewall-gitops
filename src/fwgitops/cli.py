@@ -43,6 +43,7 @@ from fwgitops.kinds import (
     kinds_with_state_api,
     compile_any,
     group_by_kind_and_scope,
+    handler_for_request,
     scopes_in_apply_order,
     of_kind,
 )
@@ -1488,84 +1489,59 @@ def run_evidence(
     out=None,
     err=None,
 ) -> int:
-    """Write a NIST-mapped evidence bundle per change (Phase 2).
+    """Write a NIST-mapped evidence bundle per change, for EVERY kind (Phase 2).
 
     Compiles + classifies every intent, then assembles one bundle per change with
     the risk verdict, intent/tfvars hashes, and CI provenance (from GITHUB_* env),
-    written to `out_root/<folder>/<req_id>.json`. This is the apply-path audit
-    record — run it after apply/push and upload the folder as a run artifact.
+    written to `out_root/<scope>/<req_id>.json`. This is the apply-path audit
+    record — run it after apply/push; the workflow commits the folder.
+
+    Until v1.36.0 this filtered to `AccessRequest`, so a route, zone or interface
+    change produced NO audit record while the command reported success. The
+    filter is gone: every registered kind is bundled, and a kind that cannot be
+    bundled would now fail loudly rather than be skipped silently.
+
     Exit codes:  0 ok · 1 usage/IO/build error · 2 invalid intent.
     """
     import os
     from datetime import datetime, timezone
 
-    from fwgitops.classify import PolicyContext, classify
+    from fwgitops.classify import PolicyContext
     from fwgitops.evidence import CIContext, EvidenceError, build_bundle, sha256_file, write_bundle
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
-    if not env_map_path.is_file():
-        print(f"error: env map not found: {env_map_path}", file=err)
-        return 1
-    try:
-        env_map = EnvMap.from_dict(read_yaml(env_map_path))
-    except ResolveError as e:
-        print(f"error: invalid env map {env_map_path}: {e}", file=err)
-        return 1
     cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
     if not ok:
         return 1
-    if not intent_root.exists():
-        print(f"error: intent root not found: {intent_root}", file=err)
-        return 1
-
-    intents = discover_intents(intent_root)
-    if not intents:
+    items, code = _compile_intents(intent_root, env_map_path, cats, err)
+    if items is None:
+        return code
+    if not items:
         print(f"no intent files found under {intent_root}", file=out)
         return 0
 
-    items = []  # (path, request, change)
-    problems: List[str] = []
-    for path in intents:
-        rel = _display_path(path)
-        try:
-            doc = read_yaml(path)
-        except Exception as e:  # noqa: BLE001
-            problems.append(f"{rel}: could not parse YAML: {e}")
-            continue
-        try:
-            ar = load_intent(doc, env_map=env_map, **cats)
-            ch = compile_any(ar, env_map)
-            # Evidence bundles are rule-shaped: build_bundle takes a rule's
-            # request AND its compiled change. `has_evidence` records which
-            # kinds that is true for, rather than an unexplained isinstance.
-            if isinstance(ch, REGISTRY["AccessRequest"].compiled_type):
-                items.append((path, ar, ch))
-        except IntentError as e:
-            problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
-        except ResolveError as e:
-            problems.append(f"{rel}: {e}")
-    if problems:
-        print(f"REJECTED — {len(problems)} of {len(intents)} intent file(s) invalid:", file=err)
-        for p in problems:
-            print(f"  - {p}", file=err)
-        return 2
-
-    policy = PolicyContext.from_changes([ch for _, _, ch in items])
+    compiled = [ch for _, _, ch in items]
+    policy = PolicyContext.from_changes(of_kind(compiled, "AccessRequest"))
     ci = CIContext.from_env(os.environ)
     now = datetime.now(timezone.utc)
     written: List[Path] = []
     for path, ar, ch in items:
-        tfvars = tfvars_root / ch.rule.folder / "rules.auto.tfvars.json"
+        handler = handler_for_request(ar)
+        # The tfvars file this kind writes, in this object's OWN scope — a
+        # device-scoped interface hashes `terraform/device-<serial>/…`, not the
+        # folder's. Getting that wrong would hash a real file belonging to a
+        # different scope, which is worse than hashing nothing.
+        tfvars = tfvars_root / handler.scope_of(ch).dirname / handler.tfvars_filename
         try:
             bundle = build_bundle(
-                request=ar, change=ch, status=status, generated_at=now,
+                request=ar, compiled=ch, handler=handler, status=status, generated_at=now,
                 intent_sha256=sha256_file(path), intent_path=_display_path(path),
                 tfvars_sha256=sha256_file(tfvars) if tfvars.is_file() else None,
-                risk=classify(ch, policy=policy), ci=ci,
+                risk=handler.classify(ch, policy=policy), ci=ci,
             )
         except EvidenceError as e:
-            print(f"error: could not build evidence for {ch.rule.name}: {e}", file=err)
+            print(f"error: could not build evidence for {handler.name_of(ch)}: {e}", file=err)
             return 1
         written.append(write_bundle(bundle, out_root))
 

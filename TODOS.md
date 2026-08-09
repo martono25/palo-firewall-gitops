@@ -748,15 +748,26 @@ FEATURE rather than an observed behaviour:
   `config-versions/candidate` cannot supply one (it is version history).
   **Effort:** M · **Priority:** P2
 
-* **Evidence bundles cover `AccessRequest` ONLY.** `build_bundle(request:
-  AccessRequest, ...)`, so interface, zone and route changes produce no audit
-  record at all — 5 bundles for 10 intents on the live tree. A route change is
-  arguably MORE audit-relevant than a rule, since it decides where all unmatched
-  traffic goes, and the deletion test showed its removal is a silent outage.
+* ~~**Evidence bundles cover `AccessRequest` ONLY.**~~ **DONE — v1.36.0**
+  (schema `fw-evidence/v2`). The bundle is now assembled from the kind registry
+  (`kinds.evidence_object`) instead of an explicit `SecurityRule` field list, so
+  the shipped tree produces **10 bundles for 10 intents**, up from 5. Three
+  things came with it:
 
-  The registry already drives compile, classify, tfvars and drift per kind; the
-  bundle builder is the one place still hard-wired to one kind.
-  **Effort:** M · **Priority:** P2
+  * `request` carries paperwork only — `action` and `environment` moved under
+    `compiled`, the same metadata-vs-spec split that `stale_ticket_problems`
+    enforces.
+  * The path is keyed on SCOPE, so a device-scoped change lands in
+    `evidence/device-<serial>/`, mirroring the Terraform roots.
+  * The compiled object is serialised WHOLE. The v1 list went stale twice —
+    `application`, `profile_group` and `log_setting` were on the compiled rule
+    for a release before anyone added them to the bundle, so records claiming to
+    be "the effective rule an assessor sees" omitted the threat-inspection
+    profile.
+
+  `has_evidence` is gone. It was an honest declaration of a gap, but declaring a
+  gap is not the same as it being acceptable, and the flag made the hole look
+  like a design.
 
 * **Still open — evidence for a removal.** Bundles are built per request, so a
   deletion still produces no audit record beyond git history and the plan. The

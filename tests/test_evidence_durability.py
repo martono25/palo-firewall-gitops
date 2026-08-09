@@ -76,6 +76,22 @@ def test_the_bundle_path_is_one_file_per_rule():
     sys.path.insert(0, str(REPO_ROOT / "src"))
     from fwgitops.evidence import bundle_path
 
-    p = bundle_path("evidence",
-                    {"req_id": "REQ-2026-0727", "compiled": {"folder": "prod-edge"}})
+    p = bundle_path("evidence", {"req_id": "REQ-2026-0727",
+                                 "compiled": {"scope": {"kind": "folder",
+                                                        "value": "prod-edge"}}})
     assert p == Path("evidence/prod-edge/REQ-2026-0727.json")
+
+
+def test_a_device_scoped_bundle_lands_under_its_own_directory():
+    """A firewall is addressed `device=<serial>`, never `folder=<serial>`. Keying
+    the path on scope keeps a device-scoped change out of a directory named for a
+    serial — and mirrors the Terraform root layout, so `terraform/device-<s>/` and
+    `evidence/device-<s>/` describe the same thing."""
+    import sys
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+    from fwgitops.evidence import bundle_path
+
+    p = bundle_path("evidence", {"req_id": "REQ-2026-0801",
+                                 "compiled": {"scope": {"kind": "device",
+                                                        "value": "007955000894453"}}})
+    assert p == Path("evidence/device-007955000894453/REQ-2026-0801.json")

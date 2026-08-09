@@ -39,10 +39,10 @@ def test_every_handler_is_fully_populated(kind):
     h = REGISTRY[kind]
     assert h.kind == kind
     for attr in ("request_type", "compiled_type", "compile", "tfvars_filename",
-                 "tfvars", "scope_of", "name_of", "classify"):
+                 "tfvars", "scope_of", "name_of", "classify",
+                 "evidence_object", "evidence_id_of"):
         assert getattr(h, attr) is not None, f"{kind}.{attr} is not set"
     assert h.drift_engine in ("tag", "state"), f"{kind}: undeclared drift engine"
-    assert isinstance(h.has_evidence, bool)
 
 
 def test_kinds_match_the_intent_loaders_exactly():
@@ -150,11 +150,55 @@ def test_drift_engines_are_declared_per_kind_not_assumed_uniform():
     assert tag | state == set(REGISTRY), "every kind must declare a drift engine"
 
 
-def test_evidence_capability_is_declared_rather_than_discovered_at_runtime():
-    """build_bundle is rule-shaped today. Recording that is honest; a protocol
-    member returning None would be an interface with a hole."""
-    assert REGISTRY["AccessRequest"].has_evidence is True
-    assert REGISTRY["ZoneRequest"].has_evidence is False
+def test_every_kind_can_produce_an_evidence_object():
+    """`has_evidence` used to be False for three of four kinds, and the honesty of
+    declaring that hid what it cost: ten intents produced five bundles, so a route
+    or interface change left no audit record while the command exited 0.
+
+    A kind is not shippable without an audit record, so this is a hard assertion
+    on ALL of them rather than a flag anyone can set False."""
+    from fwgitops.compiler import CompiledInterface, CompiledRoute
+
+    samples = {
+        "ZoneRequest": CompiledZone(folder="f", name="dmz", zone_type="layer3",
+                                    interfaces=["$eth-local"]),
+        "InterfaceRequest": CompiledInterface(folder="f", name="$eth-local",
+                                              ip=["10.0.0.1/24"]),
+        "RouteRequest": CompiledRoute(folder="f", router="r", vrf="v",
+                                      name="REQ-1", destination="0.0.0.0/0"),
+    }
+    for kind, obj in samples.items():
+        payload = REGISTRY[kind].evidence_object(obj)
+        assert payload, f"{kind} produced an empty evidence object"
+        # Scope is recorded ONCE, as compiled.scope. Repeating it inside the
+        # object would let a bundle disagree with itself about which firewall a
+        # change landed on.
+        assert "folder" not in payload and "device" not in payload
+
+
+def test_the_default_evidence_object_cannot_go_stale():
+    """The v1 bundle listed rule fields BY HAND and the list fell behind twice.
+    Serialising the dataclass whole means a field added to a compiled type
+    reaches the audit record without a second edit — so this asserts coverage is
+    derived, not remembered."""
+    import dataclasses
+
+    from fwgitops.compiler import CompiledRoute
+    r = CompiledRoute(folder="f", router="r", vrf="v", name="REQ-1",
+                      destination="0.0.0.0/0", nexthop="10.0.0.254", metric=10)
+    payload = REGISTRY["RouteRequest"].evidence_object(r)
+    expected = {f.name for f in dataclasses.fields(r)} - {"folder", "device"}
+    assert set(payload) == expected
+
+
+def test_a_handler_callable_is_not_silently_bound_as_a_method():
+    """A bare function assigned as a dataclass DEFAULT becomes a class attribute,
+    and Python binds it — `handler.evidence_id_of(obj)` would pass the handler as
+    `obj` and compare a KindHandler to a request id. `default_factory` avoids it;
+    this proves the defaults actually behave like plain functions."""
+    z = CompiledZone(folder="f", name="dmz", zone_type="layer3", interfaces=[])
+    assert REGISTRY["ZoneRequest"].evidence_id_of(z) is None
+    assert "name" in REGISTRY["ZoneRequest"].evidence_object(z)
 
 
 def test_a_new_kind_needs_exactly_one_registry_entry():

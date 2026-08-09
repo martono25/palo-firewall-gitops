@@ -177,7 +177,6 @@ def test_the_kind_is_registered_once_and_drives_everything():
     assert h.report_prefix == "interface/"
     assert h.drift_engine == "state"          # scm_ethernet_interface has no tag
     assert h.state_api_path == "/config/network/v1/ethernet-interfaces"
-    assert h.has_evidence is False
 
 
 def test_the_repos_root_declares_every_path_the_compiler_emits():

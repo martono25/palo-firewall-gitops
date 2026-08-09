@@ -3,6 +3,59 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.36.0] — 2026-08-09
+
+### Evidence bundles for every kind — half the changes had no audit record
+
+`fwgitops evidence` filtered to `AccessRequest`, so the shipped tree's ten
+intents produced **five** bundles. Changing a default route, an interface
+address or a zone left no audit record at all — while the command printed
+`wrote 5 evidence bundle(s)` and exited 0, and the workflow committed the five
+it had. Nothing anywhere said the other five were missing.
+
+That gap was *declared*, via `has_evidence: False` on three of four kinds, on
+the reasoning that `build_bundle` reaching into `SecurityRule` fields made a
+kind-agnostic bundle impossible. Declaring a gap honestly is not the same as
+the gap being acceptable, and the flag made it look like a design decision. A
+`RouteRequest` decides where every unmatched packet goes; ADR-0008 measured its
+removal as a silent black-hole with no backstop. It is the change an incident
+responder reaches for first.
+
+**Schema `fw-evidence/v2`.** The bundle is assembled from the kind registry —
+`kinds.evidence_object`, which defaults to the compiled dataclass serialised
+whole. Three consequences:
+
+* **`kind` is recorded.** v1 had no such field because there was only ever one.
+* **`request` is paperwork only.** `action` and `environment` moved under
+  `compiled`, where they are derived from the spec and cannot silently disagree
+  with it. This is the same metadata-vs-spec split that
+  `removal.stale_ticket_problems` enforces — mixing them is what let an edited
+  rule keep the ticket authorising its previous version.
+* **The path is keyed on scope.** A device-scoped change lands in
+  `evidence/device-<serial>/`, mirroring the Terraform roots. Building the path
+  from a `folder` field would have put it under a directory named for a serial
+  that SCM rejects as a folder — the folder-vs-device confusion that broke the
+  drift job in v1.34.2.
+
+**Serialising the object whole is the durable part.** The v1 bundle listed rule
+fields by hand and the list fell behind the compiler twice: `application`,
+`profile_group` and `log_setting` were on the compiled rule for a release before
+anyone added them here, so bundles claiming to be *"the effective rule an
+assessor sees"* omitted the threat-inspection profile. An audit record that has
+to be remembered separately from the thing it records eventually will not be.
+
+The pairing guard is now per kind and says what it cannot check: a rule and a
+route are named for their request, so the bundle verifies it; a zone is named
+`dmz`, so there is nothing to verify and `evidence_id_of` returns `None` rather
+than inventing an assertion.
+
+**Regression pinned against the TREE, not a number.** The new test counts
+bundles against `discover_intents`, so an intent of a kind nobody wired into
+evidence fails CI instead of shipping silently. Mutation-tested by restoring the
+`AccessRequest` filter: the test fails.
+
+`has_evidence` removed. 687 tests.
+
 ## [1.35.0] — 2026-08-08
 
 ### State drift had never actually worked for anything but rules
