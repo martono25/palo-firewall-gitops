@@ -472,6 +472,157 @@ def _load_catalogs(
     }, True
 
 
+def run_where(
+    query_text: str,
+    intent_root: Path,
+    env_map_path: Path,
+    *,
+    evidence_root: Path = Path("evidence"),
+    service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
+    as_json: bool = False,
+    out=None,
+    err=None,
+) -> int:
+    """Map an address, name or ticket back to the intent that authorised it.
+
+    The incident-response query: a log line gives an IP, and the question is which
+    request permitted the traffic, who asked for it, and under what ticket.
+
+    Matching is by CONTAINMENT, not text — the log says `10.20.9.10` and the
+    intent says `10.20.9.0/24`, so grep answers "nothing", which at 3am is
+    indistinguishable from "no rule permits this". See `fwgitops.where`.
+
+    Exit codes:  0 hits found · 1 usage/IO error · 2 invalid intent · 4 no match.
+    """
+    import json as _json
+
+    from fwgitops.where import Query, find
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
+    if not ok:
+        return 1
+    items, code = _compile_intents(intent_root, env_map_path, cats, err)
+    if items is None:
+        return code
+
+    query = Query.parse(query_text)
+    by_id = {}
+    scope_by_id = {}
+    searchable = []
+    for path, req, ch in items:
+        handler = handler_for_request(req)
+        rid = req.metadata.id
+        scope = handler.scope_of(ch)
+        by_id[rid] = (path, req, handler)
+        scope_by_id[rid] = scope
+        searchable.append((handler.kind, rid, scope.key, ch))
+
+    hits = find(query, searchable)
+
+    # The METADATA query. A responder often holds a TICKET rather than an
+    # address — "what did JIRA-12345 actually change?" — and metadata lives on
+    # the request, not on anything compiled, so the generic walk cannot see it.
+    if not query.is_address:
+        from fwgitops.where import Hit
+        for rid, (path, req, handler) in sorted(by_id.items()):
+            for field, value in (("metadata.id", rid),
+                                 ("metadata.ticket", req.metadata.ticket),
+                                 ("metadata.requester", req.metadata.requester)):
+                if str(value).lower() == query.text.lower():
+                    hits.append(Hit(kind=handler.kind, req_id=rid,
+                                    scope=scope_by_id[rid].key,
+                                    field=field, value=str(value),
+                                    why=f"{field} is exactly {query.text!r}"))
+
+    records = []
+    for h in hits:
+        path, req, handler = by_id[h.req_id]
+        # `dirname`, NOT `key`: a device scope keys as `device:<serial>` but its
+        # evidence lands in `device-<serial>/`, mirroring the Terraform roots. A
+        # colon in a path is the folder-vs-device confusion this project keeps
+        # meeting, arriving through a report this time.
+        ev = evidence_root / scope_by_id[h.req_id].dirname / f"{h.req_id}.json"
+        records.append({
+            "kind": h.kind, "req_id": h.req_id, "scope": h.scope,
+            "matched": {"field": h.field, "value": h.value, "why": h.why},
+            "effective_route": h.effective_route,
+            "intent_file": _display_path(path),
+            "ticket": req.metadata.ticket,
+            "requester": req.metadata.requester,
+            "requested": req.metadata.requested.isoformat(),
+            "justification": req.metadata.justification,
+            # Reported whether or not it exists. A missing bundle for a live
+            # object is itself the finding — it means this change has no audit
+            # record — and hiding the path would hide that.
+            "evidence": _display_path(ev),
+            "evidence_exists": ev.is_file(),
+        })
+
+    if as_json:
+        print(_json.dumps(records, indent=2, sort_keys=True), file=out)
+        return 0 if records else 4
+
+    # SPLIT BY WHAT THE MATCH MEANS. A default route matches EVERY address, so a
+    # flat "1 match" for an address no rule mentions reads as "something
+    # authorised this" — the opposite of the truth, delivered to someone at 3am.
+    # "What permits it" and "what carries it" are different questions and are
+    # answered separately, so a silent rulebase stays visible.
+    rules = [r for r in records if r["kind"] == "AccessRequest"]
+    routes = [r for r in records if r["kind"] == "RouteRequest"]
+    other = [r for r in records if r not in rules and r not in routes]
+
+    def show(rs):
+        for r in rs:
+            star = "   <- CARRIES IT" if r["effective_route"] else ""
+            print(f"  {r['kind']}  {r['req_id']}  ({r['scope']}){star}", file=out)
+            print(f"      matched : {r['matched']['field']} = {r['matched']['value']}",
+                  file=out)
+            print(f"      why     : {r['matched']['why']}", file=out)
+            print(f"      ticket  : {r['ticket']}  ({r['requester']}, "
+                  f"{r['requested']})", file=out)
+            print(f"      request : {r['justification']}", file=out)
+            print(f"      intent  : {r['intent_file']}", file=out)
+            ev = r["evidence"] if r["evidence_exists"] else \
+                f"{r['evidence']}  (MISSING — this change has no audit record)"
+            print(f"      evidence: {ev}\n", file=out)
+
+    if not records:
+        # EXPLICIT, and distinguished from an error. "Nothing here accounts for
+        # it" is a real answer — it means the config came from somewhere else —
+        # and it must not read like the command failed.
+        print(f"no intent accounts for {query.text!r}.", file=out)
+        print("  This is an ANSWER, not an error: nothing in this repository "
+              "authorised it.", file=out)
+        print("  Check `fwgitops drift` — config in SCM that GitOps did not put "
+              "there looks exactly like this.", file=out)
+        return 4
+
+    print(f"{len(records)} match(es) for {query.text!r}\n", file=out)
+    if query.is_address:
+        print("RULES — what permits or denies it", file=out)
+        if rules:
+            show(rules)
+        else:
+            print(f"  NONE. No AccessRequest in this repository mentions "
+                  f"{query.text}.\n"
+                  f"  Traffic to or from it is decided by a rule declared "
+                  f"elsewhere, by an\n"
+                  f"  inherited rule, or by the folder's default — not by anything "
+                  f"here.\n", file=out)
+        if routes:
+            print("ROUTES — what carries it", file=out)
+            show(routes)
+    else:
+        show(rules + routes)
+    if other:
+        print("OTHER", file=out)
+        show(other)
+    return 0 if records else 4
+
+
 def run_classify(
     intent_root: Path,
     env_map_path: Path,
@@ -1988,6 +2139,25 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path,
                    help="app name catalog (Phase 2); absent = explicit cidr/fqdn only")
 
+    wh = sub.add_parser(
+        "where",
+        help="which intent authorised this address, name or ticket? (incident response)")
+    wh.add_argument("query", help="an IP (10.20.9.10), a CIDR, a zone/app/interface "
+                                  "name, a request id, a ticket, or a requester")
+    wh.add_argument("intent_root", nargs="?", default="intent", type=Path,
+                    help="directory of intent YAML (default: intent)")
+    wh.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path)
+    wh.add_argument("--evidence", dest="evidence_root", default=Path("evidence"), type=Path,
+                    help="where evidence bundles live, so each hit can name its audit "
+                         "record (default: evidence)")
+    wh.add_argument("--json", dest="as_json", action="store_true",
+                    help="machine-readable, for piping into an incident timeline")
+    # The catalogs are needed because an intent may name an app whose addresses
+    # live there — the raw YAML never contains the CIDR, so a search that skipped
+    # them would silently miss every app-based rule.
+    wh.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
+    wh.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+
     cl = sub.add_parser("classify", help="risk-classify intents (Phase 2, policy-as-code)")
     cl.add_argument("intent_root", nargs="?", default="intent", type=Path,
                     help="directory of intent YAML (default: intent)")
@@ -2179,6 +2349,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_compile(
             args.intent_root, args.env_map, args.out, write=not args.check,
             require_terraform_root=not args.allow_missing_root,
+            service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+        )
+    if args.command == "where":
+        return run_where(
+            args.query, args.intent_root, args.env_map,
+            evidence_root=args.evidence_root, as_json=args.as_json,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "classify":

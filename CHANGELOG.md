@@ -3,6 +3,65 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.39.0] — 2026-08-09
+
+> Developed in parallel with 1.37.0 and 1.38.0 and independent of both, so it was
+> numbered ahead of them rather than colliding on a version. Nothing is missing
+> from the sequence.
+
+### `fwgitops where` — the query an incident responder actually makes
+
+A firewall log gives an IP and an hour. The question is *which request permitted
+this, who asked for it, under what ticket, and is it still supposed to exist?*
+Every field for that answer already lived in this repository — spread across
+`intent/`, the compiled desired-state and `evidence/` — and nothing joined them.
+
+**`grep` answers this WRONG, not slowly.** The log says `10.20.9.10`; the intent
+says `10.20.9.0/24`. Grep returns nothing, and nothing is the worst available
+answer, because it is indistinguishable from *"no rule permits this"* — the
+conclusion someone will draw at 3am with a firewall in front of them. So matching
+is by CONTAINMENT, in both directions: a host from a log lands inside an
+intent's range, and a subnet from a change request contains one.
+
+Accepts an IP, a CIDR, a zone/app/interface name, a request id, a ticket, or a
+requester. `--json` for an incident timeline.
+
+**What PERMITS and what CARRIES are separate questions.** This is the trap the
+command is built around: a default route matches EVERY address, so a flat match
+count reports "1 match" for traffic nothing permits — the opposite of the truth,
+delivered to someone under pressure. Rules and routes are reported separately,
+and when no rule mentions the address that is STATED rather than implied by
+absence. Among routes, the longest prefix per scope is flagged as the one that
+carries it; for a range query no effective route is named at all, because a /16
+has no single answer and inventing one is exactly the confident-wrong-answer this
+is meant to prevent.
+
+**It searches the COMPILED state, not the YAML.** An intent may name an app whose
+addresses live in the catalog, so the CIDR appears nowhere in the intent file.
+Searching the text would miss precisely the indirection the catalog exists to
+provide.
+
+**Nothing found is an ANSWER** (exit 4), not an error — it means the config came
+from somewhere else — and it points at `fwgitops drift`, which is the tool for
+config GitOps did not put there.
+
+**The walk is generic.** Every compiled kind is a dataclass, so the searchable
+surface is `asdict()`: a new kind is searchable the day it is registered, with no
+matcher to remember. A per-kind list of "fields worth searching" is the shape
+that let `ZoneRequest` ship wired into three stages and missing from four
+(ADR-0004).
+
+Name matches are EXACT, not substring — `dmz` must not hit `dmz-legacy`, because
+a responder acting on the wrong zone is worse off than one who got no answer.
+Each hit also names its evidence bundle, and reports it as a finding when the
+file is absent: a live object with no audit record is what an assessor wants
+flagged, and hiding the path would hide that.
+
+Mutation-tested five ways — containment replaced by text search (7 tests fail),
+exact-match relaxed to substring, longest-prefix marking dropped, an effective
+route invented for a range query, and rules/routes flattened into one list.
+702 tests.
+
 ## [1.38.0] — 2026-08-09
 
 ### Every bundle claimed CM-5 and named nobody
