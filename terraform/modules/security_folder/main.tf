@@ -16,6 +16,21 @@
 #     with -parallelism=1 (see .github/workflows/apply.yml)
 
 locals {
+  # LITERAL service values — passed through UNRESOLVED, because they name no
+  # object. `application-default` is what an application-matched rule (ICMP)
+  # carries: scm_service requires a port, so ICMP cannot be a service object at
+  # all. MEASURED in spike/icmp-service-shape (2026-08-09): SCM accepts
+  # `application-default` and `any`, and REJECTS a rule with no service key at
+  # all (400 "service" is required) even though the provider schema marks the
+  # attribute optional.
+  #
+  # Anything NOT in this set is still resolved through scm_service.this, which
+  # keeps the fine-grained dependency edge that orders object-before-rule. A
+  # literal has no object to depend on, so nothing is lost by skipping it — and
+  # a typo'd service name still fails loudly on the lookup rather than being
+  # passed through as a literal.
+  literal_services = toset(["application-default", "any"])
+
   # Every distinct tag used by any object or rule must exist as an scm_tag.
   managed_tags = toset(flatten(concat(
     [for o in values(var.address_objects) : o.tags],
@@ -95,8 +110,9 @@ resource "scm_security_rule" "this" {
   # no explicit depends_on.
   source      = [for s in each.value.sources : scm_address.this[s].name]
   destination = [for d in each.value.destinations : scm_address.this[d].name]
-  service     = [for v in each.value.services : scm_service.this[v].name]
-  tag         = [for t in each.value.tags : scm_tag.this[t].name]
+  service = [for v in each.value.services :
+  contains(local.literal_services, v) ? v : scm_service.this[v].name]
+  tag = [for t in each.value.tags : scm_tag.this[t].name]
 
   action   = each.value.action
   log_end  = each.value.log_end

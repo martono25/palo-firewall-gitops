@@ -32,7 +32,16 @@ KIND = "AccessRequest"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]+$")  # flows into PAN-OS tags downstream
 _FQDN = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})+$")
 _ACTIONS = {"allow", "deny", "drop", "reset-client", "reset-server", "reset-both"}
-_PROTOCOLS = {"tcp", "udp"}
+#: Port-based protocols — these compile to an `scm_service` OBJECT.
+_PORT_PROTOCOLS = {"tcp", "udp"}
+#: ICMP has no ports, so it cannot be an `scm_service` at all (the resource
+#: requires one). PAN-OS matches it by APPLICATION instead, and SCM accepts
+#: `application: [ping]` with `service: [application-default]` — MEASURED in
+#: `spike/icmp-service-shape`, along with the fact that omitting `service`
+#: entirely is REJECTED (400, `"service" is required`) even though the provider
+#: schema marks it optional.
+_APPLICATION_PROTOCOLS = {"icmp"}
+_PROTOCOLS = _PORT_PROTOCOLS | _APPLICATION_PROTOCOLS
 _ENDPOINT_KEYS = {"cidr", "fqdn", "app"}
 
 
@@ -73,8 +82,15 @@ class Endpoint:
 
 @dataclass(frozen=True)
 class Service:
-    protocol: str  # "tcp" | "udp"
-    port: str      # "443" or "8000-8100"
+    protocol: str            # "tcp" | "udp" | "icmp"
+    #: None for a protocol that has no ports (icmp). Optional rather than "" so a
+    #: missing port cannot be confused with an empty one.
+    port: Optional[str] = None
+
+    @property
+    def is_application_matched(self) -> bool:
+        """True when PAN-OS matches this by APPLICATION rather than by port."""
+        return self.protocol in _APPLICATION_PROTOCOLS
 
 
 #: Every key each kind's `spec:` may carry. One frozenset per loader, checked at
@@ -1230,7 +1246,24 @@ def _load_services(raw: Any, path: str, c: _Collector) -> Optional[List[Service]
             ok = False
         else:
             out.append(svc)
-    return out if ok else None
+    if not ok:
+        return None
+
+    # NO MIXING application-matched and port-based services in one request.
+    # `service` is a RULE-LEVEL list, so an ICMP entry forces the whole rule to
+    # `application-default` — which would silently re-interpret the tcp/udp
+    # entries beside it as "their App-ID's default ports" rather than the ports
+    # actually requested. Two requests, two rules, each meaning what it says.
+    app = sorted({x.protocol for x in out if x.is_application_matched})
+    port = sorted({x.protocol for x in out if not x.is_application_matched})
+    if app and port:
+        c.add(path,
+              f"cannot mix {app} with {port} in one request. `service` is a "
+              f"rule-level list and {app[0]!r} forces the rule to "
+              f"`application-default`, which would silently change what the "
+              f"{port} entries match. File them as separate requests.")
+        return None
+    return out
 
 
 def _load_service(item: Any, path: str, c: _Collector) -> Optional[Service]:
@@ -1255,10 +1288,23 @@ def _load_service(item: Any, path: str, c: _Collector) -> Optional[Service]:
     protocol = item.get("protocol")
     if protocol not in _PROTOCOLS:
         c.add(f"{path}.protocol", f"must be one of {sorted(_PROTOCOLS)}, got {protocol!r}")
-        protocol = None
-    port = item.get("port")
-    port_str = _validate_port(port, f"{path}.port", c)
-    if protocol is None or port_str is None:
+        return None
+
+    if protocol in _APPLICATION_PROTOCOLS:
+        # A `port` alongside `icmp` is REJECTED, not ignored. ICMP has no ports,
+        # so accepting one would let a requester write a number that reads like a
+        # restriction and enforces nothing — the same silently-dropped-field trap
+        # that `_reject_unknown` exists to close.
+        if "port" in item:
+            c.add(f"{path}.port",
+                  f"{protocol!r} has no ports, so `port` cannot restrict anything here. "
+                  f"Remove it — a value that looks like a restriction and enforces "
+                  f"nothing is worse than no value.")
+            return None
+        return Service(protocol=protocol, port=None)
+
+    port_str = _validate_port(item.get("port"), f"{path}.port", c)
+    if port_str is None:
         return None
     return Service(protocol=protocol, port=port_str)
 

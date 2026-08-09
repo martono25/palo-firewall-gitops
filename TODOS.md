@@ -663,7 +663,7 @@ gains tags on these types, or if reading TF state proves acceptable.
 
 ## Compiler / intent model
 
-### An AccessRequest cannot express ICMP — ping is unrequestable
+### ~~An AccessRequest cannot express ICMP~~ — BUILT v1.40.0
 
 **Found 2026-08-04** when Martono asked why the traffic harness was reaching for
 a NAT rule instead of just testing connectivity with ping first. It cannot:
@@ -711,7 +711,19 @@ the API, so "optional in the schema" cannot be read as "omittable".
   `scm_service.this[...]`, so a literal cannot pass today.
 * NOT answered by the probe: what the DEVICE enforces. Nothing was pushed.
 
-**Effort:** M · **Priority:** P2
+**BUILT v1.40.0.** `protocol: icmp` (no `port`) compiles to
+`service: [application-default]` + `application: [ping]`; no `scm_service` object
+is created, because the resource requires a port. A `port` alongside `icmp` is
+REJECTED, and so is MIXING icmp with tcp/udp in one request — `service` is a
+rule-level list, so an ICMP entry forces the whole rule to `application-default`,
+silently re-interpreting the tcp/udp entries beside it. The module passes literal
+service values through unresolved; anything else still resolves via
+`scm_service.this`, so a typo fails loudly rather than reaching SCM as a literal.
+
+**Still not answered: what the DEVICE enforces.** A `terraform plan` against live
+SCM accepts the shape, but nothing has been pushed, so PAN-OS behaviour for an
+`application-default` ICMP rule is untested on hardware. That is the natural
+first use of the feature.
 
 
 ### ~~Zone deletion path~~ — TESTED END TO END 2026-08-05, FAILS CLOSED

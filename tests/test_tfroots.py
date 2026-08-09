@@ -149,3 +149,20 @@ def test_scope_dirname_matches_the_root_layout():
     names = {r.name for r in _roots()}
     assert Scope("folder", "prod-edge").dirname in names
     assert Scope("device", "007955000894453").dirname in names
+
+
+def test_a_literal_service_is_passed_through_not_resolved_as_an_object():
+    """`main.tf` maps every service name through `scm_service.this[...]`, which
+    creates the dependency edge that orders object-before-rule. An ICMP rule
+    carries `application-default`, which names NO object — so the lookup would
+    fail with a missing key.
+
+    The passthrough must stay NARROW: anything not in the literal set is still
+    resolved, so a typo'd service name fails loudly on the lookup instead of
+    being handed to SCM as a literal."""
+    from pathlib import Path
+    main = (Path(__file__).resolve().parents[1]
+            / "terraform" / "modules" / "security_folder" / "main.tf").read_text()
+    assert "literal_services" in main
+    assert "application-default" in main
+    assert "contains(local.literal_services, v) ? v : scm_service.this[v].name" in main

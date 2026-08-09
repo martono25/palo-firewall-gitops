@@ -205,6 +205,20 @@ def _address_for(ep: Endpoint, folder: str) -> AddressObject:
     )
 
 
+#: What goes in a rule's `service` when the match is by APPLICATION rather than
+#: by port. MEASURED in `spike/icmp-service-shape` (2026-08-09): SCM accepts both
+#: this and `any`, and they are NOT equivalent — `any` matches the App-ID on any
+#: protocol/port, while this restricts it to the application's own defaults,
+#: which for `ping` is ICMP echo. Omitting `service` altogether is REJECTED (400,
+#: `"service" is required`) even though the provider schema marks it optional.
+APPLICATION_DEFAULT = "application-default"
+
+#: protocol -> the App-ID that matches it. Kept small and explicit: a mapping
+#: that guessed (e.g. protocol name == App-ID name) would silently produce a rule
+#: matching an application nobody asked for.
+_PROTOCOL_APPLICATION = {"icmp": "ping"}
+
+
 def _service_for(svc: Service, folder: str) -> ServiceObject:
     canonical = f"{svc.protocol}/{svc.port}"
     return ServiceObject(
@@ -250,7 +264,22 @@ def compile_request(
 
     src_objs = [_address_for(ep, res.folder) for ep in ar.spec.source]
     dst_objs = [_address_for(ep, res.folder) for ep in ar.spec.destination]
-    svc_objs = [_service_for(s, res.folder) for s in ar.spec.service]
+
+    # APPLICATION-MATCHED services (icmp) become NO service object — `scm_service`
+    # requires a port, so ICMP cannot be one. They contribute a literal to the
+    # rule's `service` list and an App-ID to its `application` list instead.
+    port_svcs = [s for s in ar.spec.service if not s.is_application_matched]
+    app_svcs = [s for s in ar.spec.service if s.is_application_matched]
+    svc_objs = [_service_for(s, res.folder) for s in port_svcs]
+
+    service_names = _names_in_order(svc_objs)
+    applications = list(ar.spec.application)
+    if app_svcs:
+        # Mixing is refused at load time (see intent._load_services), so this is
+        # the whole service list, not a merge.
+        service_names = [APPLICATION_DEFAULT]
+        applications = _dedup_preserving_order(
+            [_PROTOCOL_APPLICATION[s.protocol] for s in app_svcs])
 
     # Dedup within the request (a source and dest could share a CIDR) by name,
     # preserving first-seen order for stable output.
@@ -268,7 +297,7 @@ def compile_request(
         to_zones=_zones_for(ar.spec.destination, res.to_zone),
         sources=_names_in_order(src_objs),
         destinations=_names_in_order(dst_objs),
-        services=_names_in_order(svc_objs),
+        services=service_names,
         action=ar.spec.action,
         log_end=ar.spec.log,
         # No expiry: the field was removed from the intent schema in v1.23.0
@@ -279,7 +308,7 @@ def compile_request(
             section=section,
             ticket=ar.metadata.ticket,
         ),
-        application=list(ar.spec.application),
+        application=applications,
         profile_group=ar.spec.profile,
         log_setting=ar.spec.log_forwarding,
         relative_position=rel,
@@ -294,6 +323,13 @@ def compile_request(
     return CompiledChange(
         address_objects=address_objects, service_objects=service_objects, rule=rule
     )
+
+
+def _dedup_preserving_order(items: List[str]) -> List[str]:
+    seen: Dict[str, None] = {}
+    for i in items:
+        seen.setdefault(i, None)
+    return list(seen)
 
 
 def _dedup_by_name(objs: List[Any]) -> List[Any]:
