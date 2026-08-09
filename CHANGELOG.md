@@ -3,6 +3,46 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.39.3] — 2026-08-09
+
+### An empty push is not free — three of them minted three config versions
+
+`push_folder` has a `noop` path that has never fired: SCM returns a normal job
+with `OK` for a push with nothing staged, so every push looks like it worked.
+TODOS proposed deriving noop by diffing config versions instead.
+
+**That cannot work, and it is now measured rather than assumed.** Three
+consecutive pushes with NOTHING staged each minted a version — v75 at 08:51, v76
+and v77 at 09:29–09:30 — while `terraform apply` reported
+`0 added, 0 changed, 0 destroyed` and enrich reported `moved: false` for every
+rule. A version is created either way. Neither can the job record distinguish
+them: the empty job and the real one are byte-identical apart from the id.
+
+So the direction is retired, and the fix comes from the other side. **What SCM
+cannot tell us, the pipeline already knows: whether *we* staged anything.**
+`terraform plan -detailed-exitcode` (2 = changes) plus enrich's move count now
+decide whether to push at all — and because the push is admin-scoped it can only
+ever commit our own changes, so "we staged nothing" is sufficient.
+
+Enrich's move count is counted separately on purpose: a reorder is applied
+through the SCM API, which `terraform plan` cannot see, so deciding on the plan
+alone would skip the push that commits it.
+
+**The fail direction is the part that matters.** An unreadable enrich output
+**pushes** rather than skipping. Leaving a move staged and uncommitted is the
+applied-but-unpushed state `devicesync.py` documents as invisible to every check
+in this repo — an unnecessary push costs a version entry, a missed one costs a
+silent divergence between SCM and the firewall.
+
+Why it is worth fixing: an empty push appends to the tenant's version history,
+which is the record an assessor is being asked to trust, and it makes "did my
+push commit anything?" unanswerable from the job.
+
+The decision matrix was executed against fixtures before shipping (changes/no
+moves, no changes/a move, neither, rule-less scope, unreadable output) rather
+than read. Mutation-tested three ways: push made unconditional, the move count
+ignored, and the unreadable case flipped to skip. 738 tests.
+
 ## [1.39.2] — 2026-08-09
 
 ### The first successful apply skipped a whole scope and reported success

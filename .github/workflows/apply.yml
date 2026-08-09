@@ -231,7 +231,20 @@ jobs:
             # without this the apply silently drops the config and reports success.
             # Authoritative check is tfcontract.check_contract at compile time;
             # this backstops hand-edited tfvars and terraform/ changes.
-            terraform -chdir="$dir" plan -input=false -no-color 2>&1 | tee "plan-$folder.txt"
+            # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error. This is
+            # how the loop learns whether it STAGED anything, which decides
+            # whether a push is warranted at all (see the push step). `| tee`
+            # would mask the code behind the pipe's, so redirect and echo.
+            set +e
+            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode \
+              > "plan-$folder.txt" 2>&1
+            plan_rc=$?
+            set -e
+            cat "plan-$folder.txt"
+            if [ "$plan_rc" -gt 2 ]; then
+              echo "::error::$folder: terraform plan failed"
+              exit 1
+            fi
             if grep -q "Value for undeclared variable" "plan-$folder.txt"; then
               echo "::error::$folder: compiled tfvars set a variable the Terraform module does not declare — the config would be SILENTLY IGNORED. Refusing to apply."
               exit 1
@@ -250,8 +263,24 @@ jobs:
             # ENRICH IS RULES-ONLY, so it is conditional on rules — but the
             # APPLY above is not. Conflating the two is what skipped the whole
             # scope; the guard belongs on the rules-shaped step, not on the loop.
+            moved=0
             if [ -f "$dir/rules.auto.tfvars.json" ]; then
-              fwgitops enrich "$folder"
+              fwgitops enrich "$folder" | tee "enrich-$folder.txt"
+              # enrich prints a human line then a JSON record. A MOVE stages a
+              # change that `terraform plan` cannot see, so it counts toward
+              # "did we stage anything" independently of plan_rc.
+              moved=$(tail -1 "enrich-$folder.txt" \
+                      | jq '[.records[]? | select(.moved)] | length' 2>/dev/null || echo "")
+              if [ -z "$moved" ]; then
+                # UNKNOWN MEANS PUSH. Skipping on an unreadable enrich output
+                # would leave a move staged and uncommitted — the
+                # applied-but-unpushed state `devicesync.py` documents as
+                # INVISIBLE to every check here. An unnecessary push costs a
+                # version entry; a missed one costs a silent divergence between
+                # SCM and the firewall.
+                echo "::warning::$folder: could not read enrich output — pushing rather than assuming nothing moved"
+                moved=1
+              fi
             fi
             # Atomic commit boundary (Topic-1): terraform only STAGES config; this
             # push makes it live (scm provider has no push). The push is
@@ -262,7 +291,27 @@ jobs:
             # device-<serial> doesn't exist"). Stripping the prefix here instead
             # would put a second copy of the mapping in YAML — the duplication
             # that broke the drift job in v1.34.2.
-            fwgitops push --scope-dir "$folder"
+            #
+            # ONLY PUSH IF WE STAGED SOMETHING. Measured 2026-08-09: three
+            # consecutive pushes with NOTHING staged each minted a config version
+            # (v75 at 08:51, v76/v77 at 09:29–09:30) while terraform reported
+            # `0 added, 0 changed, 0 destroyed` every time. So an empty push is
+            # not free — it appends to the tenant's version history, the record
+            # an assessor is being asked to trust, and it makes "did my push
+            # commit anything?" unanswerable from the job: the empty job and the
+            # real one are byte-identical apart from the id.
+            #
+            # This also RETIRES the direction TODOS proposed (derive noop by
+            # diffing config versions): a version is created either way, so
+            # versions cannot distinguish. What IS knowable is whether WE staged
+            # anything — plan's exit code plus enrich's move count — and since
+            # the push is admin-scoped it can only ever commit our own changes.
+            if [ "$plan_rc" -eq 2 ] || [ "${moved:-0}" -gt 0 ]; then
+              fwgitops push --scope-dir "$folder"
+            else
+              echo "nothing staged for $folder (plan: no changes, enrich: no moves)"
+              echo "  — skipping push, which would mint an empty commit job"
+            fi
             echo "::endgroup::"
           done
 

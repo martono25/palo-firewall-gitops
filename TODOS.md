@@ -354,13 +354,27 @@ failure mode is a false green, not an error.
 Anything asserting "the change is live" must poll the device until it agrees,
 not trust the job. `spike/`-style readbacks in this repo now do exactly that.
 
-**Direction:** compare the candidate before/after, or diff config versions, and
-derive noop from that rather than from an error string. Worth checking whether
-the folder path behaves the same way (it may have been noop-detected only
-because a *different* error was returned).
+**~~Direction: diff config versions~~ — RETIRED, that cannot work.** MEASURED
+2026-08-09: three consecutive pushes with NOTHING staged each minted a config
+version — v75 (08:51), v76 and v77 (09:29–09:30) — while `terraform apply`
+reported `0 added, 0 changed, 0 destroyed` and enrich reported `moved: false`
+for every rule. A version is created either way, so versions cannot distinguish
+a real commit from an empty one. Neither can the job record: the empty job and
+the real one are byte-identical apart from the id.
 
-**Effort:** M
-**Priority:** P2
+**FIXED a different way, v1.39.3.** What SCM cannot tell us, the pipeline
+already knows: whether *we* staged anything. `terraform plan -detailed-exitcode`
+(2 = changes) plus enrich's move count decide whether to push at all, and since
+the push is admin-scoped it can only ever commit our own changes. An unreadable
+enrich output PUSHES rather than skipping — leaving a move staged and
+uncommitted is the applied-but-unpushed state `devicesync.py` documents as
+invisible.
+
+**Still open:** `push_folder`'s `_NOTHING_TO_PUSH` path remains unreachable, and
+the 38-second device lag above is unchanged — anything asserting "the change is
+live" must still poll the device rather than trust the job.
+
+**Effort:** S (remainder) · **Priority:** P3
 
 ### ~~Pilot firewall: mgmt plane exposed, and no ENI behind the data interfaces~~ — BOTH FIXED
 

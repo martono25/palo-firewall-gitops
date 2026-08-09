@@ -235,3 +235,38 @@ def test_the_baseline_is_materialised_on_a_DISPATCH_too():
         "must come from git")
     assert "git log -1 --format=%B" in run, (
         "the `Removes:` trailer must still be readable on a dispatch")
+
+
+# ── an empty push is not free ─────────────────────────────────────────────
+def test_the_push_is_skipped_when_nothing_was_staged():
+    """MEASURED 2026-08-09: three consecutive pushes with NOTHING staged each
+    minted a config version — v75 at 08:51, v76 and v77 at 09:29–09:30 — while
+    terraform reported `0 added, 0 changed, 0 destroyed` every time.
+
+    An empty push is therefore not free: it appends to the tenant's version
+    history, which is the record an assessor is being asked to trust, and it
+    makes "did my push commit anything?" unanswerable from the job, since the
+    empty job and the real one are byte-identical apart from the id."""
+    run = _apply_loop()
+    assert "-detailed-exitcode" in run, (
+        "the loop must learn from plan whether it staged anything")
+    assert 'if [ "$plan_rc" -eq 2 ] || [ "${moved:-0}" -gt 0 ]; then' in run
+    assert "skipping push" in run
+
+
+def test_a_MOVE_counts_as_staged_even_when_terraform_saw_no_changes():
+    """enrich applies ORDERING via the SCM API, which `terraform plan` cannot
+    see. Deciding on plan alone would skip the push that commits a reorder."""
+    run = _apply_loop()
+    assert "select(.moved)" in run, "enrich's move count must feed the decision"
+
+
+def test_an_UNREADABLE_enrich_output_pushes_rather_than_skipping():
+    """Fail direction matters more than the check. Skipping on an unparseable
+    enrich output would leave a move staged and uncommitted — the
+    applied-but-unpushed state `devicesync.py` documents as invisible to every
+    check in this repo. An unnecessary push costs a version entry; a missed one
+    costs a silent divergence between SCM and the firewall."""
+    run = _apply_loop()
+    i = run.index('could not read enrich output')
+    assert "moved=1" in run[i:i + 400], "unknown must mean PUSH, not skip"
