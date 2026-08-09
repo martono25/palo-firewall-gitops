@@ -237,6 +237,13 @@ jobs:
               exit 1
             fi
 
+            # TAGS FIRST. The API validates tags as REFERENCES and rejects
+            # free-form strings (INVALID_REFERENCE), so a rule cannot apply
+            # before its tags exist — and Terraform no longer creates them
+            # (ADR-0009: it ran a tag DESTROY before the rule UPDATE that
+            # released it and 409'd). Idempotent; creates only what is missing.
+            fwgitops tags ensure "$folder"
+
             # -parallelism=1 REQUIRED: the scm provider cannot handle concurrent
             # token acquisition (spike 2026-07-19) — serial apply only.
             terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1 \
@@ -324,6 +331,17 @@ jobs:
               echo "nothing staged for $folder (apply: 0 changed, enrich: no moves)"
               echo "  — skipping push, which would mint an empty commit job"
             fi
+
+            # SWEEP AFTER THE PUSH, and never in the same operation as the rule
+            # change that released the tag — that ordering IS the fix (ADR-0009).
+            #
+            # NON-FATAL. By here the firewall is already updated, so failing the
+            # job would turn leftover garbage into a red apply for a change that
+            # succeeded. An unreferenced tag is inert. The warning is the whole
+            # signal, though: nothing else reports these, so a sweep that quietly
+            # stops working accumulates unnoticed.
+            fwgitops tags sweep "$folder" \
+              || echo "::warning::$folder: tag sweep failed — unreferenced gitops: tags may remain"
             echo "::endgroup::"
           done
 

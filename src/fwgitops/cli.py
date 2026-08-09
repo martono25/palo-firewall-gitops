@@ -1844,6 +1844,92 @@ def _removes_trailers(change_message_path: Optional[Path], err):
         return None
 
 
+def run_tags(
+    action: str,
+    scope_dir: str,
+    intent_root: Path = Path("intent"),
+    env_map_path: Path = Path("catalog/environments.yaml"),
+    *,
+    service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
+    dry_run: bool = False,
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Create or sweep this platform's tag objects (ADR-0009).
+
+    Terraform CREATES nothing and DESTROYS nothing here: changing a tag value on
+    a live rule made Terraform run the destroy before the update that released
+    it, and SCM refused with 409 NON_ZERO_REFS (measured,
+    `spike/tag-destroy-ordering`). So the halves are separated in time — this
+    command is both of them.
+
+    `ensure` runs BEFORE apply: the API validates tags as references and rejects
+    free-form strings, so a rule cannot be applied before its tags exist.
+    `sweep` runs AFTER push, and only ever removes a `gitops:` tag that nothing
+    references.
+
+    Exit codes:  0 ok · 1 usage/IO/auth · 2 invalid intent.
+    """
+    from fwgitops.clients import ScmPushClient  # noqa: F401  (auth stack)
+    from fwgitops.compiler import Scope
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+    from fwgitops.tagsweep import ensure_tags, sweep_tags
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
+    if not ok:
+        return 1
+    items, code = _compile_intents(intent_root, env_map_path, cats, err)
+    if items is None:
+        return code
+
+    scope = Scope.from_dirname(scope_dir)
+    # Every tag any object or rule IN THIS SCOPE carries. Derived from the
+    # compiled desired state, so it is exactly what the next apply will
+    # reference — which is why a tag in this set is never swept even when
+    # nothing references it yet.
+    wanted = set()
+    for _p, _req, ch in items:
+        handler = handler_for_request(_req)
+        if handler.scope_of(ch).key != scope.key:
+            continue
+        for obj in (list(getattr(ch, "address_objects", []))
+                    + list(getattr(ch, "service_objects", []))
+                    + ([ch.rule] if hasattr(ch, "rule") else [])):
+            wanted.update(getattr(obj, "tags", []) or [])
+
+    try:
+        session = session or ScmSession(ScmCredentials.from_env())
+        params = {"folder": scope.value} if scope.kind == "folder" else {"device": scope.value}
+        fn = ensure_tags if action == "ensure" else sweep_tags
+        plan = fn(session, params, sorted(wanted), dry_run=dry_run)
+    except ScmConfigError as e:
+        print(f"error: {e}", file=err)
+        return 1
+    except ScmApiError as e:
+        print(f"error: SCM API: {e}", file=err)
+        return 1
+
+    verb = "would " if dry_run else ""
+    made, gone = ("create", "remove") if dry_run else ("created", "removed")
+    if action == "ensure":
+        print(f"OK — {verb}{made} {len(plan.missing)} tag(s) in {scope}; "
+              f"{len(plan.referenced)} already referenced, {plan.foreign} not ours",
+              file=out)
+        for n in plan.missing:
+            print(f"  + {n}", file=out)
+    else:
+        print(f"OK — {verb}{gone} {len(plan.unreferenced)} unreferenced tag(s) in "
+              f"{scope}; {len(plan.referenced)} still referenced, {plan.foreign} not ours",
+              file=out)
+        for n in plan.unreferenced:
+            print(f"  - {n}", file=out)
+    return 0
+
+
 def run_push(
     folder: Optional[str] = None,
     *,
@@ -2294,6 +2380,21 @@ def build_parser() -> argparse.ArgumentParser:
                          "never folder=.")
     sn.add_argument("--out", required=True, type=Path, help="where to write the snapshot JSON")
 
+    tg = sub.add_parser("tags",
+                        help="create or sweep this platform's tag objects (ADR-0009)")
+    tg.add_argument("action", choices=("ensure", "sweep"),
+                    help="ensure: create missing tags, run BEFORE apply. "
+                         "sweep: remove `gitops:` tags nothing references, run AFTER push. "
+                         "Terraform does neither — it ran a tag destroy before the rule "
+                         "update that released it and 409'd (spike/tag-destroy-ordering).")
+    tg.add_argument("scope_dir",
+                    help="a Terraform root DIRECTORY name (`prod-edge` or `device-<serial>`)")
+    tg.add_argument("intent_root", nargs="?", default=Path("intent"), type=Path)
+    tg.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path)
+    tg.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
+    tg.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+    tg.add_argument("--dry-run", action="store_true", help="report, write nothing")
+
     p = sub.add_parser("push", help="push a folder's or firewall's staged config to SCM (T13)")
     p.add_argument("folder", nargs="?", default=None, help="SCM folder to push")
     p.add_argument("--device", default=None,
@@ -2449,6 +2550,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                   "folder= (which returns 400 'Folder doesn't exist').", file=sys.stderr)
             return 1
         return run_snapshot(args.kind, args.folder, args.out, device=args.device)
+    if args.command == "tags":
+        return run_tags(
+            args.action, args.scope_dir, args.intent_root, args.env_map,
+            service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+            dry_run=args.dry_run,
+        )
     if args.command == "push":
         if args.scope_dir:
             from fwgitops.compiler import Scope

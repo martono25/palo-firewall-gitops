@@ -3,6 +3,66 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.42.0] — 2026-08-10
+
+### Terraform creates tag objects; it no longer destroys them (ADR-0009)
+
+Changing a tag VALUE on a live rule failed the apply. MEASURED 2026-08-10
+(`spike/tag-destroy-ordering`): Terraform planned the rule update, the new tag
+and the old tag's destroy correctly — then ran the **destroy before the update**,
+and SCM refused with `409 NON_ZERO_REFS`. The rule update never ran, with
+`-parallelism=1`, so it is ordering and not a race. Once the rule's config stops
+referencing the old tag, nothing orders the destroy after the update: the edge
+that existed for creation is gone exactly when destruction needs it.
+
+Narrow, and confirmed narrow — it fires only where the rule is UPDATED in place.
+Removing a whole rule orders correctly (measured 2026-08-09). The trigger is a
+**corrected ticket number**.
+
+**The halves are now separated in time:**
+
+```
+fwgitops tags ensure <scope>    before apply — create what is missing
+terraform apply + push
+fwgitops tags sweep  <scope>    after push   — remove what nothing references
+```
+
+`scm_tag` leaves the module. Existing tags are dropped from state with a
+`removed { lifecycle { destroy = false } }` block, so Terraform **forgets** them
+rather than destroying them — without it the first apply would try to destroy
+every tag at once and 409 on all of them. Verified against the real S3 state:
+`Plan: 0 to add, 0 to change, 0 to destroy`, twelve tags reading *"will no longer
+be managed by Terraform, but will not be destroyed"*. Both roots plan clean.
+
+**Two fail-safe rules in the sweep, both mutation-tested:**
+
+* Only `gitops:` tags are ever touched. A tag this platform did not create is not
+  ours to tidy, whatever references it.
+* A tag is removed only when NOTHING references it, and references are read from
+  SCM rather than inferred from the intent tree — an object created outside
+  GitOps can reference a `gitops:` tag, and deleting it would break their config
+  to tidy ours. A failed reference read sweeps nothing: a partial set makes a
+  referenced tag look unreferenced.
+
+A tag the NEXT apply wants is also protected, covering the window between
+`ensure` and the apply that references it.
+
+**The sweep cannot fail the apply.** By the time it runs the firewall is already
+updated, so a failure warns rather than reddening a change that succeeded.
+
+### A claim in the ADR that did not survive checking
+
+The first draft said drift must be taught that an unreferenced `gitops:` tag is
+expected. It does not: nothing in `drift.py` or `catalogcheck.py` enumerates tag
+OBJECTS — the tag-based engine reads the `tag` ATTRIBUTE of rules, and the object
+list is never fetched. So an orphan was always invisible.
+
+Which cuts the other way, and the ADR now says so: **if the sweep stops running,
+nothing reports the accumulating garbage.** No check covers it and this change
+adds none. Accepted deliberately, recorded as a gap rather than left implicit.
+
+764 tests.
+
 ## [1.41.1] — 2026-08-09
 
 ### Correction: `scaffold-root --check` does not ignore defaults

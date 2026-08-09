@@ -17,38 +17,46 @@
 
 locals {
   # LITERAL service values — passed through UNRESOLVED, because they name no
-  # object. `application-default` is what an application-matched rule (ICMP)
-  # carries: scm_service requires a port, so ICMP cannot be a service object at
-  # all. MEASURED in spike/icmp-service-shape (2026-08-09): SCM accepts
-  # `application-default` and `any`, and REJECTS a rule with no service key at
-  # all (400 "service" is required) even though the provider schema marks the
-  # attribute optional.
-  #
-  # Anything NOT in this set is still resolved through scm_service.this, which
-  # keeps the fine-grained dependency edge that orders object-before-rule. A
-  # literal has no object to depend on, so nothing is lost by skipping it — and
-  # a typo'd service name still fails loudly on the lookup rather than being
-  # passed through as a literal.
+  # object. See the security-rule resource below.
   literal_services = toset(["application-default", "any"])
-
-  # Every distinct tag used by any object or rule must exist as an scm_tag.
-  managed_tags = toset(flatten(concat(
-    [for o in values(var.address_objects) : o.tags],
-    [for o in values(var.service_objects) : o.tags],
-    [for r in values(var.security_rules) : r.tags],
-  )))
 }
 
-# ── Tag objects (must exist before anything references them) ──────────────
-resource "scm_tag" "this" {
-  for_each = local.managed_tags
+# ── Tag objects: CREATED ELSEWHERE, DESTROYED ELSEWHERE (ADR-0009) ────────
+#
+# `scm_tag` used to live here, for_each over every tag any object or rule used.
+# That made Terraform own the whole lifecycle — and MEASURED 2026-08-10
+# (spike/tag-destroy-ordering), changing one tag VALUE on a live rule failed the
+# apply: Terraform ran the tag DESTROY before the rule UPDATE that released it,
+# and SCM refused with 409 NON_ZERO_REFS. Once the rule's config no longer
+# REFERENCES the old tag, nothing orders the destroy after the update — the edge
+# that existed for creation is gone exactly when destruction needs it.
+#
+# Neither workaround survives review: `-target` on the rules pulls the tag in and
+# plans the destroy anyway, and `depends_on = [scm_tag.this]` is the pattern this
+# module REMOVED once already, because it made every rule depend on every object
+# and a `destroy -target` of one address cascaded into destroying ALL rules.
+#
+# So the halves are separated in time (ADR-0009):
+#
+#   fwgitops ensure-tags   before apply — create what is missing
+#   terraform apply + push
+#   fwgitops sweep-tags    after push   — remove what nothing references
+#
+# Tags are still REFERENCED by name below. The API validates them as references
+# and rejects free-form strings (INVALID_REFERENCE), so `ensure-tags` running
+# first is load-bearing, not a convenience.
 
-  name     = each.value
-  folder   = var.folder
-  comments = "Managed by fwgitops"
+# FORGET the tag objects Terraform already manages; do NOT destroy them. Without
+# this, the first apply after the change above would try to destroy every tag at
+# once — and 409 on all of them, since the rules still reference them.
+removed {
+  from = scm_tag.this
+
+  lifecycle {
+    destroy = false
+  }
 }
 
-# ── Address objects ───────────────────────────────────────────────────────
 resource "scm_address" "this" {
   for_each = var.address_objects
 
@@ -61,7 +69,7 @@ resource "scm_address" "this" {
 
   # Reference each tag resource (not raw strings) so this object depends on ONLY
   # the tags it uses — a fine-grained edge, not a blanket `depends_on`.
-  tag = [for t in each.value.tags : scm_tag.this[t].name]
+  tag = each.value.tags
 }
 
 # ── Service objects ───────────────────────────────────────────────────────
@@ -78,7 +86,7 @@ resource "scm_service" "this" {
     udp = each.value.protocol == "udp" ? { port = each.value.port } : null
   }
 
-  tag = [for t in each.value.tags : scm_tag.this[t].name]
+  tag = each.value.tags
 }
 
 # ── Security rules ────────────────────────────────────────────────────────
@@ -112,7 +120,7 @@ resource "scm_security_rule" "this" {
   destination = [for d in each.value.destinations : scm_address.this[d].name]
   service = [for v in each.value.services :
   contains(local.literal_services, v) ? v : scm_service.this[v].name]
-  tag = [for t in each.value.tags : scm_tag.this[t].name]
+  tag = each.value.tags
 
   action   = each.value.action
   log_end  = each.value.log_end
