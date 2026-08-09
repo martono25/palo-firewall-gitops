@@ -524,10 +524,14 @@ null, a plan against the live folder still showed `+ relative_position =
 `optional(string, "bottom")` substitutes its default when the value is NULL, and
 it was in the ROOT's variables.tf as well as the module's.
 
-**`scaffold-root --check` passed throughout**, because it compares attribute
-NAMES and not DEFAULTS. A root can therefore mirror the module structurally while
-re-defaulting a null — a hole in the guard that ADR-0004 relies on. Pinned by a
-test for `relative_position`; the general case is not fixed.
+**`scaffold-root --check` passed throughout, and was RIGHT to.** It compares the
+root's `variables.tf` against a freshly rendered one, in full — types and
+defaults included — and `render_variables` copies the module's blocks verbatim.
+The root was not drifting: the MODULE carried the bad default and the root
+mirrored it faithfully. A mirror cannot detect that its subject is wrong.
+
+An earlier version of this entry claimed the check ignored defaults. That was
+wrong and is corrected here rather than deleted.
 
 **STILL TRUE, and not fixed by this:** Terraform cannot SEE ordering drift.
 `relative_position` is a create/update instruction, not a stored property, so a
