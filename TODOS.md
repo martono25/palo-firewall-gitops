@@ -669,15 +669,35 @@ platform's own changes. Without it every connectivity question has to be posed
 as a TCP service that may not exist on the far side — which is exactly the
 wrong-shaped test that cost hours in this session.
 
-**Direction:** PAN-OS matches ICMP by APPLICATION (`ping`) with `service: any`,
-not by a port-based service. The intent model already has an `application`
-field, so the change sits in the SERVICE half: allow an application-defined
-service, or accept `protocol: icmp` and compile it to `service: any` +
-`application: ping`. Take care not to weaken port validation for tcp/udp — an
-`icmp` protocol that silently ignores `port` would be its own trap.
+**Direction — now MEASURED, not guessed** (`spike/icmp-service-shape`, 2026-08-09):
 
-**Effort:** M — intent model, compiler, and the Terraform service mapping.
-**Priority:** P2
+| variant | outcome |
+|---|---|
+| `application: [ping]`, no `service` key | **REJECTED 400** — `"service" is required` |
+| `application: [ping]`, `service: [any]` | created, read back identical |
+| `application: [ping]`, `service: [application-default]` | created, read back identical |
+
+**Build on `application-default`.** Both accepted shapes work and they are NOT
+equivalent: `any` matches the `ping` App-ID on any protocol/port, while
+`application-default` restricts it to ICMP echo — what was asked for and nothing
+else.
+
+**Carried finding, wider than ICMP:** the provider schema marks `service`
+OPTIONAL and SCM REQUIRES it. A rule Terraform would plan happily is refused by
+the API, so "optional in the schema" cannot be read as "omittable".
+
+**Remaining work:**
+
+* intent — accept `protocol: icmp`, REJECT a `port` alongside it (an `icmp` that
+  silently ignores `port` would be its own trap), and REJECT mixing icmp with
+  tcp/udp in one request: `service` is a rule-level list, so mixing changes what
+  the other entries mean.
+* compiler — emit `service: [application-default]` + `application: [ping]`.
+* Terraform module — `main.tf:98` maps every service name through
+  `scm_service.this[...]`, so a literal cannot pass today.
+* NOT answered by the probe: what the DEVICE enforces. Nothing was pushed.
+
+**Effort:** M · **Priority:** P2
 
 
 ### ~~Zone deletion path~~ — TESTED END TO END 2026-08-05, FAILS CLOSED
