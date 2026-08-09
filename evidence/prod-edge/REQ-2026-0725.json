@@ -1,0 +1,135 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31304463821"
+  },
+  "approval": {
+    "approvers": [],
+    "gate": null,
+    "merge_commit": "776302289b18d9a075725dddcb8d98c29816ffac",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/101"
+  },
+  "compiled": {
+    "compiler_version": "1.0.0",
+    "object": {
+      "address_objects": [
+        {
+          "name": "addr-85c1076cfe",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.20.1.0/24"
+        },
+        {
+          "name": "addr-beed1e7b50",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.20.20.10/32"
+        }
+      ],
+      "rule": {
+        "action": "allow",
+        "application": [
+          "any"
+        ],
+        "category": [
+          "any"
+        ],
+        "description": null,
+        "destinations": [
+          "addr-beed1e7b50"
+        ],
+        "from_zones": [
+          "local"
+        ],
+        "log_end": true,
+        "log_setting": null,
+        "log_start": false,
+        "name": "REQ-2026-0725",
+        "negate_destination": false,
+        "negate_source": false,
+        "profile_group": null,
+        "relative_position": "bottom",
+        "rulebase": "pre",
+        "services": [
+          "svc-fd64e1b89a"
+        ],
+        "source_user": [
+          "any"
+        ],
+        "sources": [
+          "addr-85c1076cfe"
+        ],
+        "tags": [
+          "gitops:managed",
+          "gitops:req:REQ-2026-0725",
+          "gitops:section:specific-allow",
+          "gitops:ticket:JIRA-20725"
+        ],
+        "target_rule": null,
+        "to_zones": [
+          "internet"
+        ]
+      },
+      "service_objects": [
+        {
+          "name": "svc-fd64e1b89a",
+          "port": "443",
+          "protocol": "tcp",
+          "tags": [
+            "gitops:managed"
+          ]
+        }
+      ]
+    },
+    "object_sha256": "34e5b32f5d04157eac78dee476e2f292f447a494f35e997ec4e46e4b7155ed16",
+    "scope": {
+      "kind": "folder",
+      "value": "prod-edge"
+    },
+    "tfvars_file": "rules.auto.tfvars.json",
+    "tfvars_sha256": "e3727960b8de265345ee650ffd7006c364a113648af76c4f14e22d606a0adaac"
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7"
+  ],
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-09T08:51:26Z",
+  "kind": "AccessRequest",
+  "push": null,
+  "req_id": "REQ-2026-0725",
+  "request": {
+    "intent_file": "intent/prod/observability/REQ-2026-0725.yaml",
+    "intent_sha256": "abbbd58d36ab0088603630256b3ed9a125234bba9c8359398a84e34807a78a90",
+    "justification": "Web tier ships logs/metrics to the central observability collector",
+    "requested": "2026-07-25",
+    "requester": "martono@corp",
+    "ticket": "JIRA-20725"
+  },
+  "risk": {
+    "checks_fired": [
+      {
+        "check": "allow_without_inspection",
+        "reason": "allow rule has no security profile group \u2014 traffic is permitted without threat inspection",
+        "tier": "LOW"
+      }
+    ],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "applied"
+}

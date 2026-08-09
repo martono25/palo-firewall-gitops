@@ -1,0 +1,76 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31304463821"
+  },
+  "approval": {
+    "approvers": [],
+    "gate": null,
+    "merge_commit": "776302289b18d9a075725dddcb8d98c29816ffac",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/101"
+  },
+  "compiled": {
+    "compiler_version": "1.0.0",
+    "object": {
+      "device_acl": null,
+      "device_id": null,
+      "dos_log_forwarding": null,
+      "dos_profile": null,
+      "interfaces": [
+        "$eth-dmz"
+      ],
+      "log_forwarding": "log-best",
+      "name": "dmz",
+      "protection_profile": "best-practice",
+      "user_acl": null,
+      "user_id": null,
+      "zone_type": "layer3"
+    },
+    "object_sha256": "d835a7a3fce15c526fb96bea4581042106d2d9a7f3d5127f2844644a30f9e4b5",
+    "scope": {
+      "kind": "folder",
+      "value": "prod-edge"
+    },
+    "tfvars_file": "zones.auto.tfvars.json",
+    "tfvars_sha256": "59bba52d716155376c081cb1d0381ccb4be2c8af027413b2e2dd192f5cb0ae4b"
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7"
+  ],
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-09T08:51:26Z",
+  "kind": "ZoneRequest",
+  "push": null,
+  "req_id": "REQ-2026-0806",
+  "request": {
+    "intent_file": "intent/prod/edge-fw-4453/REQ-2026-0806.yaml",
+    "intent_sha256": "222ed5b679f74a982bd224ac93bad26ffadc42e3d7ff6dae4ef4c0a5043f8952",
+    "justification": "Declare the dmz zone on the edge firewall folder and bind it to the DMZ interface addressed by REQ-2026-0805. Proves kind #2 end to end on real hardware \u2014 the last Day-1 kind never verified on a device.",
+    "requested": "2026-08-05",
+    "requester": "martono@corp",
+    "ticket": "JIRA-906"
+  },
+  "risk": {
+    "checks_fired": [
+      {
+        "check": "user_id_disabled_on_zone",
+        "reason": "User-ID is not enabled on zone 'dmz'; any rule matching on source_user will silently never match traffic here",
+        "tier": "LOW"
+      }
+    ],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "applied"
+}

@@ -1,0 +1,65 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31304463821"
+  },
+  "approval": {
+    "approvers": [],
+    "gate": null,
+    "merge_commit": "776302289b18d9a075725dddcb8d98c29816ffac",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/101"
+  },
+  "compiled": {
+    "compiler_version": "1.0.0",
+    "object": {
+      "comment": "Outside \u2014 managed by fwgitops",
+      "dhcp": false,
+      "ip": [
+        "10.100.2.142/24"
+      ],
+      "management_profile": null,
+      "mtu": 1500,
+      "name": "ethernet1/3"
+    },
+    "object_sha256": "99b8d80756bc708fb9d75cc2c87b927bf4fde7379adbfcce6dd9ec0ed3bb097f",
+    "scope": {
+      "kind": "device",
+      "value": "007955000894453"
+    },
+    "tfvars_file": "interfaces.auto.tfvars.json",
+    "tfvars_sha256": "8253738dd7913d3e9b8cc08b0f8bfcef6a6bfd69880927682f9c722424a0fd65"
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7"
+  ],
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-09T08:51:26Z",
+  "kind": "InterfaceRequest",
+  "push": null,
+  "req_id": "REQ-2026-0802",
+  "request": {
+    "intent_file": "intent/prod/edge-fw-4453/REQ-2026-0802.yaml",
+    "intent_sha256": "0ca62f6877aa6fa712fb55bbd0363a912a488de91667c94bb2bf897acc776ce4",
+    "justification": "Day-1 build for edge firewall fw-prod-edge-4453: address the outside interface so the internet zone can carry traffic. Completes the 1 mgmt + 2 dataplane topology.",
+    "requested": "2026-08-03",
+    "requester": "martono@corp",
+    "ticket": "JIRA-903"
+  },
+  "risk": {
+    "checks_fired": [],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "applied"
+}
