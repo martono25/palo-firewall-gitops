@@ -1,13 +1,18 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31304463821"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31322822785"
   },
   "approval": {
-    "approvers": [],
+    "approvers": [
+      {
+        "login": "martono25",
+        "via": "deployment_gate"
+      }
+    ],
     "gate": null,
-    "merge_commit": "776302289b18d9a075725dddcb8d98c29816ffac",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/101"
+    "merge_commit": "9ec84849fc66abbdb36eecd8fbb2cc82ee676da6",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/112"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -52,7 +57,7 @@
         "negate_destination": false,
         "negate_source": false,
         "profile_group": null,
-        "relative_position": "bottom",
+        "relative_position": null,
         "rulebase": "pre",
         "services": [
           "svc-fd64e1b89a"
@@ -85,28 +90,24 @@
         }
       ]
     },
-    "object_sha256": "34e5b32f5d04157eac78dee476e2f292f447a494f35e997ec4e46e4b7155ed16",
+    "object_sha256": "60c04344620d481e5641e22d2c113b3ee8845efaa3041a714810f5bdc86b33a5",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "e3727960b8de265345ee650ffd7006c364a113648af76c4f14e22d606a0adaac"
+    "tfvars_sha256": "d34f2926552e6987a7c867cc5c31ae321e3efe5edbce0d33bcae184b9fd06451"
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7"
+    "SC-7",
+    "CM-5"
   ],
-  "controls_not_evidenced": [
-    {
-      "control": "CM-5",
-      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
-    }
-  ],
-  "generated_at": "2026-08-09T08:51:26Z",
+  "controls_not_evidenced": [],
+  "generated_at": "2026-08-09T16:09:35Z",
   "kind": "AccessRequest",
   "push": null,
   "req_id": "REQ-2026-0725",

@@ -1,13 +1,18 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31308877939"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31322822785"
   },
   "approval": {
-    "approvers": [],
+    "approvers": [
+      {
+        "login": "martono25",
+        "via": "deployment_gate"
+      }
+    ],
     "gate": null,
-    "merge_commit": "e09046840432f19f2fbf9e505cb1d4eebb8d9b5c",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/107"
+    "merge_commit": "9ec84849fc66abbdb36eecd8fbb2cc82ee676da6",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/112"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -52,7 +57,7 @@
         "negate_destination": false,
         "negate_source": false,
         "profile_group": null,
-        "relative_position": "bottom",
+        "relative_position": null,
         "rulebase": "pre",
         "services": [
           "application-default"
@@ -76,28 +81,24 @@
       },
       "service_objects": []
     },
-    "object_sha256": "e367342a0d72974af333af9b821fda20077c71a94d7ec56b28ffaee7ec185356",
+    "object_sha256": "d68a4178ac82e605022afe5ce08e8814afaebb7d9ab9e7a5fb969fc18abac23e",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "973beb7e5616f293431d5879eaa200e559287a00d00467ef24c4e28f16c2cc49"
+    "tfvars_sha256": "d34f2926552e6987a7c867cc5c31ae321e3efe5edbce0d33bcae184b9fd06451"
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7"
+    "SC-7",
+    "CM-5"
   ],
-  "controls_not_evidenced": [
-    {
-      "control": "CM-5",
-      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
-    }
-  ],
-  "generated_at": "2026-08-09T10:41:03Z",
+  "controls_not_evidenced": [],
+  "generated_at": "2026-08-09T16:09:35Z",
   "kind": "AccessRequest",
   "push": null,
   "req_id": "REQ-2026-0809",
