@@ -1,0 +1,80 @@
+{
+  "cleanup": {
+    "PROBE-ICMP-B_service_any": "deleted",
+    "PROBE-ICMP-C_service_application_default": "deleted",
+    "PROBE-ICMP-D_control_tcp_service": "deleted"
+  },
+  "leftover_after_cleanup": [],
+  "results": {
+    "A_no_service_key": {
+      "created": false,
+      "error": "400: SCM API error 400: {\"_errors\": [{\"code\": \"API_I00035\", \"message\": \"Invalid Request Payload [object Object]\", \"details\": [\"\\\"service\\\" is required\"]}], \"_request_id\": \"6d07752a-b80e-4552-a694-58243b437201\"}",
+      "sent": {
+        "application": [
+          "ping"
+        ]
+      }
+    },
+    "B_service_any": {
+      "created": true,
+      "id": "e67fb4d8-ac85-432e-abb9-e05856eed0d9",
+      "read_back": {
+        "application": [
+          "ping"
+        ],
+        "service": [
+          "any"
+        ]
+      },
+      "sent": {
+        "application": [
+          "ping"
+        ],
+        "service": [
+          "any"
+        ]
+      }
+    },
+    "C_service_application_default": {
+      "created": true,
+      "id": "70b01304-09e0-4bbc-90dd-d984dede9b90",
+      "read_back": {
+        "application": [
+          "ping"
+        ],
+        "service": [
+          "application-default"
+        ]
+      },
+      "sent": {
+        "application": [
+          "ping"
+        ],
+        "service": [
+          "application-default"
+        ]
+      }
+    },
+    "D_control_tcp_service": {
+      "created": true,
+      "id": "0e870199-78a1-4701-972f-f887cd0d4c21",
+      "read_back": {
+        "application": [
+          "any"
+        ],
+        "service": [
+          "svc-fd64e1b89a"
+        ]
+      },
+      "sent": {
+        "application": [
+          "any"
+        ],
+        "service": [
+          "svc-fd64e1b89a"
+        ]
+      }
+    }
+  },
+  "rules_in_folder_after": 9
+}
