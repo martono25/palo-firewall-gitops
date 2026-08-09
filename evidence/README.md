@@ -1,7 +1,16 @@
 # evidence — NIST-mapped change evidence (Git-resident)
 
 One JSON record per change, written by `fwgitops.evidence`, committed to Git
-(Git = SSoT). Layout: `evidence/<folder>/<REQ-id>.json`.
+(Git = SSoT). Layout: `evidence/<scope>/<REQ-id>.json`, where `<scope>` is an
+SCM folder (`prod-edge/`) or a single firewall (`device-<serial>/`) — the same
+split the Terraform roots use, because a firewall is addressed `device=`, never
+`folder=`.
+
+**Every kind, since v1.36.0 (schema `fw-evidence/v2`).** Bundles used to be
+rule-shaped, so only `AccessRequest` produced one: ten intents in this repo
+produced five records, and changing a default route, an interface address or a
+zone left no audit trail at all. The bundle is now assembled from the kind
+registry, and a `kind` field says which one each record describes.
 
 An assessor or incident responder can reconstruct **what changed, who authorised
 it, why, and what the system checked** from the bundle alone — no CI logs, no
@@ -11,8 +20,9 @@ ticket archaeology, no SCM UI.
 
 | Section | Contains |
 |---|---|
-| `request` | requester, ticket, justification, expiry, intent file + sha256 |
-| `compiled` | folder, objects, rule, tags, compiler version, tfvars sha256 |
+| `kind` | which intent kind this record describes |
+| `request` | requester, ticket, justification, requested date, intent file + sha256 — **paperwork only** |
+| `compiled` | scope, the compiled object, compiler version, tfvars file + sha256 |
 | `risk` | tier, classifier + threshold versions, checks fired (Phase 2) |
 | `approval` | gate, approvers, PR, merge commit |
 | `apply` | plan sha256, CI run URL |
@@ -30,6 +40,14 @@ ticket archaeology, no SCM UI.
   want on record. Failure statuses require a `failure_reason`.
 - **Deterministic** — byte-stable JSON, so re-generating never churns Git.
 - **No secrets** — asserted by test.
+- **Paperwork and behaviour are separated** — `request` carries the change
+  record; anything describing what the firewall will do lives under `compiled`,
+  derived from the spec so it cannot silently disagree with it. Mixing the two
+  is what let an edited rule keep the ticket that authorised its previous
+  version (see `removal.stale_ticket_problems`).
+- **The object is serialised whole** — the v1 bundle listed rule fields by hand
+  and the list fell behind the compiler twice. A field added to a compiled type
+  now reaches the audit record without a second edit.
 
 ## Controls (NIST SP 800-53 Rev.5)
 

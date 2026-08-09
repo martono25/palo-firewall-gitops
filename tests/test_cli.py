@@ -228,10 +228,50 @@ def test_evidence_writes_bundle_with_risk_and_provenance(tmp_path, monkeypatch, 
     rc = run_evidence(intent_root, env_map, out, tfvars_root=tmp_path / "none")
     assert rc == 0
     b = json.loads((out / "prod-edge" / "REQ-2026-0417.json").read_text())
-    assert b["schema"] == "fw-evidence/v1" and b["status"] == "applied"
+    assert b["schema"] == "fw-evidence/v2" and b["status"] == "applied"
+    assert b["kind"] == "AccessRequest"
     assert b["risk"]["classifier_version"]                    # risk verdict recorded
     assert b["apply"]["run_url"].endswith("/actions/runs/42")  # CI provenance
     assert set(b["controls"]) >= {"AC-4", "CM-3", "AU-12"}
+
+
+def test_evidence_covers_EVERY_intent_in_the_shipped_tree(tmp_path):
+    """One bundle per intent file, whatever kind it is.
+
+    THE REGRESSION THIS PINS. `run_evidence` filtered to `AccessRequest`, so on
+    2026-08-08 the repo's ten intents produced five bundles — and the command
+    printed "wrote 5 evidence bundle(s)" and exited 0, so nothing anywhere said
+    the other five had no audit record. A `RouteRequest` decides where every
+    unmatched packet goes; changing one left nothing to read afterwards.
+
+    Counting against the TREE rather than a fixed number is the point: adding an
+    intent of a kind nobody wired into evidence fails here instead of shipping
+    with a silent hole.
+    """
+    from pathlib import Path
+
+    from fwgitops.io import discover_intents
+    from fwgitops.kinds import REGISTRY
+
+    repo = Path(__file__).resolve().parents[1]
+    out = tmp_path / "ev"
+    rc = run_evidence(repo / "intent", repo / "catalog" / "environments.yaml", out,
+                      tfvars_root=repo / "terraform",
+                      service_catalog_path=repo / "catalog" / "services.yaml",
+                      app_catalog_path=repo / "catalog" / "apps.yaml")
+    assert rc == 0
+    bundles = sorted(out.rglob("*.json"))
+    intents = discover_intents(repo / "intent")
+    assert len(bundles) == len(intents), (
+        f"{len(intents)} intents produced {len(bundles)} bundles — a change with "
+        f"no evidence is a change with no audit record")
+
+    kinds = {json.loads(p.read_text())["kind"] for p in bundles}
+    assert kinds == set(REGISTRY), f"no bundle for kind(s) {set(REGISTRY) - kinds}"
+    for p in bundles:
+        b = json.loads(p.read_text())
+        assert b["compiled"]["object"], f"{p.name}: empty compiled object"
+        assert b["risk"]["tier"] != "not_classified", f"{p.name}: unclassified"
 
 
 def test_evidence_rejects_invalid_intent_exits_2(tmp_path, capsys):

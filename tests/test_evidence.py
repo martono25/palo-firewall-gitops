@@ -40,7 +40,7 @@ def pieces(doc=None):
 def bundle(**kw):
     ar, ch = pieces()
     base = dict(
-        request=ar, change=ch, status="applied", generated_at=WHEN,
+        request=ar, compiled=ch, status="applied", generated_at=WHEN,
         intent_sha256=sha256_bytes(b"intent"), intent_path="intent/prod/x.yaml",
         tfvars_sha256=sha256_bytes(b"tfvars"), plan_sha256=sha256_bytes(b"plan"),
         ci=CIContext(pr_url="https://gh/pr/42", merge_commit="abc123",
@@ -76,16 +76,35 @@ def test_request_section_carries_provenance():
 
 def test_compiled_section_records_what_was_built():
     c = bundle()["compiled"]
-    assert c["folder"] == "prod-edge"
-    assert c["rule"]["from_zones"] == ["trust"] and c["rule"]["to_zones"] == ["app"]
-    assert c["rule"]["action"] == "allow"
-    assert any(t.startswith("gitops:req:") for t in c["tags"])
+    assert c["scope"] == {"kind": "folder", "value": "prod-edge"}
+    rule = c["object"]["rule"]
+    assert rule["from_zones"] == ["trust"] and rule["to_zones"] == ["app"]
+    assert rule["action"] == "allow"
+    assert any(t.startswith("gitops:req:") for t in rule["tags"])
     assert c["compiler_version"]                  # reproducibility
+    assert c["tfvars_file"] == "rules.auto.tfvars.json"
     assert len(c["tfvars_sha256"]) == 64
 
 
+def test_bundle_names_its_kind():
+    """v1 had no `kind`, because there was only ever one. A reader must not have
+    to infer it from which fields happen to be present."""
+    assert bundle()["kind"] == "AccessRequest"
+
+
+def test_request_section_is_paperwork_only():
+    """`action` and `environment` describe the FIREWALL, so they belong under
+    `compiled` — derived from the spec, unable to disagree with it. In v1 they sat
+    in `request` beside the ticket, which is the same conflation that let an
+    edited rule keep the ticket authorising the previous version of itself."""
+    r = bundle()["request"]
+    assert set(r) == {"requester", "ticket", "justification", "requested",
+                      "intent_file", "intent_sha256"}
+    assert bundle()["compiled"]["object"]["rule"]["action"] == "allow"
+
+
 def test_compiled_rule_records_adr0003_enrichment():
-    r = bundle()["compiled"]["rule"]
+    r = bundle()["compiled"]["object"]["rule"]
     # the effective (enriched) rule an assessor reads — set on-device by enrich
     for k in ("application", "profile_group", "log_setting",
               "rulebase", "relative_position", "target_rule"):
@@ -166,8 +185,8 @@ def test_mismatched_intent_and_change_refused():
     ar, ch = pieces()
     other = valid_doc(); other["metadata"]["id"] = "REQ-DIFFERENT"
     other_ar = __import__("fwgitops.intent", fromlist=["load_intent"]).load_intent(other)
-    with pytest.raises(EvidenceError, match="does not match compiled rule"):
-        build_bundle(request=other_ar, change=ch, status="applied", generated_at=WHEN)
+    with pytest.raises(EvidenceError, match="does not match compiled AccessRequest"):
+        build_bundle(request=other_ar, compiled=ch, status="applied", generated_at=WHEN)
 
 
 def test_no_credentials_leak_into_the_bundle():

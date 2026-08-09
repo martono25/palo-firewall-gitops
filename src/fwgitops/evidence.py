@@ -8,7 +8,27 @@ SCM UI.
     intent + compiled change + risk verdict + approval + apply + push
                               │
                               ▼
-              evidence/<folder>/<REQ-id>.json   (committed; Git = SSoT)
+              evidence/<scope>/<REQ-id>.json   (committed; Git = SSoT)
+
+EVERY KIND, NOT JUST RULES (v1.36.0, schema v2). The v1 bundle was rule-shaped:
+an explicit list of `SecurityRule` fields, a `request` block reading
+`spec.action`, and a path built from `change.rule.folder`. Nothing else could be
+expressed, so `fwgitops evidence` filtered to `AccessRequest` and ten intents
+produced five bundles — while printing "wrote 5 evidence bundle(s)" and exiting
+0. Changing a default route, an interface address or a zone left NO audit
+record, which is precisely the class of change an incident responder reaches for
+first.
+
+The bundle is now assembled from the kind registry (`kinds.evidence_object`),
+so the shape is the compiled dataclass rather than a list someone maintains.
+Two consequences worth stating plainly:
+
+  * `request` carries METADATA ONLY. `environment` and `action` moved into
+    `compiled.object`, where they belong: metadata is paperwork, spec is
+    firewall behaviour, and mixing them is what let a modified rule keep the
+    ticket that authorised the previous one (see `removal.stale_ticket_problems`).
+  * The path is keyed on SCOPE, not folder. `evidence/device-<serial>/…` for a
+    change targeting one firewall, matching the Terraform root layout.
 
 Design properties:
   * **Self-contained** — readable without any other system.
@@ -32,16 +52,14 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 from fwgitops import __version__
-from fwgitops.compiler import CompiledChange
-from fwgitops.intent import AccessRequest
 from fwgitops.push import PushResult
 
-EVIDENCE_SCHEMA = "fw-evidence/v1"
+EVIDENCE_SCHEMA = "fw-evidence/v2"
 
 #: Baseline controls every change record supports.
 BASE_CONTROLS: Tuple[str, ...] = ("AC-4", "CM-3", "CM-5", "AU-2", "AU-12", "SC-7")
@@ -114,10 +132,11 @@ class RiskVerdict:
 
 def build_bundle(
     *,
-    request: AccessRequest,
-    change: CompiledChange,
+    request: Any,
+    compiled: Any,
     status: str,
     generated_at: datetime,
+    handler: Any = None,
     intent_sha256: Optional[str] = None,
     intent_path: Optional[str] = None,
     tfvars_sha256: Optional[str] = None,
@@ -127,73 +146,65 @@ def build_bundle(
     push: Optional[PushResult] = None,
     failure_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Assemble the evidence record for one change.
+    """Assemble the evidence record for one change, whatever kind it is.
+
+    `handler` is the kind registry entry; it is looked up from `request` when
+    omitted, so a caller that already has it does not pay for a second search.
 
     `status` is applied / rejected / failed — failures are recorded, not dropped.
     """
+    from fwgitops.kinds import handler_for_request
+
     if status not in VALID_STATUSES:
         raise EvidenceError(f"status must be one of {VALID_STATUSES}, got {status!r}")
     if status in (STATUS_REJECTED, STATUS_FAILED) and not failure_reason:
         raise EvidenceError(f"status {status!r} requires a failure_reason")
-    if request.metadata.id != change.rule.name:
-        raise EvidenceError(
-            f"intent id {request.metadata.id!r} does not match compiled rule "
-            f"{change.rule.name!r} — refusing to emit mismatched evidence"
-        )
 
-    rule = change.rule
+    if handler is None:
+        handler = handler_for_request(request)
+    if not isinstance(compiled, handler.compiled_type):
+        raise EvidenceError(
+            f"{handler.kind} compiles to {handler.compiled_type.__name__}, got "
+            f"{type(compiled).__name__} — refusing to emit mismatched evidence")
+
+    # Where the compiled object carries its request id, the pairing is checked.
+    # Where it does not (a zone is named `dmz`), it is NOT — and saying so here
+    # is the point: an unchecked pairing that looks checked is how a bundle ends
+    # up describing the wrong change while claiming CM-3.
+    compiled_id = handler.evidence_id_of(compiled)
+    if compiled_id is not None and compiled_id != request.metadata.id:
+        raise EvidenceError(
+            f"intent id {request.metadata.id!r} does not match compiled "
+            f"{handler.kind} {compiled_id!r} — refusing to emit mismatched evidence")
+
+    scope = handler.scope_of(compiled)
     controls = list(BASE_CONTROLS)
     if risk.is_dual_control:
         controls.append(DUAL_CONTROL)
 
+    md = request.metadata
     bundle: Dict[str, Any] = {
         "schema": EVIDENCE_SCHEMA,
-        "req_id": request.metadata.id,
+        "kind": handler.kind,
+        "req_id": md.id,
         "status": status,
         "generated_at": _iso(generated_at),
+        # PAPERWORK ONLY — see the module note. Anything describing what the
+        # firewall will do belongs under `compiled`, which is derived from the
+        # spec and so cannot silently disagree with it.
         "request": {
-            "requester": request.metadata.requester,
-            "ticket": request.metadata.ticket,
-            "justification": request.metadata.justification,
-            "requested": request.metadata.requested.isoformat(),
-            "environment": request.spec.environment,
-            "action": request.spec.action,
+            "requester": md.requester,
+            "ticket": md.ticket,
+            "justification": md.justification,
+            "requested": md.requested.isoformat(),
             "intent_file": intent_path,
             "intent_sha256": intent_sha256,
         },
         "compiled": {
             "compiler_version": __version__,
-            "folder": rule.folder,
-            "address_objects": sorted(o.name for o in change.address_objects),
-            "service_objects": sorted(o.name for o in change.service_objects),
-            "rule": {
-                "name": rule.name,
-                "from_zones": list(rule.from_zones),
-                "to_zones": list(rule.to_zones),
-                "sources": list(rule.sources),
-                "destinations": list(rule.destinations),
-                "services": list(rule.services),
-                "action": rule.action,
-                "log_end": rule.log_end,
-                # ADR-0003 enrichment — the effective rule an assessor sees. These
-                # are set on-device by `fwgitops enrich` (the scm provider drops
-                # them); recording them from the compiled desired-state makes the
-                # bundle the full audit record, not just the skeleton.
-                "application": list(rule.application),
-                "profile_group": rule.profile_group,
-                "log_setting": rule.log_setting,
-                "rulebase": rule.rulebase,
-                "relative_position": rule.relative_position,
-                "target_rule": rule.target_rule,
-                # v1.0 completeness
-                "description": rule.description,
-                "log_start": rule.log_start,
-                "source_user": list(rule.source_user),
-                "category": list(rule.category),
-                "negate_source": rule.negate_source,
-                "negate_destination": rule.negate_destination,
-            },
-            "tags": list(rule.tags),
+            "scope": {"kind": scope.kind, "value": scope.value},
+            "object": _jsonable(handler.evidence_object(compiled)),
+            "tfvars_file": handler.tfvars_filename,
             "tfvars_sha256": tfvars_sha256,
         },
         "risk": {
@@ -220,14 +231,44 @@ def build_bundle(
     return bundle
 
 
+def _jsonable(value: Any) -> Any:
+    """Tuples -> lists, sets -> sorted lists, dates -> ISO, recursively.
+
+    Serialising compiled dataclasses whole means the bundle inherits whatever
+    types they use. `CompiledRoute.vrf_interfaces` is a tuple; `json.dumps`
+    renders that as a list anyway, but normalising here keeps the in-memory
+    bundle equal to the one a reader parses back, which is what the
+    byte-stability test compares.
+    """
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, (set, frozenset)):
+        return sorted(_jsonable(v) for v in value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
+
+
 def dumps(bundle: Dict[str, Any]) -> str:
     """Byte-stable JSON so re-generating never churns Git."""
     return json.dumps(bundle, sort_keys=True, indent=2) + "\n"
 
 
 def bundle_path(root: Path, bundle: Dict[str, Any]) -> Path:
-    folder = bundle["compiled"]["folder"]
-    return Path(root) / folder / f"{bundle['req_id']}.json"
+    """`evidence/<scope-dirname>/<req-id>.json`.
+
+    Keyed on SCOPE, not folder: a change targeting one firewall lands in
+    `evidence/device-<serial>/`, mirroring the Terraform root layout. Reading the
+    folder out of the bundle would have put a device-scoped change under a
+    directory named for a serial that SCM rejects as a folder — the same
+    folder-vs-device confusion that broke the drift job in v1.34.2.
+    """
+    from fwgitops.compiler import Scope
+
+    scope = bundle["compiled"]["scope"]
+    return Path(root) / Scope(**scope).dirname / f"{bundle['req_id']}.json"
 
 
 def write_bundle(bundle: Dict[str, Any], root: Path) -> Path:

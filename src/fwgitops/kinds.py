@@ -15,12 +15,24 @@ WHAT THIS REGISTRY DOES AND DOES NOT UNIFY
 ------------------------------------------
 Uniform across kinds, so registered here as callables:
 
-    compile · tfvars filename · tfvars payload · folder · classify
+    compile · tfvars filename · tfvars payload · folder · classify · evidence
 
-NOT uniform, and deliberately not forced into one signature:
+EVIDENCE WAS NOT UNIFORM, AND THAT WAS A HOLE, NOT A DESIGN. Until v1.36.0 this
+docstring argued that `build_bundle` reaching into rule-specific fields made a
+kind-agnostic bundle impossible. The consequence was measured on 2026-08-08: ten
+intents produced FIVE bundles. A `RouteRequest` decides where every unmatched
+packet goes, and changing one left no audit record at all — while the pipeline
+reported success and the workflow committed the bundles it did have. The
+"capability is declared, not faked" principle is right, but it was being used to
+declare a gap permanent instead of describing one.
 
-  * EVIDENCE — `build_bundle` takes a rule's request AND its compiled change and
-    reaches into rule-specific fields. There is no kind-agnostic bundle today.
+What made the bundle rule-shaped was an EXPLICIT field list in `evidence.py`.
+The fix is `evidence_object` below: the compiled dataclass serialised whole, so
+a kind describes itself and a field added to a compiled type appears in the
+bundle without anyone remembering to add it.
+
+STILL not uniform, and deliberately not forced into one signature:
+
   * DRIFT — genuinely two engines. Rules carry `gitops:` provenance tags, so
     drift can say WHO created something. `scm_zone` has no `tag` attribute (only
     14 of the provider's resources do), so zones use state-based drift against a
@@ -28,13 +40,14 @@ NOT uniform, and deliberately not forced into one signature:
 
 A protocol with optional members for the stages a kind cannot support would be
 an interface with holes — barely better than the isinstance chains it replaced.
-So capability is DECLARED (`drift_engine`, `has_evidence`) rather than faked,
-and a caller that needs one asks instead of assuming. Honest beats uniform.
+So capability is DECLARED (`drift_engine`) rather than faked, and a caller that
+needs one asks instead of assuming. Honest beats uniform — but "honest" has to
+be re-earned each time, because a declared gap is still a gap.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from fwgitops.compiler import (
@@ -54,6 +67,34 @@ from fwgitops.compiler import _compile_interface as _compile_interface_impl
 from fwgitops.compiler import _compile_route as _compile_route_impl
 from fwgitops.compiler import _compile_zone as _compile_zone_impl
 from fwgitops.intent import AccessRequest, InterfaceRequest, RouteRequest, ZoneRequest
+
+
+#: Scope lives ONCE in a bundle, as `compiled.scope`. Repeating it inside the
+#: object would let the two disagree, and a bundle that disagrees with itself
+#: about which firewall a change landed on is worse than one that omits it.
+_SCOPE_FIELDS = ("folder", "device")
+
+
+def _default_evidence_object(compiled: Any) -> Dict[str, Any]:
+    """The compiled dataclass, serialised whole, minus its scope fields.
+
+    Serialised WHOLE on purpose. The v1 bundle listed the rule's fields by hand
+    and the list went stale twice — `application`, `profile_group` and
+    `log_setting` were on the compiled rule for a release before anyone added
+    them here, so bundles claiming to be "the effective rule an assessor sees"
+    omitted the threat-inspection profile. An audit record that has to be
+    remembered separately from the thing it records will eventually not be.
+    """
+    if not is_dataclass(compiled):
+        raise TypeError(
+            f"{type(compiled).__name__} is not a dataclass, so it has no default "
+            f"evidence shape — register an `evidence_object` for its kind")
+    return {k: v for k, v in asdict(compiled).items() if k not in _SCOPE_FIELDS}
+
+
+def _no_evidence_id(compiled: Any) -> Optional[str]:
+    """This kind's compiled object does not carry its request id. See the field."""
+    return None
 
 
 @dataclass(frozen=True)
@@ -83,8 +124,25 @@ class KindHandler:
     #: and the state-aware classifier checks are driven off the registry rather
     #: than a hand-written block per kind.
     state_api_path: Optional[str]
-    #: Whether `evidence.build_bundle` accepts this kind at all.
-    has_evidence: bool
+    #: compiled -> the `compiled.object` block of an evidence bundle. Defaults to
+    #: the whole compiled dataclass minus its scope fields (which the bundle
+    #: records once, as `compiled.scope`), so a field added to a compiled type
+    #: reaches the audit record without a second edit here. A kind overrides this
+    #: only to say something the dataclass does not.
+    #:
+    #: `default_factory`, not a plain default: a bare function assigned as a
+    #: dataclass default becomes a CLASS attribute, and Python then binds it as a
+    #: method — `handler.evidence_object(c)` would silently pass the handler as
+    #: the first argument. The factory stores it per instance instead.
+    evidence_object: Callable[[Any], Dict[str, Any]] = field(
+        default_factory=lambda: _default_evidence_object)
+    #: compiled -> the request id the object carries, or None where it carries
+    #: none. A rule and a route are NAMED for their request, so a bundle can
+    #: verify it is pairing the right intent with the right object; a zone is
+    #: named `dmz`, so there is nothing to check and the guard says so rather
+    #: than inventing an assertion it cannot make.
+    evidence_id_of: Callable[[Any], Optional[str]] = field(
+        default_factory=lambda: _no_evidence_id)
     #: Kinds that must be APPLIED BEFORE this one (ADR-0002's ordered chain).
     #: Declared per kind rather than hard-coded in the CLI, for the same reason
     #: `drift_engine` is: a new kind states its own requirements and the
@@ -146,7 +204,16 @@ REGISTRY: Dict[str, KindHandler] = {
         report_prefix="",
         drift_engine="tag",
         state_api_path=None,   # rules use the tag-based engine      # rules carry gitops: provenance tags
-        has_evidence=True,
+        # A CompiledChange is a rule PLUS the address/service objects it needs,
+        # so the default (serialise the dataclass whole) already yields all
+        # three. The rule is lifted to the top so `object.rule` reads the same
+        # as it did in the v1 schema.
+        evidence_object=lambda c: {
+            "rule": _default_evidence_object(c.rule),
+            "address_objects": [_default_evidence_object(o) for o in c.address_objects],
+            "service_objects": [_default_evidence_object(o) for o in c.service_objects],
+        },
+        evidence_id_of=lambda c: c.rule.name,
     ),
     "InterfaceRequest": KindHandler(
         kind="InterfaceRequest",
@@ -162,7 +229,6 @@ REGISTRY: Dict[str, KindHandler] = {
         report_prefix="interface/",
         drift_engine="state",
         state_api_path="/config/network/v1/ethernet-interfaces",    # scm_ethernet_interface has no `tag` attribute
-        has_evidence=False,      # bundles are rule-shaped today
     ),
     "RouteRequest": KindHandler(
         kind="RouteRequest",
@@ -184,7 +250,12 @@ REGISTRY: Dict[str, KindHandler] = {
         report_prefix="route/",
         drift_engine="state",    # scm_logical_router has no `tag` attribute
         state_api_path="/config/network/v1/logical-routers",
-        has_evidence=False,
+        # `name` IS the request id — see CompiledRoute. Routes AGGREGATE into one
+        # router object, so this is the only kind where the bundle documents a
+        # change that shares its Terraform resource with other requests; the
+        # tfvars hash it records therefore covers the whole router, not just
+        # this route. Recorded rather than smoothed over.
+        evidence_id_of=lambda c: c.name,
     ),
     "ZoneRequest": KindHandler(
         kind="ZoneRequest",
@@ -200,7 +271,6 @@ REGISTRY: Dict[str, KindHandler] = {
         report_prefix="zone/",
         drift_engine="state",
         state_api_path="/config/network/v1/zones",    # scm_zone has no `tag` attribute
-        has_evidence=False,      # bundles are rule-shaped today
     ),
 }
 
