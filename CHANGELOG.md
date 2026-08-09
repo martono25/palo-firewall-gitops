@@ -3,6 +3,53 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.39.2] — 2026-08-09
+
+### The first successful apply skipped a whole scope and reported success
+
+Two defects, both found by RUNNING the pipeline rather than reading it. The apply
+itself was correct — `0 added, 0 changed, 0 destroyed`, push `job=178`, device on
+`v75`, drift clean — and it still exposed these.
+
+**A scope with no RULES was never applied.** The loop guarded on
+`rules.auto.tfvars.json`, so `device-007955000894453` — three InterfaceRequests,
+no rules — printed *"no rules in … — skip"* and Terraform never ran against it.
+Nothing broke, because those interfaces had already been applied by hand. But any
+LATER change to a device-scoped interface would silently never reach the
+firewall, and interfaces are the FIRST link in ADR-0002's ordered chain, so the
+ordering the loop exists to honour was not being executed for that scope at all.
+
+Same defect class as `_compile_intents` returning `AccessRequest` only and
+evidence bundles being rules-shaped: a rules-keyed guard inside a multi-kind
+pipeline. The guard now tests for ANY compiled tfvars; the rules check moved onto
+`enrich`, which genuinely is rules-only.
+
+`fwgitops push` gained `--scope-dir`, so the loop passes the Terraform root
+directory and `Scope.from_dirname` resolves it — `device-<serial>` is a directory
+name, and SCM rejects it as a folder. Stripping the prefix in YAML would have put
+a second copy of that mapping outside the one function that owns it, which is
+what broke the drift job in v1.34.2.
+
+**A dispatched apply recorded no removals.** The baseline step was
+`if: github.event_name == 'push'`. That condition is inverted against how
+removals actually reach production: a route or zone removal classifies HIGH, and
+HIGH *requires* a manual dispatch to clear the risk gate — so the one case that
+most needs a tombstone was the one case that could not produce one. The first
+dispatched apply duly printed *"no --baseline, so REMOVALS were not examined"*,
+which is the note doing its job and the workflow not doing its own.
+
+The baseline now resolves from `github.event.before` on a push and `HEAD^` on a
+dispatch, and the `Removes:` trailer falls back to the tip's own commit body.
+
+Both scripts were executed against fixtures before shipping — a simulated
+`terraform/` tree (device root now applies; a root with nothing compiled is still
+skipped) and a throwaway git repo (dispatch resolves `HEAD^` and reads the
+trailer; push uses the event values). Reading the shell had already misled me
+twice today.
+
+Mutation-tested three ways: the rules-only guard restored, the baseline made
+push-only again, and push given the bare dirname. 735 tests.
+
 ## [1.39.1] — 2026-08-09
 
 ### The repo documented an approval gate it has never had
