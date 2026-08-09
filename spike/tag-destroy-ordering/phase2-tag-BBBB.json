@@ -4,7 +4,7 @@
       "folder": "prod-edge",
       "name": "addr-probe-tag",
       "tags": [
-        "gitops:managed"
+        "gitops:ticket:PROBE-OBJ"
       ],
       "type": "ip-netmask",
       "value": "192.0.2.0/24"
@@ -46,7 +46,7 @@
         "addr-probe-tag"
       ],
       "tags": [
-        "gitops:managed",
+        "gitops:ticket:PROBE-OBJ",
         "gitops:ticket:PROBE-BBBB"
       ],
       "target_rule": null,
@@ -62,7 +62,7 @@
       "port": "65000",
       "protocol": "tcp",
       "tags": [
-        "gitops:managed"
+        "gitops:ticket:PROBE-OBJ"
       ]
     }
   }

@@ -1,4 +1,4 @@
-# Tag-destroy ordering — REPRODUCTION READY, NOT YET RUN
+# Tag-destroy ordering — REPRODUCTION READY (first attempt FAILED on a probe bug, fixed)
 
 **Does Terraform order "UPDATE the rule to drop a tag" before "DESTROY that tag"?**
 
@@ -61,7 +61,32 @@ not be read as confirmation.
   traffic and grants nothing.
 * **Local state in a scratch directory** — the real `prod-edge` state is never
   opened, so a failed run cannot corrupt it.
-* **Cleans up** with `terraform destroy`.
+* **Cleans up on the way out, INCLUDING FAILURE** (`trap cleanup EXIT`).
+
+## First attempt failed — two bugs in this probe, not in the thing being probed
+
+Run on 2026-08-09, phase 1:
+
+```
+Error: 400  OBJECT_ALREADY_EXISTS
+  .../container/entry[@name='prod-edge']/tag/entry[@name='gitops:managed']
+```
+
+**1. The probe shared a tag with live objects.** Its address and service objects
+carried `gitops:managed`, which already exists in `prod-edge` from the real
+pipeline. The scratch root has EMPTY state, so Terraform tried to create it and
+SCM refused. Every tag here is now owned by this probe alone
+(`gitops:ticket:PROBE-*`).
+
+**2. Cleanup ran only on success.** `set -euo pipefail` aborted phase 1 AFTER
+`gitops:ticket:PROBE-AAAA` had been created, so `terraform destroy` never ran and
+the tag was left orphaned in the live candidate (removed by hand afterwards).
+
+A probe that can only tidy up when it succeeds has it exactly backwards: failure
+is when objects get left behind. Now a `trap`, so it runs on every exit path.
+
+Neither bug says anything about the question being probed — phase 1 never
+completed, so nothing was learned about ordering.
 
 ## What the answer changes
 
