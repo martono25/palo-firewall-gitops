@@ -15,6 +15,22 @@ set -euo pipefail
 cd "$(dirname "$0")"
 : "${SCM_CLIENT_ID:?source ~/.fwgitops/scm.env first}"
 ROOT=$(mktemp -d)
+
+# CLEANUP ON THE WAY OUT, INCLUDING FAILURE. The first version cleaned up only on
+# the happy path, and the first real run proved why that is backwards: phase 1
+# aborted PART WAY THROUGH — after creating one tag — and `set -e` skipped the
+# cleanup entirely, leaving `gitops:ticket:PROBE-AAAA` orphaned in the live
+# candidate. Failure is exactly when cleanup matters, because a failed probe is
+# the one that leaves objects behind.
+cleanup() {
+  local rc=$?
+  echo
+  echo "── CLEANUP (exit $rc) ────────────────────────────────────────────"
+  terraform -chdir="$ROOT" destroy -input=false -auto-approve -parallelism=1 \
+    -no-color 2>&1 | tail -2 || echo "::warning::destroy failed — check for PROBE- objects in prod-edge"
+  echo "scratch root: $ROOT (local state; nothing was pushed)"
+}
+trap cleanup EXIT
 REPO=$(cd ../.. && pwd)
 cp "$REPO"/terraform/prod-edge/*.tf "$ROOT"/; rm -f "$ROOT"/backend.tf
 sed -i '' "s#\"../modules/security_folder\"#\"$REPO/terraform/modules/security_folder\"#" "$ROOT"/main.tf
@@ -42,7 +58,3 @@ else
   echo "RESULT: FAILED for another reason — read /tmp/phase2.txt before concluding anything"
 fi
 
-echo
-echo "── CLEANUP ───────────────────────────────────────────────────────"
-terraform destroy -input=false -auto-approve -parallelism=1 -no-color | tail -2
-echo "scratch root: $ROOT (local state; nothing was pushed)"
