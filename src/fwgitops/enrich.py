@@ -167,6 +167,13 @@ def _apply_ordering(
     local). A target that does not resolve is a fail-closed error.
     """
     rel = rule.relative_position
+    if rel is None:
+        # UNSPECIFIED — the requester expressed no opinion, so enrich must not
+        # touch this rule's position. Distinct from `bottom`, which is a request
+        # that happens to be satisfied already. Before v1.41.0 the two were the
+        # same value and this branch could not exist; without it, `None` falls
+        # through to the unknown-ordering error below and fails EVERY apply.
+        return False
     if rel == "bottom":
         return False
     if rel == "top":

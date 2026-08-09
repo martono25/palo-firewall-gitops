@@ -148,38 +148,37 @@ resource "scm_security_rule" "this" {
     group = [each.value.profile_group]
   }
 
-  # ORDERING IS DELIBERATELY NOT WIRED YET, and not because it does not work.
-  # `position` (the rulebase, pre|post) and `relative_position` (top|bottom|
-  # before|after) are both honoured by beta.4 — verified in spike/beta4-ordering.
+  # ORDERING — WIRED as of v1.41.0, and safe only because of what changed in the
+  # compiler alongside it.
   #
-  # The hazard is applying them to rules that ALREADY EXIST. The compiler
-  # defaults every rule to relative_position="bottom", so wiring it would send a
-  # move for five live rules at once, and rule order IS policy: a permissive rule
-  # above a deny is a different firewall. What that does to an existing rulebase
-  # has not been tested, and it does not need to ride along with the field fix
-  # below, which is what closes the profile_setting gap.
-  #
-  # PROBED 2026-08-04 (spike/ordering-existing) and the answer is DO NOT WIRE IT.
-  # A first-time add of relative_position="bottom" RE-STACKS the rulebase:
+  # The hazard was never the mechanism. PROBED 2026-08-04
+  # (spike/ordering-existing): a FIRST-TIME add of relative_position="bottom"
+  # RE-STACKS an existing rulebase —
   #
   #   before: charlie, bravo, alpha
   #   after:  alpha, charlie, bravo
   #
   # and not into for_each order either (alphabetical would be alpha, bravo,
-  # charlie) — each move-to-bottom lands in whatever order Terraform processes
-  # the map, which is not a guaranteed stable ordering. The plan shows only
-  # `+ relative_position = "bottom"`, so policy is rewritten silently.
+  # charlie): each move-to-bottom lands in whatever order Terraform processes the
+  # map, which is not a guaranteed stable ordering. The plan showed only
+  # `+ relative_position = "bottom"`, so policy would have been rewritten
+  # silently, for every rule at once. Rule order IS policy — a permissive rule
+  # above a deny is a different firewall.
   #
-  # The mechanism itself is fine: a no-change value is a no-op, and changing the
-  # value moves the rule cleanly. It is the compiler's BLANKET DEFAULT that is
-  # unsafe. Wiring this needs the compiler to emit relative_position only when
-  # the intent explicitly asked for a position, which the intent model cannot
-  # express today (`position` defaults to "bottom", so "unspecified" and
-  # "deliberately bottom" are the same value).
+  # What made that unsafe was the COMPILER'S BLANKET DEFAULT, not this argument:
+  # `position` defaulted to "bottom", so every rule carried a value nobody asked
+  # for. Since v1.41.0 an unspecified position is null all the way down, so a
+  # rule nobody positioned sends NOTHING and is never moved. Only a rule whose
+  # intent explicitly says `position:` carries a value here.
   #
-  # NOTE Terraform also cannot SEE ordering drift: relative_position is a
+  # The supporting findings still hold: a no-change value is a no-op (Terraform
+  # does not act), and changing the value moves the rule cleanly.
+  #
+  # NOTE Terraform still cannot SEE ordering drift: relative_position is a
   # create/update instruction, not a stored property, so a rule reordered
-  # out-of-band produces `No changes` on the next plan.
+  # out-of-band produces `No changes` on the next plan. Wiring this does not fix
+  # that, and nothing here should be read as claiming it does.
+  relative_position = each.value.relative_position
 
   # `target_rule` is DELIBERATELY NOT WIRED, and cannot be from here.
   #

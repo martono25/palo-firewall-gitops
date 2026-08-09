@@ -473,7 +473,7 @@ block gives `Error: Cycle`.
 Ordering itself is a separate item — see *Rule ORDERING via `relative_position`*
 below, deferred to v2.0.
 
-### Rule ORDERING via `relative_position` — DEFERRED to v2.0
+### ~~Rule ORDERING via `relative_position`~~ — WIRED v1.41.0
 
 **What:** move before/after rule ordering out of `src/fwgitops/enrich.py` and
 into the compiler + Terraform module, so the whole rule is one declarative write.
@@ -511,11 +511,27 @@ intent explicitly asked for a position. It cannot today: `position` defaults to
 `bottom`, so "unspecified" and "deliberately bottom" are the same value. That
 distinction has to exist in the intent model first.
 
-**Effort:** M — intent-model change, not a Terraform change.
-**Priority:** P2 (v2.0) — not urgent, but it is now a scoped v2.0 item rather
-than a someday-maybe. Ordering works via `enrich` in the meantime.
-**Depends on:** an intent model that can express "unspecified" separately from
-"bottom". Its provider fidelity probe is DONE (above) and passed.
+**BUILT v1.41.0**, exactly as scoped: an intent-model change, not a Terraform
+one. `spec.position` now defaults to **None (unspecified)** rather than
+`"bottom"`, and that null survives all the way to the provider — so a rule nobody
+positioned sends nothing and is never moved. `top`/`bottom` are wired into the
+module; `before`/`after` still go through `enrich`, because their UUID anchor is
+a self-reference Terraform rejects with `Error: Cycle`.
+
+**The plan caught what the tests could not.** With the compiler already emitting
+null, a plan against the live folder still showed `+ relative_position =
+"bottom"` on all five rules — the exact silent re-stack the spike warned about.
+`optional(string, "bottom")` substitutes its default when the value is NULL, and
+it was in the ROOT's variables.tf as well as the module's.
+
+**`scaffold-root --check` passed throughout**, because it compares attribute
+NAMES and not DEFAULTS. A root can therefore mirror the module structurally while
+re-defaulting a null — a hole in the guard that ADR-0004 relies on. Pinned by a
+test for `relative_position`; the general case is not fixed.
+
+**STILL TRUE, and not fixed by this:** Terraform cannot SEE ordering drift.
+`relative_position` is a create/update instruction, not a stored property, so a
+rule reordered out-of-band produces `No changes` on the next plan.
 
 ### Reject a malformed Terraform root instead of best-effort parsing
 
