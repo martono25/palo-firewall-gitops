@@ -28,8 +28,9 @@ below it. Those are not the same act and must not share a tier.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fwgitops.evidence import RiskVerdict
 
@@ -47,8 +48,14 @@ class Removal:
     #: The loaded request object from the BASELINE tree. A removal is classified
     #: on what it used to be — nothing in the current tree describes it.
     request: Any
-    #: Where the file lived, for the report.
+    #: Where the file lived, RELATIVE TO ITS INTENT ROOT — the baseline tree is a
+    #: scratch directory, so an absolute path would name somewhere that never
+    #: existed in the repository.
     path: Optional[str] = None
+    #: sha256 of the removed intent FILE. Identifies exactly which version was
+    #: withdrawn, and matches the `request.intent_sha256` of the record that
+    #: created it, so a tombstone and its predecessor are provably the same object.
+    sha256: Optional[str] = None
 
     @property
     def key(self) -> Tuple[str, str]:
@@ -190,5 +197,57 @@ def stale_ticket_problems(mods: Iterable[Modification]) -> List[str]:
                 f"evidence bundle for this change names the request that authorised the "
                 f"PREVIOUS one. Update `metadata.ticket` (and `requested`, and "
                 f"`justification` if the reason differs) to describe THIS change."
+            )
+    return problems
+
+
+# ── AUTHORISING A REMOVAL ─────────────────────────────────────────────────
+#: `Removes: REQ-2026-0727 (JIRA-31555)` — a git trailer naming what is being
+#: withdrawn and the ticket that authorises withdrawing it.
+REMOVES_TRAILER = re.compile(
+    r"^\s*Removes:\s*(?P<req>[A-Za-z0-9][A-Za-z0-9._-]*)\s*\(\s*(?P<ticket>[^)\s][^)]*?)\s*\)\s*$",
+    re.MULTILINE,
+)
+
+
+def parse_removes_trailers(message: str) -> Dict[str, str]:
+    """`req_id -> ticket` from a commit message or PR body.
+
+    WHY A TRAILER AND NOT A FIELD. A modified intent proves its own
+    authorisation: `stale_ticket_problems` requires `metadata.ticket` to change
+    with the spec. A REMOVAL cannot, because the fix is deleting the file — there
+    is nowhere left to write the new ticket. Left alone, the evidence for an
+    August deletion would carry the ticket that authorised the JULY creation:
+    the same false statement in a CM-3 artifact, arriving through deletion
+    instead of modification.
+
+    The trailer puts the authorisation where the change itself lives. It is read
+    from whatever text lands on `main` — with squash merges that is the PR title
+    and body, so `pr-validate` checks the PR body and `apply` checks the merged
+    commit. Neither is parsed here: this takes text and returns what it found.
+    """
+    return {m.group("req"): m.group("ticket").strip()
+            for m in REMOVES_TRAILER.finditer(message or "")}
+
+
+def removal_ticket_problems(removals: Iterable[Removal],
+                            trailers: Dict[str, str]) -> List[str]:
+    """Removals with no `Removes:` trailer authorising them.
+
+    FAIL CLOSED — a removal with no trailer is a problem, not a warning. The
+    whole point is that a deletion carries its own change ticket; accepting an
+    unauthorised one "because the metadata is still readable" would reinstate
+    exactly the misattribution this closes.
+    """
+    problems: List[str] = []
+    for r in removals:
+        if r.req_id not in trailers:
+            problems.append(
+                f"{r.req_id} ({r.kind}): deleted with no `Removes:` trailer. A removal "
+                f"needs its OWN change ticket — the intent's `metadata.ticket` "
+                f"authorised CREATING it, so reusing it would make the evidence for "
+                f"this deletion name the request that asked for the object. Add to the "
+                f"PR body (squash-merged, so it lands on main):\n"
+                f"        Removes: {r.req_id} (TICKET-123)"
             )
     return problems

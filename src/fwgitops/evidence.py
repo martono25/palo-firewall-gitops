@@ -69,7 +69,12 @@ DUAL_CONTROL = "AC-5"
 STATUS_APPLIED = "applied"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"
-VALID_STATUSES = (STATUS_APPLIED, STATUS_REJECTED, STATUS_FAILED)
+#: The object was destroyed in SCM AND the push delivering it succeeded — the
+#: same bar `applied` meets, deliberately. A destroy whose push is refused is
+#: `failed`, not `removed`: ADR-0008 measured exactly that during the route test,
+#: with SCM reporting no default route while the device still forwarded on one.
+STATUS_REMOVED = "removed"
+VALID_STATUSES = (STATUS_APPLIED, STATUS_REJECTED, STATUS_FAILED, STATUS_REMOVED)
 
 
 class EvidenceError(Exception):
@@ -117,6 +122,26 @@ class CIContext:
 
 
 @dataclass(frozen=True)
+class RemovalContext:
+    """What authorises a REMOVAL, as opposed to what authorised the object.
+
+    A modified intent proves its own authorisation — `stale_ticket_problems`
+    requires `metadata.ticket` to move with the spec. A removal cannot, because
+    the fix is deleting the file, so there is nowhere left to write the new
+    ticket. Without this, the record for an August deletion would carry the July
+    ticket that authorised CREATING the object: the same false CM-3 statement,
+    reached through deletion instead of modification.
+
+    So on a `removed` record the two are SEPARATE and both are kept:
+    `request.ticket` is what asked for the object, `removal.ticket` is what
+    asked for it to go.
+    """
+
+    ticket: str
+    commit: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class RiskVerdict:
     """Classifier output. Phase 1 has no classifier, hence the default."""
 
@@ -145,6 +170,7 @@ def build_bundle(
     ci: CIContext = CIContext(),
     push: Optional[PushResult] = None,
     failure_reason: Optional[str] = None,
+    removal: Optional[RemovalContext] = None,
 ) -> Dict[str, Any]:
     """Assemble the evidence record for one change, whatever kind it is.
 
@@ -159,6 +185,17 @@ def build_bundle(
         raise EvidenceError(f"status must be one of {VALID_STATUSES}, got {status!r}")
     if status in (STATUS_REJECTED, STATUS_FAILED) and not failure_reason:
         raise EvidenceError(f"status {status!r} requires a failure_reason")
+    # A removal MUST name what authorised it. Emitting one without would leave the
+    # record carrying only the ticket that authorised creating the object — the
+    # exact misattribution `RemovalContext` exists to prevent, so it fails rather
+    # than degrades.
+    if status == STATUS_REMOVED and (removal is None or not removal.ticket):
+        raise EvidenceError(
+            f"status {STATUS_REMOVED!r} requires a RemovalContext with a ticket — the "
+            f"intent's own ticket authorised CREATING the object, not removing it")
+    if removal is not None and status != STATUS_REMOVED:
+        raise EvidenceError(
+            f"a RemovalContext is only meaningful on status {STATUS_REMOVED!r}, got {status!r}")
 
     if handler is None:
         handler = handler_for_request(request)
@@ -235,6 +272,19 @@ def build_bundle(
         "push": push.to_evidence() if push is not None else None,
         "controls": controls,
     }
+    if removal is not None:
+        # SEPARATE from `request` on purpose. `request.*` describes the change
+        # being withdrawn; these describe the withdrawal. Merging them is what
+        # would let a deletion inherit the creation's authorisation.
+        bundle["removal"] = {
+            "ticket": removal.ticket,
+            "commit": removal.commit,
+            "authorises": "the removal — `request.ticket` authorised the object itself",
+        }
+        # The object is gone, so there is no tfvars file left to hash for it. Say
+        # so rather than leaving a null that reads like a failed lookup.
+        bundle["compiled"]["tfvars_sha256"] = None
+        bundle["compiled"]["object_is"] = "the LAST APPLIED state, from the baseline tree"
     if failure_reason:
         bundle["failure"] = {"reason": failure_reason}
     return bundle
