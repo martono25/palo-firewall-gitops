@@ -19,6 +19,48 @@ a cross-model challenge invalidated two of its load-bearing assumptions.
    with an *empty* interface list — a zone that carries no traffic. "Closing the
    ZoneRequest loop" without interfaces does not produce a working zone.
 
+
+## No human-approval gate exists — the tier gate is the only control
+
+**Found 2026-08-09 while preparing the first apply.** `apply.yml` claimed, in its
+header and beside `environment: firewall-apply`, that Phase 1 had *"human
+approval on EVERY change via the environment's required reviewers"*.
+
+    $ gh api repos/<repo>/environments/firewall-apply --jq .protection_rules
+    []
+
+**The control was never enabled, and could not have been.** Environment
+protection rules require Pro/Team/Enterprise on a PRIVATE repository; this repo
+is private on a personal account. So the claim was not "aspirational" — it named
+a feature the plan does not include, and nothing anywhere said so.
+
+Same shape as `expires` and as the bundle's unconditional CM-5: a control that
+reads as operating and is not. It is also the CAUSE of that CM-5 gap — evidence
+bundles record no approver because nothing requires an approval.
+
+**What is actually enforced today:** the fail-closed risk gate. It works, on any
+plan, and it has been holding since 2026-08-05 — `REQ-2026-0803` classifies HIGH
+(`default_route`), so every push-triggered apply stops there. But it BLOCKS
+rather than ROUTES: there is no way for a human to approve a HIGH change, only to
+re-dispatch at a higher tier, which is an override rather than an approval and is
+recorded as neither.
+
+**Options, none chosen:**
+
+* **Make the repo public** — environment protection is free on public repos.
+  Cheapest fix; the constraint is whether this content can be public.
+* **Upgrade the plan** — Pro enables environment protection on private repos.
+* **Move the gate to branch protection / CODEOWNERS** — approval happens on the
+  PR instead of the deployment. Works on any plan, but approves the *merge*, not
+  the *apply*, and the two are not the same act (see `Approver.via`).
+* **Accept it and stop claiming it** — done as of v1.39.0. The docs now describe
+  the tier gate as the only control, and bundles name CM-5 in
+  `controls_not_evidenced`.
+
+**Effort:** S (option 1 or 2) · **Priority:** P1 — not because the pipeline is
+unsafe, but because it was DESCRIBED as having a control it lacks, and that is
+the failure mode this project exists to remove.
+
 ## Completed
 
 ### A1 / A2 / A3 — ZoneRequest end to end — DONE v1.2.0

@@ -3,6 +3,43 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.39.1] — 2026-08-09
+
+### The repo documented an approval gate it has never had
+
+Preparing the first apply, `GET /environments/firewall-apply` returned
+`"protection_rules": []`. `apply.yml` claimed, in its header and beside
+`environment: firewall-apply`, *"human approval on EVERY change via the
+environment's required reviewers"*. README said high-risk changes "wait for
+human approval".
+
+**None of it was true, and none of it could have been.** Environment protection
+rules require a paid plan on a PRIVATE repository; this repo is private on a
+personal account. The claim named a feature the plan does not include, and
+nothing said so.
+
+Same shape as `expires`, as `DESIGN.md`, and as the bundle's unconditional CM-5 —
+and it is the CAUSE of that CM-5 gap: bundles record no approver because nothing
+requires an approval.
+
+**What is actually enforced** is the fail-closed risk gate, which works on any
+plan and has been holding since 2026-08-05: `REQ-2026-0803` classifies HIGH
+(`default_route`), so every push-triggered apply stops there. But it BLOCKS
+rather than ROUTES — a human cannot approve a HIGH change, only re-dispatch at a
+higher tier, which is an override, not an approval.
+
+Docs now say that. The gap is filed in TODOS.md with four options and none
+chosen, rather than annotated and forgotten.
+
+**Also corrected: the AWS OIDC backend is working.** `apply.yml` carried
+`⬜ SETUP REMAINING: create the GitHub-OIDC IAM role … until then this step
+fails`. A dispatched `pr-validate` ran `Configure AWS credentials (OIDC)` and
+`terraform plan` against both roots successfully. The note outlived the setup by
+weeks and made a working backend read as a stub — the mirror image of the same
+defect: documentation disagreeing with reality, in the safe direction this time.
+
+No behaviour change; comments, README and TODOS only.
+
 ## [1.39.0] — 2026-08-09
 
 > Developed in parallel with 1.37.0 and 1.38.0 and independent of both, so it was

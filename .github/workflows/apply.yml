@@ -1,18 +1,33 @@
 # ─────────────────────────────────────────────────────────────────────────
-# UNVALIDATED SCAFFOLDING. Applies the reviewed desired-state after merge.
+# Applies the reviewed desired-state after merge.
 #
-# PHASE 1: human approval on EVERY change via the `firewall-apply` environment's
-# required reviewers (there is no risk classifier yet). PHASE 2 slots for the
-# tier-driven routing (LOW auto / HIGH review / CRITICAL security sign-off) and
-# the window-aware scheduler are marked below. Auth (T1) + backend (Arch-2) are
-# stubbed with `# VERIFY:`.
+# WHAT ACTUALLY GATES A CHANGE HERE — measured 2026-08-09, because this header
+# claimed a control that does not exist:
+#
+#   * THE RISK GATE (real, and currently the only one). `fwgitops classify
+#     --gate` fails the job when any change exceeds the max-auto tier, which a
+#     push pins to LOW. It has been holding since 2026-08-05: `REQ-2026-0803`
+#     classifies HIGH (`default_route`), so every push-triggered apply stops
+#     there. Raising it requires an explicit, logged `workflow_dispatch`.
+#
+#   * REQUIRED REVIEWERS ON `firewall-apply` — CLAIMED HERE UNTIL v1.39.0, AND
+#     NEVER PRESENT. `GET /environments/firewall-apply` returns
+#     `"protection_rules": []`. Environment protection needs Pro/Team/Enterprise
+#     on a PRIVATE repository, and this one is private on a personal account, so
+#     it was never configurable — and nothing said so. The header asserted
+#     "human approval on EVERY change" over a control that had never been
+#     enabled, which is the same claimed-but-not-operating defect this project
+#     removed from `expires`, from `DESIGN.md`, and from the bundle's own CM-5.
+#
+#     This is why evidence bundles record no approver: nothing requires an
+#     approval, so `controls_not_evidenced` names CM-5 rather than claiming it.
+#     Tracked in TODOS.md with the options; NOT quietly re-asserted here.
+#
+# PHASE 2 slots for tier-driven routing (LOW auto / HIGH review / CRITICAL
+# security sign-off) and the window-aware scheduler are marked below.
 # ─────────────────────────────────────────────────────────────────────────
 name: apply
 
-# GATED: manual-only (workflow_dispatch) until the SCM-token (T1), backend, and
-# push (T13) steps are wired, so it doesn't auto-run and fail on every terraform
-# commit. Restore the push trigger below (and drop workflow_dispatch) once the
-# stubbed steps are implemented.
 on:
   # Auto-apply on merge to main. Fail-closed: a push runs the risk gate at LOW
   # (see the gate step's `|| 'LOW'`), so only LOW-risk changes auto-apply; HIGH/
@@ -69,7 +84,11 @@ jobs:
 
   apply:
     runs-on: ubuntu-latest
-    # PHASE 1: single protected environment = human approval on every change.
+    # NOT an approval gate — see the header. This environment carries no
+    # protection rules, so naming it buys deployment-history grouping and a
+    # place to scope secrets, nothing more. Kept because the protection can be
+    # switched on here the day the plan allows it; documented because a reader
+    # who sees `environment:` reasonably assumes it stops something.
     environment: firewall-apply
     # SCM auth for BOTH the scm Terraform provider and `fwgitops push`. Each does
     # its own client_credentials -> JWT exchange, so no separate token step.
@@ -145,9 +164,10 @@ jobs:
       - uses: hashicorp/setup-terraform@v4
 
       # AWS creds for the S3 state backend (Arch-2), via OIDC — no long-lived keys.
-      # ⬜ SETUP REMAINING: create the GitHub-OIDC IAM role (trust this repo) and
-      # put its ARN in the AWS_OIDC_ROLE_ARN repo variable. Until then this step
-      # fails and the terraform/backend below cannot run.
+      # WORKING as of 2026-08-09: the OIDC role is created, AWS_OIDC_ROLE_ARN is
+      # set, and a dispatched pr-validate ran this step and `terraform plan`
+      # against both roots successfully. The old "⬜ SETUP REMAINING" note here
+      # outlived the setup by weeks and made a working backend read as a stub.
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
