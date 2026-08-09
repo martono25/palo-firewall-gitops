@@ -197,7 +197,27 @@ jobs:
             # Skip run-once bootstraps (local state) and the shared module dir.
             case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
             [ -f "$dir/main.tf" ] || continue
-            [ -f "$dir/rules.auto.tfvars.json" ] || { echo "no rules in $folder — skip"; continue; }
+            # ANY compiled tfvars, not just RULES. This read
+            # `[ -f "$dir/rules.auto.tfvars.json" ]` until v1.39.2, so a scope
+            # holding only interfaces, zones or routes was skipped ENTIRELY and
+            # the job still reported success. Measured on the first successful
+            # apply (2026-08-09, run 31304463821): `device-007955000894453` holds
+            # three InterfaceRequests and no rules, printed "no rules … — skip",
+            # and Terraform never ran against it.
+            #
+            # Nothing broke that day only because those interfaces had already
+            # been applied by hand. Any LATER change to a device-scoped interface
+            # would silently never reach the firewall — and it is the FIRST link
+            # in ADR-0002's ordered chain, so the ordering the loop exists to
+            # honour was not being executed for that scope at all.
+            #
+            # Same defect class as `_compile_intents` returning AccessRequest
+            # only, and as evidence bundles being rules-shaped: a rules-keyed
+            # guard inside a multi-kind pipeline.
+            shopt -s nullglob
+            set -- "$dir"*.auto.tfvars.json
+            shopt -u nullglob
+            [ "$#" -gt 0 ] || { echo "nothing compiled for $folder — skip"; continue; }
             echo "::group::apply+push $folder"
             ./terraform/make-backend.sh "$folder"
             terraform -chdir="$dir" init -input=false -backend-config=backend.hcl
@@ -227,12 +247,22 @@ jobs:
             # the just-applied rules — landing in the SAME candidate, so the push
             # below commits skeleton + enrichment as one atomic change. Fail-closed:
             # if enrich errors, we never push.
-            fwgitops enrich "$folder"
+            # ENRICH IS RULES-ONLY, so it is conditional on rules — but the
+            # APPLY above is not. Conflating the two is what skipped the whole
+            # scope; the guard belongs on the rules-shaped step, not on the loop.
+            if [ -f "$dir/rules.auto.tfvars.json" ]; then
+              fwgitops enrich "$folder"
+            fi
             # Atomic commit boundary (Topic-1): terraform only STAGES config; this
             # push makes it live (scm provider has no push). The push is
             # admin-scoped (defaults to SCM_CLIENT_ID) so a shared-candidate folder
             # with out-of-band edits is safe — we only ever commit our own changes.
-            fwgitops push "$folder"
+            # --scope-dir, NOT "$folder": `device-<serial>` is a Terraform root
+            # DIRECTORY, and SCM rejects it as a folder ("Folder
+            # device-<serial> doesn't exist"). Stripping the prefix here instead
+            # would put a second copy of the mapping in YAML — the duplication
+            # that broke the drift job in v1.34.2.
+            fwgitops push --scope-dir "$folder"
             echo "::endgroup::"
           done
 
@@ -262,8 +292,18 @@ jobs:
       # for a squash-merged PR is the pre-merge tip; the head commit message is
       # the squashed PR title + body, which is where the `Removes:` trailer that
       # `pr-validate` checked ends up.
+      # RUNS ON DISPATCH TOO. This was `if: github.event_name == 'push'` until
+      # v1.39.2, and the condition was inverted against how removals actually
+      # reach production: a route or zone removal classifies HIGH, and HIGH
+      # REQUIRES a manual dispatch to clear the risk gate — so the one case that
+      # most needs a tombstone was the one case that could not produce one. The
+      # first dispatched apply (2026-08-09) printed "no --baseline, so REMOVALS
+      # were not examined", which is the note doing its job and the workflow not
+      # doing its own.
+      #
+      # `github.event.before` is empty on a dispatch, so the previous commit is
+      # resolved from git instead. `fetch-depth: 0` above makes that possible.
       - name: Materialise the baseline intent tree
-        if: github.event_name == 'push'
         env:
           # VIA env, never spliced into the script — see pr-validate.yml. A commit
           # message is still text someone else wrote.
@@ -271,13 +311,32 @@ jobs:
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          printf '%s\n' "$HEAD_MESSAGE" > /tmp/change-message.txt
-          if [ -n "$BEFORE" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            mkdir -p /tmp/base-intent
-            git archive "$BEFORE" intent | tar -x -C /tmp/base-intent
-            echo "BASELINE=/tmp/base-intent/intent" >> "$GITHUB_ENV"
+
+          # On a DISPATCH there is no head_commit, so the trailer comes from the
+          # tip's own message — which for a squash-merged PR is still the title
+          # and body `pr-validate` checked.
+          if [ -n "$HEAD_MESSAGE" ]; then
+            printf '%s\n' "$HEAD_MESSAGE" > /tmp/change-message.txt
           else
-            echo "::warning::base commit unavailable — REMOVALS will produce no evidence"
+            git log -1 --format=%B > /tmp/change-message.txt
+          fi
+
+          # `github.event.before` on a push; the parent of the tip on a dispatch.
+          base="$BEFORE"
+          if [ -z "$base" ]; then
+            base=$(git rev-parse --verify --quiet HEAD^ || true)
+          fi
+
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            mkdir -p /tmp/base-intent
+            git archive "$base" intent | tar -x -C /tmp/base-intent
+            echo "BASELINE=/tmp/base-intent/intent" >> "$GITHUB_ENV"
+            echo "baseline intent tree from $base"
+          else
+            # A root commit is the only legitimate way to get here, and it has no
+            # predecessor, so there is nothing to have removed. Still a warning:
+            # "no removals" and "could not look" must not be the same silence.
+            echo "::warning::no base commit resolved — REMOVALS will produce no evidence"
           fi
 
       # WHO APPROVED. The bundle claimed NIST CM-5 — "access restrictions for

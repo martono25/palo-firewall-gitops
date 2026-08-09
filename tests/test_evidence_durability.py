@@ -174,3 +174,64 @@ def test_no_approver_is_surfaced_rather_than_silently_dropping_the_control():
     broken token, and that is the distinction the warning preserves."""
     run = _step("Collect approval evidence")["run"]
     assert "::warning::" in run and "CM-5" in run
+
+
+# ── the apply loop must not be keyed on RULES ─────────────────────────────
+def _apply_loop() -> str:
+    return _step("terraform apply (stage) + SCM push")["run"]
+
+
+def test_a_scope_with_no_RULES_is_still_applied():
+    """MEASURED on the first successful apply (2026-08-09, run 31304463821): the
+    loop guarded on `rules.auto.tfvars.json`, printed "no rules in
+    device-007955000894453 — skip", and Terraform never ran against a root
+    holding three InterfaceRequests. The job reported success.
+
+    Nothing broke that day only because those interfaces had already been applied
+    by hand. Any later change to a device-scoped interface would silently never
+    reach the firewall — and interfaces are the FIRST link in ADR-0002's ordered
+    chain, so the ordering this loop exists to honour was not being executed for
+    that scope at all."""
+    run = _apply_loop()
+    assert '[ -f "$dir/rules.auto.tfvars.json" ] || { echo "no rules' not in run, (
+        "the apply must not be gated on a rules file — same defect class as "
+        "_compile_intents returning AccessRequest only")
+    assert '*.auto.tfvars.json' in run, "apply any scope with compiled output"
+
+
+def test_enrich_stays_rules_only_but_does_not_gate_the_apply():
+    """Enrich IS rules-shaped — that is fine. Conflating "this step needs rules"
+    with "this scope needs applying" is what skipped the whole root."""
+    run = _apply_loop()
+    i_apply = run.index("terraform -chdir=")
+    i_enrich = run.index("fwgitops enrich")
+    assert i_apply < i_enrich, "apply comes first"
+    assert 'if [ -f "$dir/rules.auto.tfvars.json" ]; then' in run, (
+        "the rules guard belongs on enrich, not on the loop")
+
+
+def test_push_resolves_the_scope_rather_than_stripping_a_prefix():
+    """`device-<serial>` is a Terraform root DIRECTORY; SCM rejects it as a
+    folder. Stripping the prefix in YAML would put a second copy of the mapping
+    outside `Scope.from_dirname` — the duplication that broke drift in v1.34.2."""
+    run = _apply_loop()
+    assert "fwgitops push --scope-dir" in run
+    assert "${folder#device-}" not in run and "${folder#device_}" not in run
+
+
+# ── removals must be recorded on the path they actually arrive by ─────────
+def test_the_baseline_is_materialised_on_a_DISPATCH_too():
+    """The condition was `if: github.event_name == 'push'`, which is inverted
+    against how removals reach production: a route or zone removal classifies
+    HIGH, and HIGH REQUIRES a manual dispatch to clear the risk gate. So the one
+    case that most needs a tombstone was the one case that could not produce
+    one."""
+    step = _step("Materialise the baseline intent tree")
+    assert "if" not in step or "github.event_name" not in str(step.get("if", "")), (
+        "the baseline step must not be push-only")
+    run = step["run"]
+    assert "HEAD^" in run, (
+        "`github.event.before` is empty on a dispatch, so the previous commit "
+        "must come from git")
+    assert "git log -1 --format=%B" in run, (
+        "the `Removes:` trailer must still be readable on a dispatch")

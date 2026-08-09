@@ -2300,6 +2300,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="push a FIREWALL instead (serial). A device-scope override belongs "
                         "to the firewall; pushing its folder would commit whatever else is "
                         "staged there.")
+    p.add_argument("--scope-dir",
+                   help="a Terraform root DIRECTORY name (`prod-edge` or "
+                        "`device-<serial>`), resolved to the right scope. The apply loop "
+                        "iterates those directories, and stripping the `device-` prefix in "
+                        "the workflow instead is the duplication that broke the drift job "
+                        "in v1.34.2 — `Scope.from_dirname` owns the mapping.")
     p.add_argument("--admin", action="append", dest="admins",
                    help="identity whose staged changes to commit (repeatable); "
                         "default: SCM_CLIENT_ID. Scopes the commit so out-of-band "
@@ -2444,6 +2450,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 1
         return run_snapshot(args.kind, args.folder, args.out, device=args.device)
     if args.command == "push":
+        if args.scope_dir:
+            from fwgitops.compiler import Scope
+            if args.folder or args.device:
+                print("error: --scope-dir replaces <folder> / --device; give one form",
+                      file=sys.stderr)
+                return 1
+            scope = Scope.from_dirname(args.scope_dir)
+            return run_push(
+                scope.value if scope.kind == "folder" else None,
+                device=scope.value if scope.kind == "device" else None,
+                admins=args.admins, all_admins=args.all_admins,
+            )
         if bool(args.folder) == bool(args.device):
             print("error: give exactly one of <folder> or --device <serial>. A device-scope "
                   "override belongs to the firewall; pushing its folder would commit "
