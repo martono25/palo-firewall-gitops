@@ -1,13 +1,13 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31304463821"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31310067494"
   },
   "approval": {
     "approvers": [],
     "gate": null,
-    "merge_commit": "776302289b18d9a075725dddcb8d98c29816ffac",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/101"
+    "merge_commit": "c610b22720a2a8c9e2a07c513cb390583c49f2da",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/109"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -86,13 +86,14 @@
         }
       ]
     },
+    "object_is": "the LAST APPLIED state, from the baseline tree",
     "object_sha256": "871d5f5872d44dd3520e4d0c536837670bc00e7ff268423619c0db2dff299ec1",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "e3727960b8de265345ee650ffd7006c364a113648af76c4f14e22d606a0adaac"
+    "tfvars_sha256": null
   },
   "controls": [
     "AC-4",
@@ -107,9 +108,14 @@
       "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
     }
   ],
-  "generated_at": "2026-08-09T08:51:26Z",
+  "generated_at": "2026-08-09T11:10:25Z",
   "kind": "AccessRequest",
   "push": null,
+  "removal": {
+    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
+    "commit": "c610b22720a2a8c9e2a07c513cb390583c49f2da",
+    "ticket": "JIRA-20810"
+  },
   "req_id": "REQ-2026-07302",
   "request": {
     "intent_file": "intent/prod/payments/REQ-2026-07302.yaml",
@@ -120,11 +126,17 @@
     "ticket": "JIRA-4822"
   },
   "risk": {
-    "checks_fired": [],
-    "classifier_version": "1.0",
-    "thresholds_version": "2026-07-26",
+    "checks_fired": [
+      {
+        "check": "allow_rule_removed",
+        "reason": "removes an allow rule (REQ-2026-07302) \u2014 withdraws access. It can break whatever depended on it, but it opens nothing.",
+        "tier": "LOW"
+      }
+    ],
+    "classifier_version": "1.0.0",
+    "thresholds_version": null,
     "tier": "LOW"
   },
   "schema": "fw-evidence/v2",
-  "status": "applied"
+  "status": "removed"
 }
