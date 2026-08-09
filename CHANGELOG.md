@@ -3,6 +3,57 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.40.0] — 2026-08-09
+
+### ICMP — ping is requestable
+
+`Service` was `protocol` + `port`, tcp/udp only, so *"let the monitoring host
+ping this segment"* could not be written as an intent at all. Ping is the first
+thing anyone reaches for to establish whether a path works, and the cheapest
+smoke test for this platform's own changes.
+
+```yaml
+service:
+  - protocol: icmp        # no port — ICMP has none
+```
+
+compiles to `service: [application-default]` + `application: [ping]`, and creates
+**no `scm_service` object**: the resource requires a port, so ICMP cannot be one.
+
+**Built on a measurement, not an inference** (`spike/icmp-service-shape`). SCM
+accepts `application-default` and `any`; they are NOT equivalent — `any` matches
+the `ping` App-ID on any protocol/port, while `application-default` restricts it
+to ICMP echo, which is what was asked for and nothing else. Omitting `service`
+entirely is REJECTED (400, `"service" is required`) even though the provider
+schema marks the attribute optional.
+
+**Two things are refused rather than accommodated:**
+
+* **A `port` alongside `icmp`.** ICMP has no ports, so accepting one would let a
+  requester write a number that reads like a restriction and enforces nothing —
+  the silently-dropped-field trap `_reject_unknown` exists to close.
+* **Mixing icmp with tcp/udp in one request.** `service` is a RULE-LEVEL list, so
+  an ICMP entry forces the whole rule to `application-default`, which would
+  silently re-interpret the tcp/udp entries beside it as their App-ID defaults
+  rather than the ports actually requested. Two requests, two rules, each
+  meaning what it says.
+
+**Module change, kept narrow.** `main.tf` mapped every service name through
+`scm_service.this[...]` — the lookup that creates the dependency edge ordering
+object-before-rule. Literal values now pass through unresolved, but *only* those
+in an explicit set; anything else still resolves, so a typo'd service name fails
+loudly on the lookup instead of reaching SCM as a literal.
+
+Verified end to end: a real ICMP intent compiles to the measured shape, and
+`terraform plan` against live SCM accepts it (`service = ["application-default"]`,
+7 to add). **Not applied** — so what the DEVICE enforces for an
+`application-default` ICMP rule is still untested, and that is the natural first
+use of the feature.
+
+Mutation-tested four ways: `any` substituted for `application-default`, the
+port-alongside-icmp rejection disabled, the mixing rejection disabled, and the
+module's literal passthrough removed. 745 tests.
+
 ## [1.39.3] — 2026-08-09
 
 ### An empty push is not free — three of them minted three config versions

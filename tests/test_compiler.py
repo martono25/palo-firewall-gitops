@@ -451,3 +451,62 @@ def test_two_environments_sharing_a_folder_union_their_baseline_zones():
                   "baseline_zones": ["y"]},
     })
     assert em.baseline_zones_by_folder()["shared"] == {"a", "b", "c", "d", "x", "y"}
+
+
+# ── ICMP: matched by APPLICATION, so it is not a service object ────────────
+def _icmp_request(**spec):
+    from fwgitops.intent import load_intent
+    doc = {
+        "apiVersion": "fw-intent/v1", "kind": "AccessRequest",
+        "metadata": {"id": "REQ-PING", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "x", "requested": "2026-08-09"},
+        "spec": {"environment": "prod", "action": "allow",
+                 "source": [{"cidr": "10.20.1.0/24"}],
+                 "destination": [{"cidr": "10.20.9.0/24"}],
+                 "service": [{"protocol": "icmp"}], **spec},
+    }
+    return load_intent(doc)
+
+
+def _env():
+    from fwgitops.resolve import EnvMap
+    return EnvMap.from_dict(
+        {"prod": {"folder": "prod-edge", "from_zone": "local", "to_zone": "internet"}})
+
+
+def test_icmp_creates_NO_service_object():
+    """`scm_service` requires a port, so ICMP cannot be one at all. Emitting an
+    object with an empty port would be an object that cannot exist."""
+    ch = compile_request(_icmp_request(), _env())
+    assert ch.service_objects == []
+
+
+def test_icmp_compiles_to_application_default_and_ping():
+    """MEASURED in spike/icmp-service-shape: SCM accepts `application-default`
+    and `any`, and they are NOT equivalent — `any` matches the ping App-ID on any
+    protocol/port, this restricts it to ICMP echo. Omitting `service` entirely is
+    REJECTED (400) despite the provider marking it optional."""
+    ch = compile_request(_icmp_request(), _env())
+    assert ch.rule.services == ["application-default"]
+    assert ch.rule.application == ["ping"]
+
+
+def test_a_tcp_request_is_completely_unchanged_by_the_icmp_path():
+    """The regression that would matter most: ICMP support must not alter how an
+    ordinary port-based rule compiles."""
+    from fwgitops.intent import load_intent
+    doc = {
+        "apiVersion": "fw-intent/v1", "kind": "AccessRequest",
+        "metadata": {"id": "REQ-TCP", "requester": "m@corp", "ticket": "J-1",
+                     "justification": "x", "requested": "2026-08-09"},
+        "spec": {"environment": "prod", "action": "allow",
+                 "source": [{"cidr": "10.20.1.0/24"}],
+                 "destination": [{"cidr": "10.20.9.0/24"}],
+                 "service": [{"protocol": "tcp", "port": "443"}]},
+    }
+    ch = compile_request(load_intent(doc), _env())
+    assert len(ch.service_objects) == 1
+    assert ch.service_objects[0].protocol == "tcp" and ch.service_objects[0].port == "443"
+    assert ch.rule.services == [ch.service_objects[0].name]
+    assert ch.rule.application == ["any"], "unchanged default"
+    assert "application-default" not in ch.rule.services

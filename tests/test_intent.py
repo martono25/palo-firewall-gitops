@@ -457,8 +457,33 @@ def test_unknown_service_name_is_rejected():
 
 def test_invalid_protocol():
     doc = valid_doc()
-    doc["spec"]["service"] = [{"protocol": "icmp", "port": "0"}]
+    # NOT icmp — that became valid in v1.40.0. A protocol this platform genuinely
+    # cannot express is the case worth pinning.
+    doc["spec"]["service"] = [{"protocol": "sctp", "port": "132"}]
     assert "spec.service[0].protocol" in problems(doc)
+
+
+# ── ICMP: matched by application, not by port ─────────────────────────────
+def test_icmp_needs_no_port():
+    doc = valid_doc()
+    doc["spec"]["service"] = [{"protocol": "icmp"}]
+    ar = load_intent(doc)
+    assert ar.spec.service[0].protocol == "icmp"
+    assert ar.spec.service[0].port is None
+    assert ar.spec.service[0].is_application_matched
+
+
+def test_a_port_alongside_icmp_is_REJECTED_not_ignored():
+    """ICMP has no ports. Accepting one would let a requester write a number that
+    reads like a restriction and enforces nothing — the silently-dropped-field
+    trap `_reject_unknown` exists to close."""
+    doc = valid_doc()
+    doc["spec"]["service"] = [{"protocol": "icmp", "port": "8"}]
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc)
+    hit = [p for p in ei.value.problems if p.path == "spec.service[0].port"]
+    assert hit, [p.path for p in ei.value.problems]
+    assert "no ports" in hit[0].message
 
 
 @pytest.mark.parametrize("port,expected", [
@@ -718,3 +743,16 @@ def test_a_plausible_typo_in_spec_does_not_silently_weaken_the_rule():
     del doc["spec"]["log"]
     with pytest.raises(IntentError, match="does not do what it says"):
         load_intent(doc)
+
+
+def test_icmp_cannot_be_MIXED_with_port_services_in_one_request():
+    """`service` is a RULE-LEVEL list, so an ICMP entry forces the whole rule to
+    `application-default` — which would silently re-interpret the tcp/udp entries
+    beside it as their App-ID defaults rather than the ports requested."""
+    doc = valid_doc()
+    doc["spec"]["service"] = [{"protocol": "tcp", "port": "443"}, {"protocol": "icmp"}]
+    with pytest.raises(IntentError) as ei:
+        load_intent(doc)
+    hit = [p for p in ei.value.problems if p.path == "spec.service"]
+    assert hit, [p.path for p in ei.value.problems]
+    assert "cannot mix" in hit[0].message and "separate requests" in hit[0].message

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fwgitops"
-version = "1.39.3"
+version = "1.40.0"
 description = "GitOps firewall automation for Palo Alto Strata Cloud Manager"
 requires-python = ">=3.9"
 dependencies = ["pyyaml>=6"]
