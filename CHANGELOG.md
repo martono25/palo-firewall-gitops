@@ -3,6 +3,47 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.40.1] — 2026-08-09
+
+### The push-skip logic skipped a push it should have made
+
+v1.39.3 decided whether to push from `terraform plan -detailed-exitcode`. On the
+first apply that actually had something to do (run `31308877939`), it got that
+decision **wrong in the dangerous direction**:
+
+```
+Plan: 3 to add, 0 to change, 0 to destroy.
+Apply complete! Resources: 3 added, 0 changed, 0 destroyed.
+nothing staged for prod-edge (plan: no changes, enrich: no moves)
+  — skipping push
+```
+
+The ICMP rule was created in SCM and **never committed** — the
+applied-but-unpushed state `devicesync.py` documents as invisible to every check
+in this repo. `config-versions` stayed at v77 while the rule sat in the
+candidate. Recovered by pushing manually (job 184, v78); the rule is live and
+correct.
+
+**The mechanism was never reproduced.** The construct returns 2 correctly in
+isolation, the line continuation is clean, there is exactly one assignment to
+`plan_rc`, and the decision is inside the loop. So the dependency was REMOVED
+rather than patched around — a fix nobody can explain is not a fix, and this one
+guards a step that writes to firewalls.
+
+**The decision now reads what the apply DID**, not a prediction made before it
+ran: `Apply complete! Resources: 0 added, 0 changed, 0 destroyed.` is terraform's
+own report of the run that just happened. Absent entirely — unexpected output, a
+format change — means UNKNOWN, and unknown pushes.
+
+Two lessons carried into the code comments: the earlier version's fail-safe was
+in the right place for the *enrich* branch and missing entirely for the *plan*
+branch, and I verified only that it declined to push, never that it still pushed
+when it should. A one-sided verification of a two-sided decision.
+
+Decision matrix re-run against fixtures including the exact failing case
+(3 added → PUSH), plus changed-only, destroyed-only, a move with no resource
+change, an unparseable summary, and a rule-less scope. 747 tests.
+
 ## [1.40.0] — 2026-08-09
 
 ### ICMP — ping is requestable

@@ -248,9 +248,7 @@ def test_the_push_is_skipped_when_nothing_was_staged():
     makes "did my push commit anything?" unanswerable from the job, since the
     empty job and the real one are byte-identical apart from the id."""
     run = _apply_loop()
-    assert "-detailed-exitcode" in run, (
-        "the loop must learn from plan whether it staged anything")
-    assert 'if [ "$plan_rc" -eq 2 ] || [ "${moved:-0}" -gt 0 ]; then' in run
+    assert 'if [ "${staged:-1}" -gt 0 ] || [ "${moved:-0}" -gt 0 ]; then' in run
     assert "skipping push" in run
 
 
@@ -270,3 +268,28 @@ def test_an_UNREADABLE_enrich_output_pushes_rather_than_skipping():
     run = _apply_loop()
     i = run.index('could not read enrich output')
     assert "moved=1" in run[i:i + 400], "unknown must mean PUSH, not skip"
+
+
+def test_the_push_decision_reads_what_the_apply_DID_not_a_prediction():
+    """REGRESSION, run 31308877939. v1.39.3 decided from
+    `terraform plan -detailed-exitcode`. The plan file said `Plan: 3 to add`, the
+    apply created three resources, and the push was SKIPPED anyway — leaving a
+    new rule staged in SCM and never committed, which is exactly the
+    applied-but-unpushed state `devicesync.py` calls invisible.
+
+    The construct returns 2 correctly in isolation and the mechanism was never
+    reproduced, so the dependency was REMOVED rather than patched: the decision
+    now reads terraform's own report of the run that just happened."""
+    run = _apply_loop()
+    assert "plan_rc" not in run, (
+        "the decision must not depend on a pre-apply prediction that was "
+        "observed to be wrong and never explained")
+    assert 'grep -q "Resources: 0 added, 0 changed, 0 destroyed"' in run
+
+
+def test_an_unreadable_APPLY_summary_pushes_rather_than_skipping():
+    """Same fail direction as the enrich output: unknown means push. A format
+    change in terraform's summary must not silently turn into "nothing to do"."""
+    run = _apply_loop()
+    i = run.index("could not read the apply summary")
+    assert "staged=1" in run[max(0, i - 500):i], "the default before the check must be PUSH"

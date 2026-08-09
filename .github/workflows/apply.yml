@@ -231,20 +231,7 @@ jobs:
             # without this the apply silently drops the config and reports success.
             # Authoritative check is tfcontract.check_contract at compile time;
             # this backstops hand-edited tfvars and terraform/ changes.
-            # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error. This is
-            # how the loop learns whether it STAGED anything, which decides
-            # whether a push is warranted at all (see the push step). `| tee`
-            # would mask the code behind the pipe's, so redirect and echo.
-            set +e
-            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode \
-              > "plan-$folder.txt" 2>&1
-            plan_rc=$?
-            set -e
-            cat "plan-$folder.txt"
-            if [ "$plan_rc" -gt 2 ]; then
-              echo "::error::$folder: terraform plan failed"
-              exit 1
-            fi
+            terraform -chdir="$dir" plan -input=false -no-color 2>&1 | tee "plan-$folder.txt"
             if grep -q "Value for undeclared variable" "plan-$folder.txt"; then
               echo "::error::$folder: compiled tfvars set a variable the Terraform module does not declare — the config would be SILENTLY IGNORED. Refusing to apply."
               exit 1
@@ -252,7 +239,32 @@ jobs:
 
             # -parallelism=1 REQUIRED: the scm provider cannot handle concurrent
             # token acquisition (spike 2026-07-19) — serial apply only.
-            terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1
+            terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1 \
+              2>&1 | tee "apply-$folder.txt"
+
+            # DID THE APPLY ACTUALLY CHANGE ANYTHING? Read from what it DID, not
+            # from a prediction made before it ran.
+            #
+            # v1.39.3 derived this from `terraform plan -detailed-exitcode`, and
+            # on run 31308877939 that produced a WRONG answer: the plan file said
+            # `Plan: 3 to add`, the apply created three resources, and the push
+            # was skipped anyway — leaving the new rule staged in SCM and never
+            # committed, which is precisely the applied-but-unpushed state
+            # `devicesync.py` documents as invisible. The construct returns 2
+            # correctly in isolation and the mechanism was never reproduced, so
+            # the dependency on it is removed rather than patched around: a fix
+            # nobody can explain is not a fix.
+            #
+            # `Apply complete! Resources: 0 added, 0 changed, 0 destroyed.` is
+            # terraform's own report of the run that just happened. Absent
+            # entirely (unexpected output, a format change) means UNKNOWN, and
+            # unknown pushes.
+            staged=1
+            if grep -q "Resources: 0 added, 0 changed, 0 destroyed" "apply-$folder.txt"; then
+              staged=0
+            elif ! grep -q "Apply complete! Resources:" "apply-$folder.txt"; then
+              echo "::warning::$folder: could not read the apply summary — pushing rather than assuming nothing changed"
+            fi
             # ADR-0003 enrich, NARROWED in v1.16.0 — it now applies ORDERING only.
             # The provider silently dropped application /
             # profile_setting / log_setting / ordering on security rules (verified
@@ -268,7 +280,7 @@ jobs:
               fwgitops enrich "$folder" | tee "enrich-$folder.txt"
               # enrich prints a human line then a JSON record. A MOVE stages a
               # change that `terraform plan` cannot see, so it counts toward
-              # "did we stage anything" independently of plan_rc.
+              # "did we stage anything" independently of the apply summary.
               moved=$(tail -1 "enrich-$folder.txt" \
                       | jq '[.records[]? | select(.moved)] | length' 2>/dev/null || echo "")
               if [ -z "$moved" ]; then
@@ -306,10 +318,10 @@ jobs:
             # versions cannot distinguish. What IS knowable is whether WE staged
             # anything — plan's exit code plus enrich's move count — and since
             # the push is admin-scoped it can only ever commit our own changes.
-            if [ "$plan_rc" -eq 2 ] || [ "${moved:-0}" -gt 0 ]; then
+            if [ "${staged:-1}" -gt 0 ] || [ "${moved:-0}" -gt 0 ]; then
               fwgitops push --scope-dir "$folder"
             else
-              echo "nothing staged for $folder (plan: no changes, enrich: no moves)"
+              echo "nothing staged for $folder (apply: 0 changed, enrich: no moves)"
               echo "  — skipping push, which would mint an empty commit job"
             fi
             echo "::endgroup::"
