@@ -43,6 +43,12 @@ permissions:
   # matches nothing and starts no run.
   contents: write
   id-token: write # OIDC to cloud for the TF state backend (Arch-2)
+  # READ-ONLY, and only so the evidence bundle can name WHO APPROVED. Without
+  # these the approvals API 403s, `--approver` is passed nothing, and the bundle
+  # declines to claim NIST CM-5 — which is the honest outcome, but a silent one,
+  # so the collection step warns rather than letting it pass unnoticed.
+  pull-requests: read
+  actions: read
 
 # Never cancel an in-flight apply. Intentional mid-apply cancellation is handled
 # by the candidate/commit boundary (discard candidate), NOT by killing the job.
@@ -254,15 +260,75 @@ jobs:
             echo "::warning::base commit unavailable — REMOVALS will produce no evidence"
           fi
 
+      # WHO APPROVED. The bundle claimed NIST CM-5 — "access restrictions for
+      # change", who MAY approve versus who DID — while `approvers` was hard-coded
+      # empty and nothing ever passed one. Collected here because the record
+      # builder must not make network calls; it takes facts, it does not discover
+      # them.
+      #
+      # TWO SOURCES, kept apart. Reviewing the proposed change and releasing the
+      # deployment are different acts, and one person doing both is a finding
+      # rather than a detail — flattening them to a list of logins would hide it.
+      - name: Collect approval evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          : > /tmp/approvers.txt
+
+          # `commits/<sha>/pulls` resolves the SQUASHED merge commit back to its
+          # PR. Parsing "(#123)" out of the subject would be guessing; a title can
+          # contain that text without being a merge.
+          pr_json=$(gh api "repos/$REPO/commits/$SHA/pulls" 2>/dev/null || echo '[]')
+          pr_url=$(printf '%s' "$pr_json" | jq -r '.[0].html_url // empty')
+          pr_num=$(printf '%s' "$pr_json" | jq -r '.[0].number // empty')
+          if [ -n "$pr_url" ]; then
+            echo "GITHUB_PR_URL=$pr_url" >> "$GITHUB_ENV"
+          fi
+
+          # ONLY WELL-FORMED LOGINS. `sed` appends the route to whatever arrives,
+          # so any stray line — an API error printed to stdout, a warning, an
+          # empty `[]` from a filter that did not apply — would become an
+          # APPROVER NAME in a compliance record. A fabricated approver is far
+          # worse than a missing one, so anything that is not a GitHub login
+          # (alphanumerics and hyphens, max 39) is dropped.
+          logins() { grep -E '^[A-Za-z0-9][A-Za-z0-9-]{0,38}$' || true; }
+
+          if [ -n "$pr_num" ]; then
+            gh api "repos/$REPO/pulls/$pr_num/reviews" --paginate \
+              --jq '.[] | select(.state == "APPROVED") | .user.login' 2>/dev/null \
+              | logins | sort -u | sed 's/$/:pull_request_review/' >> /tmp/approvers.txt || true
+          fi
+
+          # The `firewall-apply` environment gate — who released THIS run.
+          gh api "repos/$REPO/actions/runs/$RUN_ID/approvals" \
+            --jq '.[] | select(.state == "approved") | .user.login' 2>/dev/null \
+            | logins | sort -u | sed 's/$/:deployment_gate/' >> /tmp/approvers.txt || true
+
+          count=$(grep -c . /tmp/approvers.txt || true)
+          echo "collected ${count:-0} approval(s)"
+          if [ "${count:-0}" -eq 0 ]; then
+            # NOT a failure — an unapproved auto-apply of a LOW change is the
+            # designed path. But it must be VISIBLE, because the bundle silently
+            # dropping CM-5 is otherwise indistinguishable from a broken token.
+            echo "::warning::no approver recorded — bundles will NOT claim NIST CM-5"
+          fi
+
       - name: Generate evidence bundles
         run: |
           set -euo pipefail
+          args=()
+          while IFS= read -r a; do
+            [ -n "$a" ] && args+=(--approver "$a")
+          done < /tmp/approvers.txt
           if [ -n "${BASELINE:-}" ]; then
-            fwgitops evidence intent --out evidence --status applied \
-              --baseline "$BASELINE" --change-message /tmp/change-message.txt
-          else
-            fwgitops evidence intent --out evidence --status applied
+            args+=(--baseline "$BASELINE" --change-message /tmp/change-message.txt)
           fi
+          fwgitops evidence intent --out evidence --status applied \
+            ${args[@]+"${args[@]}"}
 
       - name: Upload evidence bundles
         uses: actions/upload-artifact@v7

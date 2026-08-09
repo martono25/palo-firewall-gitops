@@ -1516,6 +1516,8 @@ def run_evidence(
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     baseline_root: Optional[Path] = None,
     change_message_path: Optional[Path] = None,
+    approvers: Optional[List[str]] = None,
+    pr_url: Optional[str] = None,
     out=None,
     err=None,
 ) -> int:
@@ -1572,7 +1574,11 @@ def run_evidence(
 
     compiled = [ch for _, _, ch in items]
     policy = PolicyContext.from_changes(of_kind(compiled, "AccessRequest"))
-    ci = CIContext.from_env(os.environ)
+    # APPROVALS ARE PASSED IN, never discovered — fetching them would put a
+    # GitHub API call inside the record builder. Absent, the bundle declines to
+    # claim CM-5 rather than claiming it over an empty list.
+    ci = CIContext.from_env(os.environ, approvers=tuple(approvers or ()),
+                            pr_url=pr_url)
     now = datetime.now(timezone.utc)
     written: List[Path] = []
     unchanged: List[Path] = []
@@ -2026,6 +2032,17 @@ def build_parser() -> argparse.ArgumentParser:
                         "trailers — a removal needs its OWN change ticket, because the "
                         "intent's own ticket authorised CREATING the object and the "
                         "file it lived in is gone.")
+    e.add_argument("--approver", dest="approvers", action="append", default=None,
+                   metavar="LOGIN[:VIA]",
+                   help="who approved this change, repeatable. VIA is "
+                        "`pull_request_review` or `deployment_gate`; omitted, the "
+                        "approval is recorded as unspecified rather than guessed. "
+                        "WITHOUT AT LEAST ONE, the bundle does NOT claim NIST CM-5 — "
+                        "that control is about who approved, and an empty list is "
+                        "not an answer.")
+    e.add_argument("--pr", dest="pr_url", default=None,
+                   help="URL of the pull request this change came from (CI resolves "
+                        "it from the merge commit).")
     e.add_argument("--out", default=Path("evidence"), type=Path,
                    help="output root; writes <out>/<folder>/<req_id>.json")
     e.add_argument("--status", default="applied", choices=("applied", "rejected", "failed"),
@@ -2177,6 +2194,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             tfvars_root=args.tfvars_root,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
             baseline_root=args.baseline_root, change_message_path=args.change_message,
+            approvers=args.approvers, pr_url=args.pr_url,
         )
     if args.command == "drift":
         return run_drift(

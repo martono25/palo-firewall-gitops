@@ -3,6 +3,64 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.38.0] — 2026-08-09
+
+### Every bundle claimed CM-5 and named nobody
+
+`BASE_CONTROLS` listed `CM-5` unconditionally. CM-5 is *access restrictions for
+change* — **who may approve versus who did**. Meanwhile `CIContext.from_env`
+hard-coded `pr_url=None` and `approvers=()`, and no caller passed either. There
+was no code path that could have filled them.
+
+So every evidence bundle this project has ever written asserted a control whose
+entire content was `"approvers": [], "pr": null`. Claimed-but-empty is worse than
+absent: an assessor reads the claim, and the empty list beside it looks like a
+change nobody needed to approve rather than a field nothing populated.
+
+**Controls are now evidenced, not assumed.** `CM-5` is claimed only when an
+approver is named, and when it is not, the omission is **stated** in a new
+`controls_not_evidenced` block — a silently shorter list reads as an older
+schema rather than a gap.
+
+**A protected environment is not approval evidence.** `gate` is only the
+environment's *name*: it says a restriction was configured, not that a human
+exercised it, and a required-reviewers rule nobody has answered yet looks
+identical in the env var. `has_approval_evidence` requires a named approver.
+
+**Approvers record the route, not just the name.** `pull_request_review` and
+`deployment_gate` are different acts — reviewing the proposed change is not
+releasing the deployment — and one person doing both is a finding, not a detail.
+Flattening them to a list of logins would hide exactly that. A bare login is
+recorded as `unspecified` rather than guessed.
+
+`apply.yml` collects both from the GitHub API (`pulls/<n>/reviews` and
+`runs/<id>/approvals`), resolves the squashed merge commit back to its PR with
+`commits/<sha>/pulls` rather than parsing `(#123)` out of a subject line, and
+gains `pull-requests: read` + `actions: read`. Collection lives in the workflow
+because the record builder takes facts and does not discover them — a network
+call there would make every bundle depend on API availability.
+
+### Two things caught by testing the shell, not by reading it
+
+**A stray API line would have become an approver's name.** `sed 's/$/:deployment_gate/'`
+appends the route to whatever arrives, so an error string, a warning, or an
+empty `[]` from a filter that did not apply would be recorded as a person who
+approved a firewall change. A *fabricated* approver is far worse than a missing
+one. Output is now filtered to well-formed GitHub logins.
+
+**Zero approvers must be loud.** An unapproved auto-apply of a LOW change is the
+designed path, so this is not a failure — but a bundle silently losing CM-5 is
+indistinguishable from a broken token, so the step emits a warning naming the
+control it is about to drop.
+
+`CIContext.__post_init__` coerces `approvers` however the context is built;
+`from_env` was not the only door, and a bare tuple of strings previously survived
+until serialisation, failing far from its cause.
+
+Mutation-tested four ways: CM-5 restored to the baseline set, a bare environment
+counting as approval, the login filter removed, and the permissions dropped —
+each fails a specific test. 716 tests.
+
 ## [1.37.0] — 2026-08-09
 
 ### A removal now leaves a record — and carries its own change ticket
