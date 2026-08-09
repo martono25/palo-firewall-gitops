@@ -1,0 +1,24 @@
+{
+  "address_objects": {
+    "addr-probe-tag": {"name":"addr-probe-tag","type":"ip-netmask","value":"192.0.2.0/24",
+                       "folder":"prod-edge","tags":["gitops:managed"]}
+  },
+  "service_objects": {
+    "svc-probe-tag": {"name":"svc-probe-tag","protocol":"tcp","port":"65000",
+                      "folder":"prod-edge","tags":["gitops:managed"]}
+  },
+  "security_rules": {
+    "PROBE-TAGORDER": {
+      "name":"PROBE-TAGORDER","folder":"prod-edge",
+      "from_zones":["any"],"to_zones":["any"],
+      "sources":["addr-probe-tag"],"destinations":["addr-probe-tag"],
+      "services":["svc-probe-tag"],
+      "action":"deny","log_end":true,
+      "tags":["gitops:managed","gitops:ticket:PROBE-AAAA"],
+      "application":["any"],"profile_group":null,"log_setting":null,
+      "rulebase":"pre","relative_position":"bottom","target_rule":null,
+      "description":null,"log_start":false,"source_user":["any"],"category":["any"],
+      "negate_source":false,"negate_destination":false
+    }
+  }
+}
