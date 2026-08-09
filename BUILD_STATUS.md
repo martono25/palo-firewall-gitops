@@ -1,133 +1,82 @@
 # BUILD STATUS — palo-firewall-gitops
 
-_As of 2026-07-19. Phase-1 build. Full design + engineering review: [`docs/DESIGN.md`](docs/DESIGN.md)._
+_As of 2026-08-09, **v1.39.2**, 735 passing tests. Design + decision record:
+[`docs/DESIGN.md`](docs/DESIGN.md), [`docs/adr/`](docs/adr/)._
 
-This repo went idea → design → engineering review → a working, tested Phase-1
-compile + provision engine in one session. This document is the handoff: exactly
-what is built and verified, what is scaffolded but unvalidated, and what remains.
+> **This file was three weeks stale until 2026-08-09.** It described a
+> 2026-07-19 snapshot — 157 tests, and the risk classifier, catalog and drift
+> detection listed as *"not started"* — all three of which had shipped. A
+> handoff document that a new engineer reads first, describing a system that no
+> longer exists, is the same claimed-versus-actual defect this project removed
+> from `expires`, from `apply.yml`'s approval claim, and from the evidence
+> bundle's CM-5. It is now written to be checkable: every number below comes
+> from the repo, not from memory.
 
 ## TL;DR
 
-- **Verified on any machine:** the entire Day-2 compile path, the Day-1 provisioning
-  orchestration, the SCM push boundary, and the SCM auth/session layer — pure Python,
-  **157 passing tests**.
-- **Scaffolded, marked `# VERIFY:`:** the Terraform module, the GitHub Actions
-  pipeline, and the bootstrap template — structurally sound, but not runnable
-  without the `scm` provider + SCM/cloud credentials.
-- **Not started:** the Phase-2 analysis core, risk classifier, catalog, and drift
-  detection (deliberately deferred in the review).
+The Day-1 chain and the Day-2 change pipeline both run **end to end on real
+hardware**. The first successful production apply was 2026-08-09 (run
+`31304463821`): Terraform plan clean, SCM push committed, firewall on the newest
+config version, ten evidence bundles committed to Git.
 
-## Commit map
+What is **not** production-ready is the surrounding process, not the engine —
+see *Not built* below.
 
-| Commit | What |
+## Verified on hardware
+
+| Capability | Evidence |
 |---|---|
-| `107e646` | project skeleton |
-| `f21f6eb` | T6 tag/identity convention (22 tests) |
-| `4f7a922` | intent schema + fail-closed loader (28 tests) |
-| `f69e1b5` | compiler → rules.auto.tfvars.json (17 tests) |
-| `54345b8` | CLI + YAML reader (8 tests) |
-| `2dd7849` | Terraform module (UNVALIDATED) |
-| `64175ad` | GitHub Actions pipeline (UNVALIDATED) |
-| `732e0c1` | re-entrant provisioning orchestration (8 tests) + bootstrap template |
+| Day-1 chain (Interface → Zone → Route) | applied to the pilot firewall; ADR-0002 |
+| Day-2 rule pipeline | intent → compile → classify → gate → plan → apply → enrich → push |
+| Cross-root apply ordering | driven by the kind registry, not a glob |
+| Device scope (`device=<serial>`) | every resource accepts it after re-onboarding |
+| SCM push boundary | admin-scoped; folder job 182, device job 180 |
+| Drift, six checks, two engines | tag-based (rules) + state-based (zones/routes/interfaces) |
+| Evidence bundles, all four kinds | 10 records committed, schema `fw-evidence/v2` |
+| Removal contract | measured per kind; ADR-0008 |
+| `fwgitops where` | address → intent, by CIDR containment |
 
-## ✅ Built + tested (verified)
+## Built + tested
 
-| Area | File | Tests | Notes |
-|---|---|---|---|
-| Tag/identity (T6) | `src/fwgitops/tags.py` | 22 | managed marker, stable for_each keys, dedup names, fail-closed parse |
-| Intent + validation (T5) | `src/fwgitops/intent.py` | 28 | uniform fail-closed contract, collects all problems |
-| Env resolve | `src/fwgitops/resolve.py` | — | env → folder + zone-pair, fail-closed |
-| Compiler | `src/fwgitops/compiler.py` | 17 | intent → objects + rule → byte-stable tfvars |
-| CLI | `src/fwgitops/cli.py`, `io.py` | 8 | `fwgitops compile`, all-or-nothing |
-| Provisioning orchestration (T3) | `src/fwgitops/provision.py` | 8 | re-entrant, license retry, bounded poll |
-| SCM push / commit boundary (T13) | `src/fwgitops/push.py` | 10 | fail-closed guard, folder-scoped push, bounded job poll |
-| Evidence bundle (NIST) | `src/fwgitops/evidence.py` | 20 | Git-resident audit record; hashes not copies; failures recorded; byte-stable |
-| SCM auth/session | `src/fwgitops/scmapi.py` | 17 | VERIFIED flow: basic auth → client_credentials + `tsg_id:` scope → JWT, cached w/ early refresh |
-
-Run it:
-
-```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e '.[dev]'
-pytest -q                                              # 157 tests
-fwgitops compile intent --check                        # validate-only
-fwgitops compile intent --out terraform                # emit rules.auto.tfvars.json
-```
-
-## ⚠️ Scaffolded, UNVALIDATED (needs your environment)
-
-Every assumption is marked `# VERIFY:`. Resolve before first `apply`.
-
-| Area | Path | Blocking dependency |
+| Area | Module | Notes |
 |---|---|---|
-| ~~Terraform module~~ | `terraform/modules/security_folder/` | ✅ **SCHEMA-VERIFIED** against scm v1.0.11 — `terraform validate` passes (Part A done) |
-| Per-folder root | `terraform/prod-edge/` | remote backend (Arch-2), provider auth (T1) |
-| CI pipeline | `.github/workflows/{pr-validate,apply}.yml` | T1 auth, Arch-2 backend, `firewall-apply` environment |
-| Review gate | `.github/CODEOWNERS` | real team handles |
-| Bootstrap | `provisioning/bootstrap/init-cfg.sample.txt` | SCM onboarding keys |
-| Cloud instantiate | (pointers) | use Palo's `terraform-aws/google-vmseries-modules`, not blind HCL |
-| **SCM push client (T13)** | `src/fwgitops/clients.py` | ✅ FULLY CONFIRMED — pending/job paths (live probe), push path (live POST + SDK), push body `{"folder":[...]}` singular (SDK struct), PAN-OS two-field job model. Track B closed for Day-2. |
-| SCM provision client (T3) | `src/fwgitops/clients.py` | ⚠️ base path + segments evidenced; per-device sub-paths + licensing need the device sub-spike (a VM-Series) |
+| Intent + validation | `intent.py` | fail-closed; unknown keys in `spec` REJECTED |
+| Kind registry | `kinds.py` | one entry per kind drives compile/tfvars/classify/drift/evidence |
+| Compiler | `compiler.py` | byte-stable tfvars; `Scope` owns folder-vs-device |
+| Risk classifier | `classify.py` | per-kind, stateful checks, fail-closed tier gate |
+| Removals | `removal.py` | tiered per kind; `Removes:` trailer authorises |
+| Evidence | `evidence.py` | NIST-mapped; controls EVIDENCED, not assumed |
+| Drift | `drift.py` | two engines, per scope |
+| Device sync | `devicesync.py` | SCM version vs firewall running version |
+| Catalog check | `catalogcheck.py` | catalog vs SCM's real hierarchy |
+| Scaffolding | `scaffold.py` | Terraform roots generated from the module |
+| SCM API / push / enrich | `scmapi.py`, `push.py`, `enrich.py` | retry reads, never writes |
 
-**Finding #12 (confirmed):** a folder with no firewall bound stages config but cannot complete a
-push (no `push-to` target). Full push success is a pilot/Day-1 concern; Day-2 push code (path,
-verb, `folders` body key, PAN-OS job model) is confirmed against the live tenant.
+18 CLI commands, 4 intent kinds, 8 ADRs, 26 modules.
 
-The Python↔Terraform contract (`rules.auto.tfvars.json` shape) **is** verified end-to-end:
-compiler output type-checks through Terraform's variable types against the real provider
-schema (a `plan` reaches provider auth — `ClientId must be specified` — with no type errors).
+## NOT built — what stands between this and production
 
-### Part-A spike results (2026-07-19) — provider `PaloAltoNetworks/scm` v1.0.11
+Ordered by what blocks a launch, not by size. Tracked in [`TODOS.md`](TODOS.md).
 
-Four assumptions were wrong and are now fixed: `scm_address_object`→**`scm_address`**,
-`scm_security_policy_rule`→**`scm_security_rule`**, `tags`→**`tag`** (singular,
-`list(string)`), and `protocol` is a **nested attribute** (`protocol = { tcp = { port } }`)
-not a block. Provider pin corrected `~> 0.9`→**`~> 1.0`**. Tags are free-form strings at the
-Terraform layer, so `fwgitops.tags` needed no change. Provider does the OAuth
-client-credentials→JWT exchange itself (feeds T1). Schema dump: `spike/schema.json`.
+| # | Gap | Status |
+|---|---|---|
+| 1 | **No approval path.** The tier gate BLOCKS but cannot ROUTE — a HIGH change can only be cleared by a `workflow_dispatch` override, recorded as neither approval nor override. | P1, unblocked 2026-08-09 (repo made public, so environment protection is now available) |
+| 2 | **No requester intake.** `.github/ISSUE_TEMPLATE/` does not exist, so an app team must hand-write intent YAML — which contradicts the app-language premise. | next |
+| 3 | **ICMP is unrequestable.** `Service` is `protocol`+`port`, tcp/udp only. Ping is the first thing anyone asks for. | needs a live probe: the provider permits a serviceless rule, but PAN-OS enforcement for one is unverified |
+| 4 | **Rule ordering unwired.** Everything lands `pre:bottom`; `relative_position` needs a UUID the intent model cannot express. Shadowing is DETECTED (LOW) but not fixable. | deferred |
+| 5 | **NatRequest** | deferred by decision, 2026-08-09 |
+| 6 | **Second firewall / non-prod environment** | deferred by decision, 2026-08-09 |
+| 7 | `push` no-op detection never fires — a no-change apply still creates SCM commit jobs | P2 |
+| 8 | Removing a tag and destroying the tag OBJECT is unordered | P2 |
 
-### Part-B results (2026-07-19) — live apply against the `GitOps` lab folder ✅ SPIKE COMPLETE
+**Everything is validated at N=1**: one environment, one firewall, three folders.
+The bugs found in this codebase have been overwhelmingly in the multi-scope paths
+— device-vs-folder addressing, cross-root ordering, per-scope grouping,
+aggregating routes — so (6) is a deferral with a known cost, not a free one.
 
-Module verified end-to-end against a real tenant (tag + address + service + rule created).
-Four more findings, all fixed or recorded:
+## Not audited
 
-- **Tags must pre-exist as `scm_tag` objects** — SCM validates them as references
-  (`INVALID_REFERENCE`). The module now creates them and orders tags → objects → rules.
-- **apply requires `-parallelism=1`** — the provider cannot handle concurrent token
-  acquisition; it fails with a misleading `unauthorized_client`. Baked into `apply.yml`.
-- **No push/commit in the provider** (0/129 resources) — `apply` only *stages* config; a
-  separate push (**target = folder**) makes it live. The candidate/commit boundary is
-  structurally forced, not just a design preference.
-- **Folder-scoped push** — a push commits everything staged in the folder, so applies must be
-  serialized per folder and the push must **fail closed** on unexpected staged changes
-  (that delta is Level-1 drift).
-- Folder ownership stays with Day-1 (`scm_folder`); the Day-2 module must never own it.
-
-Full write-up: `docs/SPIKE-scm.md` → RESULTS.
-
-**T13 (SCM push):** orchestration + fail-closed guard are BUILT and TESTED
-(`src/fwgitops/push.py`, 10 tests). Remaining: the thin `PushClient` implementation against
-the SCM REST API (`list_staged` / `push` / `job_status`) — needs tenant access to verify.
-
-## ⬜ Not started (Phase 2 / 3 — deferred by review)
-
-T4 state model · risk classifier · T7 cache · T8 catalog-from-IPAM · T10 Level-2
-drift · T11 expiry job · T12 window scheduler. See `docs/DESIGN.md` → Implementation Tasks.
-
-## Handoff: first moves in an environment with SCM access
-
-1. **`scm` provider spike** — burn down `terraform/modules/security_folder/README.md`
-   with `terraform providers schema -json`. This is the #1 de-risker.
-2. **Fill T1 auth + Arch-2 backend** — short-lived SCM token, remote state per folder.
-3. **Implement `ProvisionClient`** (`src/fwgitops/provision.py`) against the SCM REST API —
-   the orchestration around it is already tested.
-4. **Pilot** — pick AWS or GCP + a greenfield SCM folder; provision one VM-Series
-   end-to-end; run one intent through the pipeline.
-
-## Design decisions (reference)
-
-All load-bearing decisions and their rationale are in `docs/DESIGN.md`
-(Engineering Review → Decisions made in review). Key ones baked into the code:
-fail-closed everywhere · stable content-derived for_each keys · 1:1 per-commit
-isolation · objects-before-rules · re-entrant provisioning · human-approval-always
-in Phase 1 (classifier is Phase 2).
+Stated so nobody reads the table above as broader than it is: the provisioning
+path, secrets handling, and the AWS state backend's own resilience have **not**
+been reviewed for production. Neither has anything about multi-tenant or
+multi-region operation.
