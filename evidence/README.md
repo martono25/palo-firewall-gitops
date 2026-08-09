@@ -22,7 +22,7 @@ ticket archaeology, no SCM UI.
 |---|---|
 | `kind` | which intent kind this record describes |
 | `request` | requester, ticket, justification, requested date, intent file + sha256 — **paperwork only** |
-| `compiled` | scope, the compiled object, compiler version, tfvars file + sha256 |
+| `compiled` | scope, the compiled object + its sha256, compiler version, tfvars file + sha256 |
 | `risk` | tier, classifier + threshold versions, checks fired (Phase 2) |
 | `approval` | gate, approvers, PR, merge commit |
 | `apply` | plan sha256, CI run URL |
@@ -39,6 +39,17 @@ ticket archaeology, no SCM UI.
   a fail-closed push that refused to commit unexpected drift is exactly what you
   want on record. Failure statuses require a `failure_reason`.
 - **Deterministic** — byte-stable JSON, so re-generating never churns Git.
+- **One commit per CHANGE, not per apply** — a record whose change is unchanged
+  is left exactly as committed. Every apply regenerates every bundle and
+  `generated_at` always moves, so without this every apply committed every
+  record, each stamped with that run's `run_url` and `merge_commit` — a request
+  nobody touched claiming to have been applied by a run that applied something
+  else. Identity is `schema · kind · status · intent_sha256 · object_sha256`.
+- **`object_sha256` is per REQUEST; `tfvars_sha256` is per FILE** — several
+  requests share one tfvars file (every rule in a folder writes
+  `rules.auto.tfvars.json`; every route for a VRF aggregates into one router),
+  so the file hash moves when a neighbour changes and says nothing about this
+  request.
 - **No secrets** — asserted by test.
 - **Paperwork and behaviour are separated** — `request` carries the change
   record; anything describing what the firewall will do lives under `compiled`,
