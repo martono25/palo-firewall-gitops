@@ -21,6 +21,7 @@ ticket archaeology, no SCM UI.
 | Section | Contains |
 |---|---|
 | `kind` | which intent kind this record describes |
+| `removal` | on a `removed` record: the ticket authorising the REMOVAL, and the commit |
 | `request` | requester, ticket, justification, requested date, intent file + sha256 — **paperwork only** |
 | `compiled` | scope, the compiled object + its sha256, compiler version, tfvars file + sha256 |
 | `risk` | tier, classifier + threshold versions, checks fired (Phase 2) |
@@ -35,9 +36,18 @@ ticket archaeology, no SCM UI.
   tamper-evident. Git supplies history and timestamps.
 - **Versioned** — compiler/classifier/threshold versions recorded, so a past
   decision stays reproducible after the rules change.
-- **Failures are evidence too** — `status` is `applied` / `rejected` / `failed`;
+- **A removal is a record, not a gap** — deleting an intent overwrites its bundle
+  with a `status: removed` **tombstone** carrying the object as last applied, so
+  `git log evidence/<scope>/<REQ>.json` is that request's whole life. `removed`
+  means destroyed in SCM *and* pushed; a refused push is `failed`. The removal's
+  own ticket comes from a `Removes: <REQ-id> (TICKET)` trailer in the text that
+  lands on main — the intent's `metadata.ticket` authorised *creating* the
+  object, and the file it lived in is gone. See ADR-0008's 2026-08-09 amendment.
+- **Failures are evidence too** — `status` is `applied` / `rejected` / `failed` /
+  `removed`;
   a fail-closed push that refused to commit unexpected drift is exactly what you
-  want on record. Failure statuses require a `failure_reason`.
+  want on record. Failure statuses require a `failure_reason`; `removed` requires
+  a `RemovalContext`.
 - **Deterministic** — byte-stable JSON, so re-generating never churns Git.
 - **One commit per CHANGE, not per apply** — a record whose change is unchanged
   is left exactly as committed. Every apply regenerates every bundle and

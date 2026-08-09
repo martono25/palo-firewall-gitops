@@ -3,6 +3,68 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.37.0] — 2026-08-09
+
+### A removal now leaves a record — and carries its own change ticket
+
+`classify` has tiered removals since v1.30.0. Nothing recorded them. **Assessed
+but unrecorded** is a strange place to stop: the gate could refuse a route
+deletion, and if it passed, the deletion happened and left nothing behind. ADR-0008
+listed this as open pending a decision about what "applied" means for a deletion.
+Three decisions, now taken (ADR-0008 amended 2026-08-09):
+
+**A removal TOMBSTONES the object's own record, in place.** `status: removed`
+over `evidence/<scope>/<REQ-id>.json`, with the removed object **embedded from
+the baseline tree** — so the record says WHAT went without anyone reading git
+history. One file per request keeps `git log evidence/<scope>/<REQ>.json` that
+request's whole life: created, changed, removed. A separate `evidence/removed/`
+tree was rejected (it forks a request into two files, and a re-created id would
+collide with its own tombstone); deleting the bundle was rejected outright — an
+audit trail that vanishes when you look for it is the `expires` failure again.
+
+**`removed` means destroyed in SCM AND pushed.** The same bar `applied` meets. A
+destroy whose push is refused is `failed`. Not theoretical: on 2026-08-06 the
+route test destroyed the logical router in SCM and had the push refused, leaving
+SCM reporting no default route while the device still forwarded on one. A record
+claiming `removed` on a successful `terraform destroy` alone would have been
+false for that window.
+
+**A removal carries its OWN ticket, via a `Removes: REQ-2026-0727 (JIRA-31555)`
+trailer.** This is the sharp one. A MODIFIED intent proves its own
+authorisation — v1.33.0 made `metadata.ticket` move with the spec. A REMOVAL
+cannot, because the fix is deleting the file, so there is nowhere left to write
+the new ticket. Left alone, an August deletion would have been recorded against
+`ticket: JIRA-20727, requested: 2026-07-26` — the request that authorised
+*creating* the object. Exactly the false CM-3 statement v1.33.0 removed, reached
+through deletion instead of modification.
+
+The trailer is read from the text that lands on `main`. With squash merges that
+is the PR title + body, so `pr-validate` checks the **PR body** — deliberately
+not the individual commit messages, which would pass a PR whose trailer never
+reaches main, a real-looking check in front of an unauthorised apply. Missing
+trailer → exit 2 on the PR, while the author is still there. A trailer naming a
+different request does not authorise this one.
+
+### Two defects found while building it
+
+**An empty current tree produced no tombstones.** `run_evidence` returned early
+on "no intent files found", so deleting *every* intent recorded nothing and
+exited 0 — the same early-return that once let an empty tree bypass the risk
+gate, one stage further along. Caught by a test, not by reading.
+
+**Both workflows interpolated untrusted text into a shell script.** Reading the
+trailer meant getting a PR body into a file, and `${{ github.event.pull_request.body }}`
+inside `run:` substitutes *before* bash parses the line — so a body containing
+`$(...)` would execute in a job holding the SCM credentials. Both now pass it
+via `env:` and quote `"$VAR"`.
+
+Mutation-tested four ways: trailer check disabled, tombstone forked to a separate
+path, removal reusing the intent's own ticket, and the early return restored —
+each fails a specific test. `apply.yml` gains `fetch-depth: 0`; without it there
+is no baseline and a removal has nothing to build a record from. A run with no
+baseline now SAYS removals were not examined, because "none" and "did not look"
+must not be the same output. 705 tests.
+
 ## [1.36.1] — 2026-08-09
 
 ### Every apply rewrote every evidence record, and claimed the wrong run made it

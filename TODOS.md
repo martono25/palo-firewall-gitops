@@ -769,10 +769,13 @@ FEATURE rather than an observed behaviour:
   gap is not the same as it being acceptable, and the flag made the hole look
   like a design.
 
-* **Still open — evidence for a removal.** Bundles are built per request, so a
-  deletion still produces no audit record beyond git history and the plan. The
-  baseline tree HAS the request object, so a bundle is buildable; it needs a
-  status (`removed`) and a decision about what "applied" means for a deletion.
+* ~~**Evidence for a removal.**~~ **DONE — v1.37.0**, ADR-0008 amended
+  2026-08-09. A removal TOMBSTONES the object's own record in place
+  (`status: removed`, object embedded from the baseline), `removed` means
+  destroyed in SCM *and* pushed, and the removal carries its OWN ticket via a
+  `Removes: <REQ-id> (TICKET)` trailer — because a deleted intent has nowhere
+  left to state one, and without it an August deletion would cite the July
+  request that authorised creating the object.
 
 * ~~**The per-kind deletion CONTRACT (an ADR).**~~ **DONE — ADR-0008.** States
   what removal means per kind from MEASURED behaviour, not prediction, and

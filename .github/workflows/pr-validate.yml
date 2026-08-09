@@ -89,15 +89,28 @@ jobs:
       # worktree: it is read-only, needs no cleanup, and cannot leave the
       # checkout on the wrong ref if the step fails midway.
       - name: Materialise the base intent tree
+        env:
+          # VIA env, NEVER spliced into the script with `${{ }}`. A PR title and
+          # body are attacker-controlled text from anyone who can open a PR, and
+          # `${{ }}` substitutes BEFORE bash parses the line — so a body holding
+          # $(...) or backticks would EXECUTE in a job that can read the SCM
+          # secrets. Quoted "$VAR" is data.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # The PR TITLE + BODY, because a SQUASH merge is what lands on main and
+          # that is the text `apply` reads for the `Removes:` trailer. Validating
+          # individual commit messages here would pass a PR whose trailer never
+          # reaches main — a real-looking check in front of an unauthorised apply.
+          { printf '%s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > /tmp/change-message.txt
           mkdir -p /tmp/base-intent
-          base="${{ github.event.pull_request.base.sha }}"
-          if git cat-file -e "$base^{commit}" 2>/dev/null; then
-            git archive "$base" intent | tar -x -C /tmp/base-intent
+          if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git archive "$BASE_SHA" intent | tar -x -C /tmp/base-intent
             echo "BASELINE=/tmp/base-intent/intent" >> "$GITHUB_ENV"
           else
-            echo "::warning::base commit $base unavailable — removals will NOT be classified"
+            echo "::warning::base commit $BASE_SHA unavailable — removals will NOT be classified"
           fi
 
       # 1b. Risk classification (Phase 2) — PR preview of each change's tier,
@@ -109,7 +122,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${BASELINE:-}" ]; then
-            fwgitops classify intent --baseline "$BASELINE"
+            fwgitops classify intent --baseline "$BASELINE" \
+              --change-message /tmp/change-message.txt
           else
             fwgitops classify intent
           fi

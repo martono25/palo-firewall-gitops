@@ -44,11 +44,26 @@ def _tree(root: Path, files: dict):
     return root
 
 
-def _classify(tmp_path, base_files, cur_files, **kw):
+def _msg(tmp_path, *req_ids, ticket="JIRA-31555"):
+    """A change message authorising these removals, as CI supplies it."""
+    p = tmp_path / "change-message.txt"
+    p.write_text("Remove some things\n\n"
+                 + "".join(f"Removes: {r} ({ticket})\n" for r in req_ids))
+    return p
+
+
+def _classify(tmp_path, base_files, cur_files, *, authorise=True, **kw):
     base = _tree(tmp_path / "base", base_files)
     cur = _tree(tmp_path / "cur", cur_files)
     env = tmp_path / "env.yaml"
     env.write_text(ENV)
+    # Every removal in these fixtures is authorised unless a test says otherwise:
+    # the trailer rule is asserted on its own below, and leaving it implicit here
+    # would make every removal test also a trailer test.
+    gone = sorted(set(base_files) - set(cur_files))
+    ids = [b.split("id: ")[1].split(",")[0] for b in (base_files[g] for g in gone)]
+    kw.setdefault("change_message_path",
+                  _msg(tmp_path, *ids) if authorise and ids else None)
     return run_classify(cur, env, baseline_root=base, **kw)
 
 
@@ -227,3 +242,140 @@ def test_an_unchanged_intent_alongside_a_changed_one_is_not_flagged(tmp_path, ca
         {"A.yaml": _rule_t("R-1", "JIRA-2", cidr="10.20.0.0/16"),
          "B.yaml": _rule_t("R-2", "JIRA-9")})
     assert rc == 0
+
+
+# ── a removal must carry its OWN change ticket ────────────────────────────
+def test_a_removal_without_a_trailer_is_REJECTED(tmp_path, capsys):
+    """The hole this closes. A MODIFIED intent proves its own authorisation —
+    `stale_ticket_problems` makes `metadata.ticket` move with the spec. A REMOVAL
+    cannot, because the fix is deleting the file, so without a trailer the
+    evidence for an August deletion would carry the July ticket that authorised
+    CREATING the object: the same false CM-3 statement, reached by deletion."""
+    rc = _classify(tmp_path, {"A.yaml": _rule("ALLOW-1")}, {}, authorise=False)
+    assert rc == 2, "an unauthorised removal must be rejected, not tiered"
+    err = capsys.readouterr().err
+    assert "without an authorising ticket" in err
+    assert "Removes: ALLOW-1 (TICKET-123)" in err, "the error must show the fix"
+
+
+def test_a_trailer_for_a_DIFFERENT_request_does_not_authorise_this_one(tmp_path, capsys):
+    """Fail-closed at the level that matters. A PR removing two rules and naming
+    one would otherwise slip the second through on the first one's ticket."""
+    msg = _msg(tmp_path, "ALLOW-1")
+    rc = _classify(tmp_path,
+                   {"A.yaml": _rule("ALLOW-1"), "B.yaml": _rule("ALLOW-2")},
+                   {}, authorise=False, change_message_path=msg)
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "ALLOW-2" in err and "ALLOW-1" not in err.split("Removes:")[0]
+
+
+def test_the_trailer_is_parsed_from_prose_around_it():
+    """It lands in a squashed PR body, which is prose with a trailer at the end —
+    not a clean key/value file."""
+    from fwgitops.removal import parse_removes_trailers
+
+    body = ("Retire the lab default route\n\n"
+            "The lab moved to the new edge, so this route black-holes.\n"
+            "See the thread for why we are not just disabling it.\n\n"
+            "Removes: REQ-2026-0803 (JIRA-31555)\n"
+            "Removes: REQ-2026-0806 (JIRA-31556)\n")
+    assert parse_removes_trailers(body) == {"REQ-2026-0803": "JIRA-31555",
+                                            "REQ-2026-0806": "JIRA-31556"}
+
+
+def test_a_malformed_trailer_authorises_nothing():
+    """Fail-closed on shape too. `Removes: REQ-1` with no ticket is someone
+    half-remembering the rule, and accepting it would record an empty ticket as
+    though it were an authorisation."""
+    from fwgitops.removal import parse_removes_trailers
+
+    for bad in ("Removes: REQ-1\n", "Removes: REQ-1 ()\n", "Removes: (JIRA-1)\n",
+                "removes REQ-1 JIRA-1\n"):
+        assert parse_removes_trailers(bad) == {}, bad
+
+
+# ── the tombstone: a removal's own evidence record ────────────────────────
+def _evidence(tmp_path, base_files, cur_files, out, **kw):
+    import json as _json
+
+    from fwgitops.cli import run_evidence
+    base = _tree(tmp_path / "base", base_files)
+    cur = _tree(tmp_path / "cur", cur_files)
+    env = tmp_path / "env.yaml"
+    env.write_text(ENV)
+    gone = sorted(set(base_files) - set(cur_files))
+    ids = [b.split("id: ")[1].split(",")[0] for b in (base_files[g] for g in gone)]
+    kw.setdefault("change_message_path", _msg(tmp_path, *ids) if ids else None)
+    rc = run_evidence(cur, env, out, baseline_root=base,
+                      tfvars_root=tmp_path / "no-tf", **kw)
+    return rc, _json
+
+
+def test_a_removal_TOMBSTONES_the_objects_own_record(tmp_path):
+    """ADR-0008 Q1a: one file per request, so `git log evidence/<scope>/<REQ>.json`
+    is that request's whole life — created, changed, removed — rather than the
+    record vanishing at the moment someone goes looking for it."""
+    out = tmp_path / "ev"
+    # 1. the object exists
+    rc, js = _evidence(tmp_path, {"A.yaml": _rule("ALLOW-1")},
+                       {"A.yaml": _rule("ALLOW-1")}, out)
+    assert rc == 0
+    target = out / "prod-edge" / "ALLOW-1.json"
+    assert js.loads(target.read_text())["status"] == "applied"
+
+    # 2. it is removed — SAME path, now a tombstone
+    rc, js = _evidence(tmp_path / "b", {"A.yaml": _rule("ALLOW-1")}, {}, out)
+    assert rc == 0
+    b = js.loads(target.read_text())
+    assert b["status"] == "removed"
+    assert list(out.rglob("*.json")) == [target], "a removal must not fork the record"
+
+
+def test_the_tombstone_says_WHAT_was_removed(tmp_path):
+    """Reading git history must not be required to learn what went. The object is
+    embedded from the baseline tree — that is the only place it still exists."""
+    out = tmp_path / "ev"
+    _evidence(tmp_path, {"D.yaml": _rule("DENY-1", "deny")}, {}, out)
+    import json
+    b = json.loads((out / "prod-edge" / "DENY-1.json").read_text())
+    assert b["compiled"]["object"]["rule"]["action"] == "deny"
+    assert b["compiled"]["object_is"].startswith("the LAST APPLIED state")
+    assert b["risk"]["tier"] == "HIGH" and b["risk"]["checks_fired"]
+
+
+def test_the_tombstone_keeps_BOTH_tickets_apart(tmp_path):
+    """The whole point of the trailer. `request.ticket` authorised creating the
+    object; `removal.ticket` authorised removing it. Collapsing them is the
+    misattribution — an August deletion citing a July request."""
+    out = tmp_path / "ev"
+    _evidence(tmp_path, {"A.yaml": _rule("ALLOW-1")}, {}, out)
+    import json
+    b = json.loads((out / "prod-edge" / "ALLOW-1.json").read_text())
+    assert b["request"]["ticket"] == "J-1"            # asked for the rule
+    assert b["removal"]["ticket"] == "JIRA-31555"     # asked for it to go
+    assert b["request"]["ticket"] != b["removal"]["ticket"]
+
+
+def test_a_tombstone_does_not_churn_on_the_next_apply(tmp_path):
+    """It is a record, so it obeys the same rule as every other: an unchanged
+    change is not rewritten. Without this a removed request would be re-committed
+    on every apply forever, each time crediting a different run."""
+    out = tmp_path / "ev"
+    _evidence(tmp_path, {"A.yaml": _rule("ALLOW-1")}, {}, out)
+    target = out / "prod-edge" / "ALLOW-1.json"
+    before = target.read_bytes()
+    _evidence(tmp_path / "c", {"A.yaml": _rule("ALLOW-1")}, {}, out)
+    assert target.read_bytes() == before
+
+
+def test_evidence_without_a_baseline_SAYS_it_did_not_look(tmp_path, capsys):
+    """"No removals" and "did not look for removals" must not be the same
+    output. That conflation is what let five of ten intents go unrecorded while
+    the command reported success."""
+    from fwgitops.cli import run_evidence
+    cur = _tree(tmp_path / "cur", {"A.yaml": _rule("ALLOW-1")})
+    env = tmp_path / "env.yaml"
+    env.write_text(ENV)
+    assert run_evidence(cur, env, tmp_path / "ev", tfvars_root=tmp_path / "no-tf") == 0
+    assert "REMOVALS were not examined" in capsys.readouterr().out
