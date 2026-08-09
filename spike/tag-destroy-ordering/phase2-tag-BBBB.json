@@ -1,0 +1,69 @@
+{
+  "address_objects": {
+    "addr-probe-tag": {
+      "folder": "prod-edge",
+      "name": "addr-probe-tag",
+      "tags": [
+        "gitops:managed"
+      ],
+      "type": "ip-netmask",
+      "value": "192.0.2.0/24"
+    }
+  },
+  "security_rules": {
+    "PROBE-TAGORDER": {
+      "action": "deny",
+      "application": [
+        "any"
+      ],
+      "category": [
+        "any"
+      ],
+      "description": null,
+      "destinations": [
+        "addr-probe-tag"
+      ],
+      "folder": "prod-edge",
+      "from_zones": [
+        "any"
+      ],
+      "log_end": true,
+      "log_setting": null,
+      "log_start": false,
+      "name": "PROBE-TAGORDER",
+      "negate_destination": false,
+      "negate_source": false,
+      "profile_group": null,
+      "relative_position": "bottom",
+      "rulebase": "pre",
+      "services": [
+        "svc-probe-tag"
+      ],
+      "source_user": [
+        "any"
+      ],
+      "sources": [
+        "addr-probe-tag"
+      ],
+      "tags": [
+        "gitops:managed",
+        "gitops:ticket:PROBE-BBBB"
+      ],
+      "target_rule": null,
+      "to_zones": [
+        "any"
+      ]
+    }
+  },
+  "service_objects": {
+    "svc-probe-tag": {
+      "folder": "prod-edge",
+      "name": "svc-probe-tag",
+      "port": "65000",
+      "protocol": "tcp",
+      "tags": [
+        "gitops:managed"
+      ]
+    }
+  }
+}
