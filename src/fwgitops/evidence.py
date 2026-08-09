@@ -42,9 +42,18 @@ Design properties:
   * **Deterministic** — byte-stable JSON, so re-generating never churns Git.
 
 Control coverage (NIST SP 800-53 Rev.5): AC-4 (the rule is the flow control),
-CM-3 (request → review → approve → implement), CM-5 (who may approve vs who
-did), AU-2 / AU-12 (this record IS the audit record), SC-7 (enforced boundary).
-AC-5 is added for dual-control (CRITICAL tier, Phase 2).
+CM-3 (request → review → approve → implement), AU-2 / AU-12 (this record IS the
+audit record), SC-7 (enforced boundary). Those hold from the record's own
+contents, whatever CI knew.
+
+CONDITIONAL, because a listed control is a claim it was OPERATING:
+  * CM-5 (who may approve vs who did) — only when an APPROVER IS NAMED. It was
+    unconditional until v1.38.0 while `approvers` was hard-coded `()` and
+    `pr_url` `None`, with no caller passing either, so every bundle claimed it
+    and evidenced nobody. Absent, it is omitted AND the omission is named in
+    `controls_not_evidenced`: a silently shorter list reads as an older schema
+    rather than a gap.
+  * AC-5 (separation of duties) — dual-control, CRITICAL tier.
 """
 
 from __future__ import annotations
@@ -54,15 +63,25 @@ import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from fwgitops import __version__
 from fwgitops.push import PushResult
 
 EVIDENCE_SCHEMA = "fw-evidence/v2"
 
-#: Baseline controls every change record supports.
-BASE_CONTROLS: Tuple[str, ...] = ("AC-4", "CM-3", "CM-5", "AU-2", "AU-12", "SC-7")
+#: Controls every change record supports from its own contents — the intent, the
+#: compiled object, the risk verdict and this record's existence are all present
+#: whatever CI knew.
+BASE_CONTROLS: Tuple[str, ...] = ("AC-4", "CM-3", "AU-2", "AU-12", "SC-7")
+#: NOT baseline. CM-5 is "access restrictions for change" — who MAY approve
+#: versus who DID — so it is evidenced by naming an approver, and by nothing
+#: else. It was listed unconditionally until v1.38.0 while `approvers` was
+#: hard-coded to `()` and `pr` to `None`: `CIContext.from_env` never read either,
+#: and no caller passed them, so EVERY bundle ever produced claimed a control it
+#: carried no evidence for. Claimed-but-empty is worse than absent — an assessor
+#: reads the claim, not the empty list beside it.
+APPROVAL_CONTROL = "CM-5"
 #: Added when the change went through dual-control approval (CRITICAL tier).
 DUAL_CONTROL = "AC-5"
 
@@ -89,15 +108,71 @@ def sha256_file(path: Path) -> str:
     return sha256_bytes(Path(path).read_bytes())
 
 
+#: How an approval was given. Kept apart because they are different controls in
+#: practice: reviewing the PROPOSED CHANGE is not the same act as releasing the
+#: DEPLOYMENT, and the same person doing both is a finding, not a detail.
+VIA_REVIEW = "pull_request_review"
+VIA_DEPLOYMENT = "deployment_gate"
+
+
+@dataclass(frozen=True)
+class Approver:
+    """Who approved, and which gate they exercised."""
+
+    login: str
+    via: str
+
+    def to_evidence(self) -> Dict[str, str]:
+        return {"login": self.login, "via": self.via}
+
+    @classmethod
+    def parse(cls, spec: str) -> "Approver":
+        """`login:via`, the CLI form. A bare login is an unattributed approval.
+
+        Unattributed rather than defaulted to a gate: guessing which restriction
+        was exercised is exactly the kind of invented detail this record must not
+        contain.
+        """
+        login, _, via = spec.partition(":")
+        return cls(login=login.strip(), via=(via.strip() or "unspecified"))
+
+
 @dataclass(frozen=True)
 class CIContext:
-    """Facts only the CI run knows. Passed in, never discovered."""
+    """Facts only the CI run knows. Passed in, never discovered.
+
+    `approvers` and `pr_url` are the reason this class exists, and were the two
+    fields nothing ever filled. They cannot be discovered here: the approvals
+    live behind the GitHub API, and reaching for them would put a network call
+    inside the record builder. The workflow fetches them and passes them in.
+    """
 
     pr_url: Optional[str] = None
     merge_commit: Optional[str] = None
     run_url: Optional[str] = None
     gate: Optional[str] = None
-    approvers: Tuple[str, ...] = ()
+    approvers: Tuple[Approver, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Coerce `approvers` however this was constructed.
+
+        `from_env` is not the only door — callers build a CIContext directly, and
+        a bare `("alice",)` would otherwise sail through and fail at
+        SERIALISATION, long after the run that could have explained it. Normalise
+        at the boundary so the type invariant is true of every instance.
+        """
+        object.__setattr__(self, "approvers", tuple(
+            a if isinstance(a, Approver) else Approver.parse(str(a))
+            for a in (self.approvers or ())))
+
+    @property
+    def has_approval_evidence(self) -> bool:
+        """Is there a NAMED approver? A protected environment is not enough.
+
+        `gate` is only the environment's name. It says a restriction was
+        configured, not that a human exercised it — and CM-5 is about who did.
+        """
+        return bool(self.approvers)
 
     @classmethod
     def from_env(cls, env: Dict[str, str], **overrides: Any) -> "CIContext":
@@ -109,15 +184,20 @@ class CIContext:
             f"{server}/{repo}/actions/runs/{run_id}" if server and repo and run_id else None
         )
         base = dict(
-            pr_url=None,
+            # Read from env like everything else here. Hard-coding this to None
+            # while the bundle claimed CM-5 is how the control stayed unevidenced
+            # for eight releases — there was no code path that could have filled
+            # it, and nothing said so.
+            pr_url=env.get("GITHUB_PR_URL") or None,
             merge_commit=env.get("GITHUB_SHA") or None,
             run_url=run_url,
             gate=env.get("GITHUB_ENVIRONMENT") or None,
             approvers=(),
         )
         base.update({k: v for k, v in overrides.items() if v is not None})
-        approvers = base.get("approvers") or ()
-        base["approvers"] = tuple(approvers)
+        # No coercion here: __post_init__ owns it, so every construction path
+        # gets the same treatment rather than only this one.
+        base["approvers"] = tuple(base.get("approvers") or ())
         return cls(**base)  # type: ignore[arg-type]
 
 
@@ -215,7 +295,21 @@ def build_bundle(
             f"{handler.kind} {compiled_id!r} — refusing to emit mismatched evidence")
 
     scope = handler.scope_of(compiled)
+    # CONTROLS ARE EVIDENCED, NOT ASSUMED. A control listed here is a claim that
+    # it was OPERATING for this change, so one the record cannot substantiate is
+    # omitted — and the omission is NAMED, because a silently shorter list reads
+    # as an older schema rather than a gap.
     controls = list(BASE_CONTROLS)
+    not_evidenced: List[Dict[str, str]] = []
+    if ci.has_approval_evidence:
+        controls.append(APPROVAL_CONTROL)
+    else:
+        not_evidenced.append({
+            "control": APPROVAL_CONTROL,
+            "why": "no approver was recorded for this change. CM-5 is about WHO "
+                   "approved, and this run passed none — either the workflow did "
+                   "not collect them, or nothing required an approval.",
+        })
     if risk.is_dual_control:
         controls.append(DUAL_CONTROL)
 
@@ -260,8 +354,10 @@ def build_bundle(
             "checks_fired": [dict(c) for c in risk.checks_fired],
         },
         "approval": {
+            # The environment NAME — a restriction was configured. Not proof one
+            # was exercised; `approvers` is that.
             "gate": ci.gate,
-            "approvers": list(ci.approvers),
+            "approvers": [a.to_evidence() for a in ci.approvers],
             "pr": ci.pr_url,
             "merge_commit": ci.merge_commit,
         },
@@ -271,6 +367,7 @@ def build_bundle(
         },
         "push": push.to_evidence() if push is not None else None,
         "controls": controls,
+        "controls_not_evidenced": not_evidenced,
     }
     if removal is not None:
         # SEPARATE from `request` on purpose. `request.*` describes the change

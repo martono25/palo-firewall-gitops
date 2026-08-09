@@ -130,3 +130,47 @@ def test_a_device_scoped_bundle_lands_under_its_own_directory():
                                  "compiled": {"scope": {"kind": "device",
                                                         "value": "007955000894453"}}})
     assert p == Path("evidence/device-007955000894453/REQ-2026-0801.json")
+
+
+# ── the approval evidence must actually be COLLECTED ──────────────────────
+def _step(name_prefix: str):
+    return next(s for s in _steps() if (s.get("name") or "").startswith(name_prefix))
+
+
+def test_the_workflow_collects_who_approved():
+    """`approvers` was hard-coded empty and no caller passed one, so every bundle
+    ever written claimed CM-5 and named nobody. The Python side now declines the
+    claim when it has no approver — which is honest, and useless if the workflow
+    never collects any. This asserts the other half."""
+    run = _step("Collect approval evidence")["run"]
+    assert "--jq" in run and "reviews" in run, "PR review approvals must be collected"
+    assert "approvals" in run, "the environment gate's approvers must be collected"
+    assert "pull_request_review" in run and "deployment_gate" in run, (
+        "the two routes must stay distinguishable — one person doing both is a "
+        "finding, not a detail")
+    assert "--approver" in _step("Generate evidence bundles")["run"]
+
+
+def test_collecting_approvals_needs_the_permissions_to_read_them():
+    """Without these the API 403s, no approver is collected, and the bundle
+    quietly stops claiming CM-5 — a control lost to a missing scope."""
+    perms = _workflow()["permissions"]
+    assert perms.get("pull-requests") == "read"
+    assert perms.get("actions") == "read"
+
+
+def test_a_stray_api_line_cannot_become_an_APPROVER_NAME():
+    """`sed` appends the route to whatever arrives, so an error string or an
+    empty `[]` on stdout would be recorded as a person who approved a firewall
+    change. A fabricated approver is worse than a missing one."""
+    run = _step("Collect approval evidence")["run"]
+    assert "logins()" in run and "grep -E" in run, (
+        "collected lines must be filtered to well-formed GitHub logins")
+
+
+def test_no_approver_is_surfaced_rather_than_silently_dropping_the_control():
+    """An unapproved auto-apply of a LOW change is the designed path, so this is
+    not a failure — but a bundle silently losing CM-5 is indistinguishable from a
+    broken token, and that is the distinction the warning preserves."""
+    run = _step("Collect approval evidence")["run"]
+    assert "::warning::" in run and "CM-5" in run

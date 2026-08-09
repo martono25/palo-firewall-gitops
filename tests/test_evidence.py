@@ -9,7 +9,9 @@ import pytest
 
 from fwgitops.compiler import compile_request
 from fwgitops.evidence import (
+    APPROVAL_CONTROL,
     DUAL_CONTROL,
+    Approver,
     EVIDENCE_SCHEMA,
     CIContext,
     EvidenceError,
@@ -120,7 +122,8 @@ def test_compiled_rule_records_adr0003_enrichment():
 
 def test_approval_and_apply_sections():
     b = bundle()
-    assert b["approval"]["approvers"] == ["alice@corp"]
+    assert b["approval"]["approvers"] == [
+        {"login": "alice@corp", "via": "unspecified"}]
     assert b["approval"]["pr"] == "https://gh/pr/42"
     assert b["approval"]["merge_commit"] == "abc123"
     assert b["apply"]["run_url"] == "https://gh/runs/9"
@@ -133,7 +136,7 @@ def test_push_section_from_push_result():
 
 # ── Controls ──────────────────────────────────────────────────────────────
 def test_base_controls_present():
-    assert set(bundle()["controls"]) >= {"AC-4", "CM-3", "CM-5", "AU-2", "AU-12", "SC-7"}
+    assert set(bundle()["controls"]) >= {"AC-4", "CM-3", "AU-2", "AU-12", "SC-7"}
 
 
 def test_dual_control_added_for_critical_tier():
@@ -214,10 +217,10 @@ def test_ci_context_from_github_env():
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_RUN_ID": "999",
         "GITHUB_SHA": "deadbeef",
-    }, approvers=("bob@corp",), gate="firewall-apply")
+    }, approvers=("bob@corp:deployment_gate",), gate="firewall-apply")
     assert ci.run_url == "https://github.com/org/repo/actions/runs/999"
     assert ci.merge_commit == "deadbeef"
-    assert ci.approvers == ("bob@corp",)
+    assert ci.approvers == (Approver(login="bob@corp", via="deployment_gate"),)
     assert ci.gate == "firewall-apply"
 
 
@@ -305,3 +308,63 @@ def test_an_unreadable_existing_bundle_is_rewritten_not_preserved(tmp_path):
     _, written = _write(tmp_path)
     assert written is True
     assert json.loads(p.read_text())["req_id"] == "REQ-2026-0417"
+
+
+# ── a control is CLAIMED only when it is EVIDENCED ────────────────────────
+def test_CM5_is_not_claimed_without_a_named_approver():
+    """The defect: `BASE_CONTROLS` listed CM-5 unconditionally while
+    `CIContext.from_env` hard-coded `approvers=()` and `pr_url=None`, and no
+    caller passed either. So every bundle ever written claimed "access
+    restrictions for change" and named nobody. An assessor reads the claim, not
+    the empty list beside it."""
+    b = bundle(ci=CIContext(gate="firewall-apply"))
+    assert APPROVAL_CONTROL not in b["controls"]
+    gap = [g for g in b["controls_not_evidenced"] if g["control"] == APPROVAL_CONTROL]
+    assert gap, "the omission must be NAMED — a shorter list reads as an older schema"
+    assert "WHO approved" in gap[0]["why"]
+
+
+def test_CM5_is_claimed_when_an_approver_is_named():
+    b = bundle(ci=CIContext(gate="firewall-apply",
+                            approvers=(Approver("alice", "deployment_gate"),)))
+    assert APPROVAL_CONTROL in b["controls"]
+    assert b["controls_not_evidenced"] == []
+
+
+def test_a_protected_environment_ALONE_does_not_evidence_CM5():
+    """`gate` is the environment's NAME. It says a restriction was configured,
+    not that a human exercised it — and a required-reviewers rule that nobody has
+    yet answered looks identical in the env var."""
+    assert not CIContext(gate="firewall-apply").has_approval_evidence
+    assert CIContext(gate="firewall-apply",
+                     approvers=(Approver("a", "x"),)).has_approval_evidence
+
+
+def test_the_approval_ROUTE_is_recorded_not_just_the_name():
+    """Reviewing the proposed change and releasing the deployment are different
+    acts. Collapsing them to a list of logins loses whether anyone actually
+    exercised the deployment gate — and one person doing both is a finding."""
+    b = bundle(ci=CIContext(approvers=(Approver("alice", "pull_request_review"),
+                                       Approver("bob", "deployment_gate"))))
+    assert b["approval"]["approvers"] == [
+        {"login": "alice", "via": "pull_request_review"},
+        {"login": "bob", "via": "deployment_gate"}]
+
+
+def test_a_bare_login_is_recorded_as_unspecified_not_guessed():
+    """Inventing which restriction was exercised would be the same class of
+    fabrication as the ticket misattribution."""
+    assert Approver.parse("alice").via == "unspecified"
+    assert Approver.parse("alice:deployment_gate").via == "deployment_gate"
+
+
+def test_approvers_are_coerced_however_the_context_is_built():
+    """`from_env` is not the only door. A bare tuple of strings passed to the
+    constructor used to survive until serialisation, failing far from the cause."""
+    ci = CIContext(approvers=("alice:pull_request_review",))
+    assert ci.approvers == (Approver("alice", "pull_request_review"),)
+
+
+def test_pr_url_is_read_from_the_environment():
+    """It was hard-coded to None, so no code path could ever have filled it."""
+    assert CIContext.from_env({"GITHUB_PR_URL": "https://gh/pr/7"}).pr_url == "https://gh/pr/7"

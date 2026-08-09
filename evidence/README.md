@@ -25,7 +25,8 @@ ticket archaeology, no SCM UI.
 | `request` | requester, ticket, justification, requested date, intent file + sha256 — **paperwork only** |
 | `compiled` | scope, the compiled object + its sha256, compiler version, tfvars file + sha256 |
 | `risk` | tier, classifier + threshold versions, checks fired (Phase 2) |
-| `approval` | gate, approvers, PR, merge commit |
+| `approval` | gate, approvers (`login` + `via`), PR, merge commit |
+| `controls_not_evidenced` | controls this record deliberately does NOT claim, and why |
 | `apply` | plan sha256, CI run URL |
 | `push` | folder-scoped push result + job id |
 | `controls` | NIST control coverage for this record |
@@ -72,11 +73,25 @@ ticket archaeology, no SCM UI.
 
 ## Controls (NIST SP 800-53 Rev.5)
 
-`AC-4` information flow enforcement (the rule *is* the flow control) · `CM-3`
-configuration change control · `CM-5` access restrictions for change · `AU-2` /
-`AU-12` audit events + record generation · `SC-7` boundary protection.
-`AC-5` (separation of duties) is added automatically for CRITICAL-tier
-dual-control changes.
+Unconditional, because they hold from the record's own contents: `AC-4`
+information flow enforcement (the rule *is* the flow control) · `CM-3`
+configuration change control · `AU-2` / `AU-12` audit events + record
+generation · `SC-7` boundary protection.
+
+**Conditional — a listed control is a claim it was OPERATING:**
+
+- `CM-5` access restrictions for change — claimed **only when an approver is
+  named**. It was unconditional until v1.38.0 while `approvers` was hard-coded
+  empty and nothing ever passed one, so every bundle claimed "who may approve vs
+  who did" and answered nobody. When it is absent the control is omitted *and*
+  the omission is listed in `controls_not_evidenced`, because a silently shorter
+  list reads as an older schema rather than a gap.
+- `AC-5` separation of duties — CRITICAL-tier dual-control changes.
+
+Approvers record **which restriction was exercised**, not just a name:
+`pull_request_review` (reviewed the proposed change) and `deployment_gate`
+(released this deployment) are different acts, and one person doing both is a
+finding rather than a detail.
 
 The point is evidence that the control **was operating** — the fired checks plus
 the classifier version prove a specific decision by a specific ruleset at a
