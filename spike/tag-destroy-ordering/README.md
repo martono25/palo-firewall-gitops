@@ -1,6 +1,48 @@
-# Tag-destroy ordering — REPRODUCTION READY (first attempt FAILED on a probe bug, fixed)
+# Tag-destroy ordering — RUN 2026-08-10. **REPRODUCED.**
+
+`TODOS.md` was right, and the mechanism it inferred is now confirmed.
 
 **Does Terraform order "UPDATE the rule to drop a tag" before "DESTROY that tag"?**
+
+## Result: NO. The destroy runs first and 409s.
+
+Phase 2 changed one tag VALUE on a live rule. Terraform planned all three actions
+correctly —
+
+```
+Plan: 1 to add, 1 to change, 1 to destroy.
+
+  # scm_security_rule.this["PROBE-TAGORDER"] will be updated in-place
+      ~ tag = [
+            "gitops:ticket:PROBE-OBJ",
+          ~ "gitops:ticket:PROBE-AAAA" -> "gitops:ticket:PROBE-BBBB",
+        ]
+  # scm_tag.this["gitops:ticket:PROBE-AAAA"] will be destroyed
+  # (because key ["gitops:ticket:PROBE-AAAA"] is not in for_each map)
+```
+
+— and then executed the DESTROY before the UPDATE:
+
+```
+scm_tag.this["gitops:ticket:PROBE-AAAA"]: Destroying...
+scm_tag.this["gitops:ticket:PROBE-BBBB"]: Creation complete after 0s
+Error: 409 Conflict — Reference Not Zero
+  [container -> prod-edge -> pre-rulebase -> security -> rules
+     -> PROBE-TAGORDER -> tag]
+  type: NON_ZERO_REFS
+```
+
+**The rule update never ran.** With `-parallelism=1`, so this is ordering, not a
+race. The inferred mechanism holds: once the rule's config no longer REFERENCES
+the old tag, nothing orders the destroy after the update, and the edge that
+existed for creation is gone exactly when it is needed for destruction.
+
+SCM fails closed, so nothing was corrupted — the same reference guard the zone
+deletion test found. Here it surfaces as a failed apply.
+
+**Scope, narrowed by the 2026-08-09 removal test:** this fires on a tag VALUE
+change, where the rule is UPDATED in place. Removing a whole rule orders
+correctly, because destroying the rule keeps the edge.
 
 `TODOS.md` says it does not, and that the destroy runs first and hits
 `409 NON_ZERO_REFS`. That has been the basis for calling this unfixable
@@ -90,13 +132,20 @@ completed, so nothing was learned about ordering.
 
 ## What the answer changes
 
-**If REPRODUCED** — the fix must break the coupling, and the honest options are
-narrow: stop letting Terraform destroy tag objects at all (they are inert when
-unreferenced) and sweep them separately, which is what TODOS proposes. That moves
-tag lifecycle partly out of Terraform and needs drift to know unreferenced
-`gitops:` tags are expected.
+REPRODUCED, so the coupling has to be broken. Terraform cannot express "destroy
+this AFTER that update" once the reference is gone, and the two obvious
+workarounds are already ruled out: `-target` pulls the tag in as a dependency and
+plans the destroy anyway, and a blanket `depends_on = [scm_tag.this]` on the
+rules is the pattern this module REMOVED once already, because it made every rule
+depend on every object and a `destroy -target` of one address cascaded into
+destroying all rules.
 
-**If NOT REPRODUCED** — the 2026-08-05 failure had a different cause, TODOS is
-wrong about the mechanism, and the item shrinks to "re-measure and rewrite".
-Designing the sweep before knowing which is the shape of the plan_rc mistake
-made on 2026-08-09: a fix for a mechanism nobody had confirmed.
+What remains is to stop Terraform destroying tag objects at all — they are inert
+when unreferenced — and sweep them separately. That moves part of the tag
+lifecycle out of Terraform and needs drift taught that an unreferenced `gitops:`
+tag is expected, not a finding. It is an architectural decision, so it belongs in
+an ADR rather than in this file.
+
+**What this probe does NOT establish:** that the sweep is the right design. It
+establishes only that the failure is real, that its mechanism is what TODOS
+inferred, and that it is confined to a tag VALUE change.
