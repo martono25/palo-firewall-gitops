@@ -1,0 +1,126 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31308877939"
+  },
+  "approval": {
+    "approvers": [],
+    "gate": null,
+    "merge_commit": "e09046840432f19f2fbf9e505cb1d4eebb8d9b5c",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/107"
+  },
+  "compiled": {
+    "compiler_version": "1.0.0",
+    "object": {
+      "address_objects": [
+        {
+          "name": "addr-beed1e7b50",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.20.20.10/32"
+        },
+        {
+          "name": "addr-85c1076cfe",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.20.1.0/24"
+        }
+      ],
+      "rule": {
+        "action": "allow",
+        "application": [
+          "ping"
+        ],
+        "category": [
+          "any"
+        ],
+        "description": null,
+        "destinations": [
+          "addr-85c1076cfe"
+        ],
+        "from_zones": [
+          "local"
+        ],
+        "log_end": true,
+        "log_setting": null,
+        "log_start": false,
+        "name": "REQ-2026-0809",
+        "negate_destination": false,
+        "negate_source": false,
+        "profile_group": null,
+        "relative_position": "bottom",
+        "rulebase": "pre",
+        "services": [
+          "application-default"
+        ],
+        "source_user": [
+          "any"
+        ],
+        "sources": [
+          "addr-beed1e7b50"
+        ],
+        "tags": [
+          "gitops:managed",
+          "gitops:req:REQ-2026-0809",
+          "gitops:section:specific-allow",
+          "gitops:ticket:JIRA-20809"
+        ],
+        "target_rule": null,
+        "to_zones": [
+          "internet"
+        ]
+      },
+      "service_objects": []
+    },
+    "object_sha256": "e367342a0d72974af333af9b821fda20077c71a94d7ec56b28ffaee7ec185356",
+    "scope": {
+      "kind": "folder",
+      "value": "prod-edge"
+    },
+    "tfvars_file": "rules.auto.tfvars.json",
+    "tfvars_sha256": "973beb7e5616f293431d5879eaa200e559287a00d00467ef24c4e28f16c2cc49"
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7"
+  ],
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-09T10:41:03Z",
+  "kind": "AccessRequest",
+  "push": null,
+  "req_id": "REQ-2026-0809",
+  "request": {
+    "intent_file": "intent/prod/observability/REQ-2026-0809.yaml",
+    "intent_sha256": "2c33e88addc8d6d75544b2cc0ce6b896409c428169463384b4be0b5aaf8fa5bc",
+    "justification": "Observability collector must ping the web tier to distinguish a dead host from a dead service",
+    "requested": "2026-08-09",
+    "requester": "martono@corp",
+    "ticket": "JIRA-20809"
+  },
+  "risk": {
+    "checks_fired": [
+      {
+        "check": "allow_without_inspection",
+        "reason": "allow rule has no security profile group \u2014 traffic is permitted without threat inspection",
+        "tier": "LOW"
+      }
+    ],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "applied"
+}
