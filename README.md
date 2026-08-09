@@ -41,8 +41,16 @@ network + security baseline. See `provisioning/`.
 
 **Day-2 (changes):** a requester declares intent (src/dst/service/app/justification) in a
 Git PR → Python compiler generates PAN-OS objects (dedup, targeting, rule placement) → risk
-classifier tiers the change → Terraform plans it → low-risk auto-applies, high-risk waits for
-human approval → every change emits a NIST-mapped evidence bundle.
+classifier tiers the change → Terraform plans it → low-risk auto-applies, high-risk stops at
+the fail-closed tier gate → every change emits a NIST-mapped evidence bundle.
+
+> **The tier gate is currently the ONLY gate.** "High-risk waits for human approval" described
+> required reviewers on the `firewall-apply` environment, which have never been enabled —
+> environment protection needs a paid plan on a private repository. HIGH changes are *blocked*
+> (the job fails), not *queued for review*, and clearing one takes an explicit
+> `workflow_dispatch` at a higher tier. Bundles therefore record no approver and decline to
+> claim NIST CM-5 rather than asserting it over an empty list. Tracked in
+> [`TODOS.md`](TODOS.md).
 
 ```
 Intent (YAML) → Python compiler → risk classifier → Terraform plan → tier gate → apply → SCM/PAN-OS
