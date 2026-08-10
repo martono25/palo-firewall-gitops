@@ -43,6 +43,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # SAME REASON AS apply.yml. A pull request opened by a workflow using
+          # GITHUB_TOKEN has its required checks held in an approval-required
+          # state — documented, deliberate, and not liftable by any repository
+          # setting. For an intake PR that means a REQUESTER's change sits
+          # looking unvalidated until someone clicks, which is exactly the
+          # friction the form exists to remove.
+          #
+          # Falls back to the default token: without the secret the intake still
+          # works, it just needs that click, and the PR step says so.
+          token: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
@@ -99,13 +110,17 @@ jobs:
       - name: Open the pull request
         if: steps.gen.outputs.rc == '0'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
+          HAS_PAT: ${{ secrets.AUTOMATION_PR_TOKEN != '' }}
           NUMBER: ${{ github.event.issue.number }}
           AUTHOR: ${{ github.event.issue.user.login }}
           TITLE: ${{ github.event.issue.title }}
           FILE: ${{ steps.gen.outputs.path }}
         run: |
           set -euo pipefail
+          if [ "$HAS_PAT" != "true" ]; then
+            echo "::warning::AUTOMATION_PR_TOKEN is not set — github-actions[bot] opens this PR and GitHub holds its required checks until someone approves them, so the requester sees an unvalidated PR."
+          fi
           branch="intake/issue-${NUMBER}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
