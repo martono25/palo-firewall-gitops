@@ -5,6 +5,25 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — no removal could be applied at all
+
+`REQ-2026-121` was the first rule removed since tier routing landed, and it did
+not apply. The `classify` job called `fwgitops classify --max-tier` **without
+`--change-message`**, so it could not see the `Removes:` trailer that authorises
+a deletion; `classify` exited 2, the job failed, `apply` was skipped.
+
+A removal authorises itself in the commit message — there is nowhere else to put
+it, because the change IS the deletion of the file. The evidence step three
+hundred lines below had always passed `--change-message`. The tier step, added
+with routing, never inherited it.
+
+**A full test suite could not see this**, because nothing had removed a rule
+since the routing was written. Both guards are mutation-tested, and one asserts
+the tier step and the evidence step derive the authorising text the same way —
+a removal that tiers under one message and is evidenced under another would put
+a different ticket in the audit record than the one the gate saw.
+
+
 ### Changed — `main` takes no direct push, including from the pipeline
 
 A push to `main` is what triggers an apply. While `main` was directly writable,
