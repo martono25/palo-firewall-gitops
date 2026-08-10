@@ -3,7 +3,7 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.1.1] — 2026-08-10
 
 ### Correction — the client id was not a credential, and v2.1.0 over-called it
 
