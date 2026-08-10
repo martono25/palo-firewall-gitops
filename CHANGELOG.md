@@ -5,6 +5,21 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — the PAT authors the pull request; it does not comment
+
+Verified live on #142, which is how this surfaced. The PAT worked exactly as
+intended — the intake PR was authored by a user account and **both required
+checks ran unattended**, the first time today that happened. Then the run died
+on `Resource not accessible by personal access token (addComment)`, leaving the
+requester with an open PR and no word about it.
+
+`AUTOMATION_PR_TOKEN` exists for one thing: authoring the PR so GitHub runs its
+checks. The scopes for that are contents + pull-requests. Commenting would drag
+`issues: write` onto a long-lived credential to save a variable, when the run's
+own default token already holds it for the life of the run — so every
+`gh issue comment` now runs under `DEFAULT_TOKEN`.
+
+
 ### Fixed — a bot-opened pull request could never merge
 
 `apply.yml` and `intake.yml` both open pull requests, and both used the default
