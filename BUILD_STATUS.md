@@ -1,6 +1,6 @@
 # BUILD STATUS — palo-firewall-gitops
 
-_As of 2026-08-10, **v2.1.0**, 811 passing tests. Design + decision record:
+_As of 2026-08-10, **v2.1.1**, 820 passing tests. Design + decision record:
 [`docs/DESIGN.md`](docs/DESIGN.md), [`docs/adr/`](docs/adr/)._
 
 > **This file was three weeks stale until 2026-08-09.** It described a
