@@ -2,7 +2,7 @@
 # BROAD-REQUESTER INTAKE. A filled Issue Form becomes an intent PR.
 #
 # This is the piece README and DESIGN.md claimed existed from 2026-07-19 until
-# v2.0.1, while `.github/ISSUE_TEMPLATE/` was empty. It is the difference between
+# v2.1.0, while `.github/ISSUE_TEMPLATE/` was empty. It is the difference between
 # a platform-team tool and something an app team can use: without it, a requester
 # has to hand-write YAML with a valid `metadata.ticket`, a resolvable
 # `environment` and catalog-correct app names, which is exactly the PAN-OS
