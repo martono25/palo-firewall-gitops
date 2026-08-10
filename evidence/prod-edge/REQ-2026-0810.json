@@ -1,0 +1,148 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31369443756"
+  },
+  "approval": {
+    "approvers": [
+      {
+        "login": "martono25",
+        "via": "deployment_gate"
+      }
+    ],
+    "gate": null,
+    "merge_commit": "b23f7adb955ff3d7857024d5815ad52592c5029a",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/139"
+  },
+  "compiled": {
+    "compiler_version": "1.0.0",
+    "object": {
+      "address_objects": [
+        {
+          "name": "addr-e336915ff1",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "192.0.2.0/24"
+        },
+        {
+          "name": "addr-44e3a73953",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "198.51.100.9/32"
+        }
+      ],
+      "rule": {
+        "action": "deny",
+        "application": [
+          "any"
+        ],
+        "category": [
+          "any"
+        ],
+        "description": null,
+        "destinations": [
+          "addr-44e3a73953"
+        ],
+        "from_zones": [
+          "local"
+        ],
+        "log_end": true,
+        "log_setting": null,
+        "log_start": false,
+        "name": "REQ-2026-0810",
+        "negate_destination": false,
+        "negate_source": false,
+        "profile_group": null,
+        "relative_position": null,
+        "rulebase": "pre",
+        "services": [
+          "svc-3fcc19c4ae"
+        ],
+        "source_user": [
+          "any"
+        ],
+        "sources": [
+          "addr-e336915ff1"
+        ],
+        "tags": [
+          "gitops:managed",
+          "gitops:req:REQ-2026-0810",
+          "gitops:section:specific-allow",
+          "gitops:ticket:JIRA-9010"
+        ],
+        "target_rule": null,
+        "to_zones": [
+          "internet"
+        ]
+      },
+      "service_objects": [
+        {
+          "name": "svc-3fcc19c4ae",
+          "port": "9443",
+          "protocol": "tcp",
+          "tags": [
+            "gitops:managed"
+          ]
+        }
+      ]
+    },
+    "object_is": "the LAST APPLIED state, from the baseline tree",
+    "object_sha256": "d2d6fdfd37ee8d896b1f924e39d00b011037891cd247c40e6b415f65d688ebcf",
+    "scope": {
+      "kind": "folder",
+      "value": "prod-edge"
+    },
+    "tfvars_file": "rules.auto.tfvars.json",
+    "tfvars_sha256": null
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7",
+    "CM-5"
+  ],
+  "controls_not_evidenced": [],
+  "generated_at": "2026-08-10T08:23:30Z",
+  "kind": "AccessRequest",
+  "push": {
+    "admin_count": 1,
+    "all_admins": false,
+    "folder": "prod-edge",
+    "job_id": "194",
+    "status": "success"
+  },
+  "removal": {
+    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
+    "commit": "b23f7adb955ff3d7857024d5815ad52592c5029a",
+    "ticket": "JIRA-9010"
+  },
+  "req_id": "REQ-2026-0810",
+  "request": {
+    "intent_file": "intent/prod/evidence-probe/REQ-2026-0810.yaml",
+    "intent_sha256": "1a875bff870c89b50679b484d1e8171ebc37c4899c6fd99400b4e110c3a69419",
+    "justification": "Verify the evidence bundle records the SCM push (fw-evidence/v2 push field)",
+    "requested": "2026-08-10",
+    "requester": "martono25",
+    "ticket": "JIRA-9010"
+  },
+  "risk": {
+    "checks_fired": [
+      {
+        "check": "deny_rule_removed",
+        "reason": "removes a deny rule (REQ-2026-0810) \u2014 traffic it blocked may now match a permissive rule below it. A removal that INCREASES effective access.",
+        "tier": "HIGH"
+      }
+    ],
+    "classifier_version": "1.0.0",
+    "thresholds_version": null,
+    "tier": "HIGH"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "removed"
+}
