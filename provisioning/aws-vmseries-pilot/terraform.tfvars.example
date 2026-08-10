@@ -19,3 +19,8 @@ scm_registration_pin_value = "REPLACE"
 
 # --- BYOL license ---
 vmseries_authcode = "REPLACE"                  # VM-Series auth code
+
+# 4 vCPU / 4 ENIs = mgmt + 3 dataplane, which is this deployment's ceiling AND
+# its requirement. Anything larger is paid for twice: EC2, and a licence tier
+# that auto-scales with the instance. See the note in variables.tf.
+instance_type     = "m5.xlarge"

@@ -3,6 +3,52 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed — the pilot drops to 4 vCPU, and the reason is the interface naming
+
+`m5.xlarge`, 4 vCPU, 4 ENIs. The 16-vCPU instance was never about CPU: an ENI
+must sit at the matching device index for a VM-Series interface to exist, and
+`$eth-internet` / `$eth-local` resolved to `ethernet1/3` and `ethernet1/4` —
+index 4 forces a fifth ENI, and a fifth ENI forces 16 vCPU.
+
+Checked rather than recalled: **every** 4-vCPU instance type in
+`ap-southeast-1` caps at 4 ENIs — m5, c5, r8i, x2iedn, t3, z1d. There is no
+4-vCPU escape hatch, so the ceiling is mgmt plus three dataplane interfaces.
+That is exactly what this deployment uses.
+
+The saving is paid twice over: the EC2 delta, and a licence tier that auto-scaled
+`VM-SERIES-4 → VM-SERIES-16` with the instance (verified 2026-08-03) and drew
+roughly 4x the credits. **Whether it scales back down is unverified** — only the
+upward move was observed — so the rationale now carries the command to check it
+after a downsize rather than an assumption.
+
+`firewall.tf` drops the spare ENI that existed only to bridge the gap up to
+indexes 3 and 4; the three roles now sit contiguously at 1, 2 and 3.
+
+**This cannot be applied before the SCM change it depends on.** `$eth-local` and
+`$eth-internet` are defaults inherited from `ngfw-shared` — this platform does
+not own them, and `catalog/interfaces.yaml` only mirrors them. Building this
+layout against the old defaults gives you zones bound to ports with no ENI
+behind them.
+
+### Added — how to replace a firewall
+
+A new serial is threaded through the catalog, the Day-1 intents, a Terraform
+root and the evidence tree, and **nothing in CI catches a half-done
+replacement**: an intent naming a stale serial compiles clean.
+
+`operator-runbook.md` now has the ordered procedure, including the two steps that
+are outside this repository (deactivate the licence before destroying the
+instance; re-point the inherited SCM defaults while the firewall is down) and the
+one that is a judgement call — old evidence bundles stay, because they are the
+record of changes that really happened on a firewall that really existed.
+
+**Known gap, stated where it matters:** `verify-catalog` checks the folder
+hierarchy and does not compare the interface port map against SCM. Nothing else
+does either, so a catalog disagreeing with the real `default_value` writes the
+wrong port with no error at any stage.
+
 ## [2.1.1] — 2026-08-10
 
 ### Correction — the client id was not a credential, and v2.1.0 over-called it

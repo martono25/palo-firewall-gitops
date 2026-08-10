@@ -155,8 +155,8 @@ its checks start without you touching them.
 
 ## Bringing the pilot up and putting it away
 
-The pilot is suspended between sessions to stop the EC2 draw (`m5.4xlarge`,
-sized for ENIs rather than CPU).
+The pilot is suspended between sessions to stop the EC2 draw (`m5.xlarge` — 4
+vCPU, 4 ENIs, which is both this deployment's ceiling and its requirement).
 
 **Up:**
 
@@ -185,6 +185,73 @@ skipped; silently green would be the worse failure.
 
 **If SSH times out**, your egress IP has changed. Re-point the management
 security group at your current `/32` — never widen it.
+
+---
+
+## Replacing a firewall (new serial)
+
+The serial is threaded through the repository, so a rebuild is not just a
+`terraform apply`. Nothing in CI catches a half-done replacement: the catalog is
+a hand-maintained mirror, and an intent naming a stale serial **compiles clean**.
+
+Do it in this order. Steps 1-2 are outside this repository.
+
+1. **Deactivate the old licence** in the Palo Alto CSP before destroying the
+   instance, or the entitlement stays bound to a machine that no longer exists.
+2. **Re-point the inherited interface defaults in SCM** at `ngfw-shared`, if you
+   are moving to a 4-ENI layout:
+
+   | Variable | From | To |
+   |---|---|---|
+   | `$eth-local` | `ethernet1/4` | `ethernet1/1` |
+   | `$eth-internet` | `ethernet1/3` | `ethernet1/2` |
+
+   These are SCM defaults **inherited by every firewall under `ngfw-shared`**,
+   not objects this platform owns. Changing them moves which physical port every
+   zone binds, which is free on a firewall that does not exist yet and disruptive
+   on one carrying traffic. Do it while the old instance is down.
+
+3. **Destroy and rebuild**, following [`provisioning.md`](provisioning.md).
+   Capture the new serial from `show system info`.
+4. **Update the catalog** — `catalog/folders.yaml` (the `devices:` block under
+   the target folder) and `catalog/interfaces.yaml` (the per-serial port map for
+   every role, plus `create_in` for any role this platform creates).
+5. **Update the Day-1 intents** that name the device. `InterfaceRequest` is
+   device-scoped, so each one carries `spec.device: "<serial>"`:
+
+   ```sh
+   grep -rln '<old-serial>' intent/
+   ```
+
+6. **Replace the Terraform device root.** The old one is named for the old
+   serial and its state describes a machine that is gone:
+
+   ```sh
+   fwgitops scaffold-root --device <new-serial> --device-folder prod-edge
+   git rm -r terraform/device-<old-serial>
+   ```
+
+   Remove the old root's state object from the backend too, or it lingers as a
+   state file nothing reconciles.
+
+7. **Leave the old evidence bundles alone.** `evidence/device-<old-serial>/` is
+   the audit record of changes that really happened on a firewall that really
+   existed. Deleting them to tidy up destroys history; they are supposed to
+   outlive the device.
+
+8. **Verify before trusting it:**
+
+   ```sh
+   fwgitops verify-catalog          # catalog vs SCM's real hierarchy
+   fwgitops compile intent --check  # every intent still resolves
+   fwgitops device-sync             # SCM vs the running config
+   ```
+
+> **The gap to know about.** `verify-catalog` checks the folder hierarchy. It
+> does **not** compare the interface port map against SCM, and nothing else
+> does either — so a catalog that disagrees with `$eth-*`'s real `default_value`
+> writes the wrong port with no error at any stage. Until that check exists,
+> step 2 and step 4 have to be done together and read twice.
 
 ---
 

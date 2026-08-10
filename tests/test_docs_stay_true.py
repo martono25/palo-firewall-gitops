@@ -162,3 +162,40 @@ def test_no_doc_links_to_a_file_that_does_not_exist():
             if not (md.parent / target).exists():
                 broken.append(f"{md.name} → {target}")
     assert not broken, f"broken relative links: {broken}"
+
+
+def test_the_runbook_covers_replacing_a_firewall():
+    """A new serial is threaded through catalog, intents, Terraform roots and
+    evidence, and NOTHING IN CI CATCHES A HALF-DONE REPLACEMENT — an intent
+    naming a stale serial compiles clean.
+
+    The procedure is only useful if it keeps naming the two steps that are
+    outside this repository (deactivate the licence, re-point the inherited SCM
+    defaults) and the one gap that makes ordering matter."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "Replacing a firewall" in runbook
+    for topic, why in (
+        ("Deactivate the old licence", "the entitlement stays bound otherwise"),
+        ("ngfw-shared", "the interface defaults are inherited, not ours"),
+        ("Leave the old evidence bundles alone",
+         "they outlive the device on purpose"),
+        ("does not compare the interface port map against SCM",
+         "the gap that forces steps 2 and 4 to be done together"),
+    ):
+        assert topic in runbook, f"the replacement procedure must still say: {why}"
+
+
+def test_the_sizing_rationale_survives_the_downsize():
+    """The instance type is cheap to change and the REASON is not. Two facts
+    have to stay attached to it: 4 vCPU caps at 4 ENIs on every family (so the
+    ceiling is mgmt + 3 dataplane), and the licence tier auto-scaled with the
+    instance — which is the larger recurring cost and was only ever observed
+    moving UP.
+
+    Dropping either turns a measured decision back into a preference."""
+    var = (REPO_ROOT / "provisioning" / "aws-vmseries-pilot" / "variables.tf").read_text()
+    assert 'default     = "m5.xlarge"' in var, "4 vCPU is the default"
+    assert "cap at 4 ENIs" in var or "caps at 4 ENIs" in var
+    assert "VM-SERIES-16" in var and "UNVERIFIED" in var, (
+        "the licence-tier behaviour, and the half of it that was never observed, "
+        "must stay recorded next to the size that causes it")
