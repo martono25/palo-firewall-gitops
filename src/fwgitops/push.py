@@ -94,11 +94,30 @@ class PushResult:
     admins: Tuple[str, ...]  # identities the commit was scoped to (audit); () = unscoped
 
     def to_evidence(self) -> Dict[str, object]:
+        """The push, shaped for a record that gets COMMITTED to a public repo.
+
+        NO RAW IDENTITIES. `admins` defaults to `SCM_CLIENT_ID`, which is a
+        GitHub secret — `.github/scripts/redact.py` lists it precisely so it
+        never reaches a published artifact. This used to emit it verbatim, which
+        was harmless only because nothing consumed the result: the moment the
+        evidence bundle started carrying the push, the value would have been
+        committed in plaintext. It was, once, on an evidence branch that was
+        deleted unmerged.
+
+        What the audit actually needs from this field is whether the commit was
+        SCOPED to our own staged changes or was break-glass over the whole
+        candidate — and that is `all_admins`, which discloses nothing.
+
+        A digest of the identity was considered and rejected: an account name in
+        a known format is low-entropy enough to confirm by guessing, so hashing
+        it would look like protection without being any.
+        """
         return {
             "folder": self.folder,
             "status": self.status,
             "job_id": self.job_id,
-            "admins": list(self.admins),
+            "admin_count": len(self.admins),
+            "all_admins": not self.admins,
         }
 
 

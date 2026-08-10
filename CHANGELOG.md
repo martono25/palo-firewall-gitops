@@ -5,6 +5,33 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Security — the push record must not carry `SCM_CLIENT_ID`
+
+Caught on the first live run of the change above, before it reached `main`.
+
+`fwgitops push` scopes its commit to `SCM_CLIENT_ID` by default, and
+`PushResult.to_evidence()` emitted that identity verbatim. Harmless while
+nothing consumed the result — and the moment the evidence bundle started
+carrying the push, it was **committed in plaintext to a public repository**.
+`.github/scripts/redact.py` lists `SCM_CLIENT_ID` precisely so it never reaches
+a published artifact; the new code walked straight past it.
+
+The evidence shape now carries `admin_count` and `all_admins` instead. That
+keeps the fact the audit actually needs — was the commit scoped to our own
+staged changes, or break-glass over the whole candidate — and discloses no
+identity. A digest was considered and rejected: an account name in a known
+format is low-entropy enough to confirm by guessing, so hashing it would look
+like protection without being any.
+
+`evidence` projects each record through an **allow-list** rather than replaying
+it. `push --record` writes no identity, but "the producer is careful" is not a
+property of the consumer, and this consumer is the last step before a public
+commit.
+
+Exposure: one evidence branch, pushed to a public repo and deleted unmerged
+about four minutes later. No bundle on `main` ever carried it.
+
+
 ### Fixed — the evidence bundle now says whether the change reached SCM
 
 **Every bundle ever written recorded `"push": null`.** The field, the

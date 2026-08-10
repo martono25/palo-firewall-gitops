@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 import os
 import sys
 from pathlib import Path
@@ -1758,6 +1759,26 @@ def _read_snapshot_rows(path: Path, err):
     return rows, 0
 
 
+#: Exactly what a push may disclose in a committed bundle. `admins` is absent by
+#: design — it defaults to `SCM_CLIENT_ID`, a secret; `all_admins` carries the
+#: audit-relevant half (was this break-glass?) without the identity.
+_PUSH_EVIDENCE_KEYS = ("folder", "status", "job_id", "admin_count", "all_admins")
+
+
+@dataclass(frozen=True)
+class _RecordedPush:
+    """A push outcome read back from `fwgitops push --record`.
+
+    Only needs to answer `to_evidence()`, because that is the whole of what a
+    bundle asks of a push.
+    """
+
+    payload: Dict[str, Any]
+
+    def to_evidence(self) -> Dict[str, Any]:
+        return dict(self.payload)
+
+
 def _push_results(paths: Optional[List[Path]], err) -> Optional[Dict[str, Any]]:
     """`scope dirname -> PushResult`, from files written by `fwgitops push --record`.
 
@@ -1771,18 +1792,31 @@ def _push_results(paths: Optional[List[Path]], err) -> Optional[Dict[str, Any]]:
     is never pushed, so no file is written and its bundles keep `push: null`.
     Those bundles are also the ones `write_bundle_if_changed` leaves alone.
     """
-    from fwgitops.push import PushResult
-
     if not paths:
         return {}
     out: Dict[str, Any] = {}
     for p in paths:
         try:
             d = json.loads(Path(p).read_text())
-            scope_dir = d["scope_dir"]
-            out[scope_dir] = PushResult(folder=d["folder"], status=d["status"],
-                                        job_id=d.get("job_id"),
-                                        admins=tuple(d.get("admins") or ()))
+            scope_dir = d.pop("scope_dir")
+            # REPLAYED, NOT REBUILT. Reconstructing a `PushResult` here would
+            # mean re-deriving the evidence shape from parts, and the part it
+            # would need is the one deliberately absent: `admins` holds
+            # `SCM_CLIENT_ID`. `push --record` already wrote the redacted shape,
+            # so the record is carried through verbatim and there is exactly one
+            # place that decides what a push discloses.
+            for required in ("folder", "status"):
+                if required not in d:
+                    raise KeyError(required)
+            # ALLOW-LIST, not passthrough. Replaying the file verbatim would
+            # mean a record containing an identity puts it in a committed
+            # bundle — `push --record` does not write one, but "the producer is
+            # careful" is not a property of the consumer, and this consumer is
+            # the last step before a public commit. Unknown keys are dropped
+            # rather than rejected: a newer `push` adding a field should not
+            # fail an older `evidence`.
+            out[scope_dir] = _RecordedPush(
+                {k: d[k] for k in _PUSH_EVIDENCE_KEYS if k in d})
         except (OSError, ValueError, KeyError, TypeError) as e:
             print(f"error: push record {p} is unreadable ({e}). Refusing to write "
                   f"bundles that would claim nothing was pushed when the record "
