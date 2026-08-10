@@ -5,6 +5,35 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed — `main` takes no direct push, including from the pipeline
+
+A push to `main` is what triggers an apply. While `main` was directly writable,
+this project's central claim — that a change to a firewall is reviewed — did not
+hold, and the pipeline itself was the loudest exception: `apply.yml` committed
+its evidence bundles straight to `main`.
+
+Closing it means a repository ruleset with **no bypass actors**. On a user-owned
+repository the `github-actions` app cannot be one at all (`422: must be part of
+the ruleset source or owner organization`), so there is no version of this where
+the workflow is excepted. It stops pushing instead: the bundles now reach `main`
+through a pull request, one branch per run.
+
+That also removes the rebase-and-retry loop, which existed only to survive two
+runs racing for `main`. Two runs that genuinely disagree about the same bundle
+now surface as a PR conflict — visible, resolved by a human, which is what that
+case always deserved.
+
+**`compile-and-plan` lost its `paths:` filter**, and that is not incidental. It
+is a REQUIRED status check, and GitHub treats a required check that never runs
+as pending forever — so an evidence PR, touching only `evidence/`, could never
+have merged. A required check behind a paths filter is a class of pull request
+that is unmergeable by construction.
+
+The cost is real and recorded so nobody optimises it away: evidence lands minutes
+after the change it records rather than in the same push, and each apply leaves a
+small PR to merge.
+
+
 ### Fixed — the intake no longer hides why it could not open a PR
 
 Found on the **first live run**, which is the point of running one. The intent

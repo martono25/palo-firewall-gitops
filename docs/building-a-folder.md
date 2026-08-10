@@ -292,6 +292,12 @@ evidence/prod-edge/REQ-2026-0806.json
 Scope-keyed, so a device-scoped change lands in `device-<serial>/`, mirroring the
 Terraform roots.
 
+**The bundles arrive as their own pull request**, titled `evidence: bundles for
+<sha>`, opened by the apply run. Merge it — the apply already happened, and the
+PR is what puts the record in the source of truth. `main` takes no direct push
+from anyone, including the workflow, because a push to `main` is what triggers an
+apply; a pipeline exempt from the rule it enforces is not enforcing it.
+
 ---
 
 ## Two things that went wrong the first time

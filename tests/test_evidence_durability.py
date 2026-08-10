@@ -15,6 +15,7 @@ lost.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -33,11 +34,16 @@ def _steps():
 
 
 def test_evidence_bundles_are_COMMITTED_not_only_uploaded():
-    """An uploaded artifact expires; a commit does not."""
+    """An uploaded artifact expires; a commit does not. The bundles reach `main`
+    through a PULL REQUEST rather than a push since the ruleset closed direct
+    writes to `main` — but they still have to reach it, so this asserts a
+    committed record exists, not the mechanism that delivers it."""
     names = [s.get("name") or "" for s in _steps()]
-    assert any("Commit evidence" in n for n in names), (
-        "apply.yml must commit the bundles — an artifact-only audit trail has a "
-        "retention TTL, which `evidence.py` explicitly does not claim")
+    assert any("evidence" in n.lower() and ("commit" in n.lower()
+                                            or "pull request" in n.lower())
+               for n in names), (
+        "apply.yml must get the bundles into git — an artifact-only audit trail "
+        "has a retention TTL, which `evidence.py` explicitly does not claim")
 
 
 def test_the_commit_step_can_actually_write():
@@ -56,16 +62,22 @@ def test_committing_evidence_cannot_retrigger_the_workflow():
     assert paths, "a paths filter must exist — without one, every push retriggers"
 
 
-def test_the_push_race_is_handled_but_a_conflict_is_not_swallowed():
-    """Applies queue (concurrency group), so two runs can race to push. A rebase
-    CONFLICT means two runs disagree about the same bundle — worth failing for,
-    not auto-resolving, because auto-resolving silently drops one change's audit
-    record."""
-    step = next(s for s in _steps() if (s.get("name") or "").startswith("Commit evidence"))
+def test_two_concurrent_applies_cannot_race_for_one_evidence_branch():
+    """Applies queue on a concurrency group but are not serialised across refs,
+    so two runs can produce bundles at once. This used to be a rebase-and-retry
+    loop against `main`; ONE BRANCH PER RUN removes the race by construction
+    instead of retrying through it.
+
+    Two runs that genuinely disagree about the same bundle now surface as a PR
+    conflict — visible, and resolved by a human. That is what the old code was
+    protecting when it refused to auto-resolve a rebase conflict, and the
+    property survives the mechanism change."""
+    step = next(s for s in _steps() if "pull request" in (s.get("name") or "").lower()
+                and "evidence" in (s.get("name") or "").lower())
     run = step["run"]
-    assert "--rebase" in run, "a concurrent apply will have pushed first"
+    assert "${GITHUB_RUN_ID}" in run, "the branch must be unique per run"
     assert "set -euo pipefail" in run, "a failed push must fail the step"
-    assert "::error::" in run, "exhausting retries must surface as an error"
+    assert "::error::" in run, "losing the record must surface as an error"
 
 
 def test_the_bundle_path_is_one_file_per_rule():
@@ -112,7 +124,8 @@ def test_the_commit_step_tolerates_having_nothing_to_commit():
     """With unchanged records preserved, "nothing to commit" is now the COMMON
     outcome of an apply that changed one request. If the step failed on it, the
     fix would surface as a red apply after the firewall had already changed."""
-    step = next(s for s in _steps() if (s.get("name") or "").startswith("Commit evidence"))
+    step = next(s for s in _steps() if "pull request" in (s.get("name") or "").lower()
+                and "evidence" in (s.get("name") or "").lower())
     run = step["run"]
     assert "git diff --cached --quiet" in run and "exit 0" in run
 
@@ -155,7 +168,10 @@ def test_collecting_approvals_needs_the_permissions_to_read_them():
     """Without these the API 403s, no approver is collected, and the bundle
     quietly stops claiming CM-5 — a control lost to a missing scope."""
     perms = _workflow()["permissions"]
-    assert perms.get("pull-requests") == "read"
+    # `write` since the bundles now arrive by pull request. Write INCLUDES read,
+    # so the approvals API still answers; asserting equality with "read" would
+    # fail for a strictly more permissive value and teach nothing.
+    assert perms.get("pull-requests") in ("read", "write")
     assert perms.get("actions") == "read"
 
 
@@ -432,3 +448,80 @@ def test_prose_alone_cannot_trigger_an_apply():
     assert paths.index("!**/*.md") > max(
         i for i, p in enumerate(paths) if not p.startswith("!")), (
         "the negation must come after the includes it subtracts from")
+
+
+def _all_workflows():
+    d = REPO_ROOT / ".github" / "workflows"
+    return {f.name: yaml.safe_load(f.read_text()) for f in sorted(d.glob("*.yml"))}
+
+
+def _run_bodies(wf):
+    out = []
+    for job in wf.get("jobs", {}).values():
+        for step in job.get("steps", []):
+            if "run" in step:
+                out.append("\n".join(l for l in str(step["run"]).splitlines()
+                                     if not l.lstrip().startswith("#")))
+    return out
+
+
+def test_no_workflow_pushes_to_main():
+    """The property the ruleset on `main` depends on, asserted in the repo so it
+    cannot be lost by an edit that looks innocent.
+
+    `main` accepts no direct push from anyone — no bypass actors — because a
+    push to `main` is what TRIGGERS AN APPLY, and this project's whole claim is
+    that a change to a firewall is reviewed. That claim did not hold while a
+    workflow could push.
+
+    On a user-owned repository the `github-actions` app cannot be a bypass actor
+    at all (422: "must be part of the ruleset source or owner organization"), so
+    there is no version of this where a workflow is excepted. It has to stop
+    pushing."""
+    offenders = []
+    for name, wf in _all_workflows().items():
+        for body in _run_bodies(wf):
+            for line in body.splitlines():
+                if "git push" not in line:
+                    continue
+                if "HEAD:main" in line or re.search(r"git push\s+\S+\s+main\b", line):
+                    offenders.append(f"{name}: {line.strip()}")
+    assert not offenders, (
+        "these push straight to main and would be rejected by the ruleset — "
+        "open a pull request instead: " + "; ".join(offenders))
+
+
+def test_the_evidence_bundles_still_reach_main():
+    """Not pushing is only half of it. Dropping the push WITHOUT replacing it
+    would leave the audit record in an artifact that expires — the exact defect
+    v1.34.0 fixed — and the tests would still be green, because "does not push"
+    is satisfied by doing nothing at all.
+
+    So assert the replacement: a branch, a pull request, and a failure that says
+    the record is not in main when the PR cannot be opened."""
+    step = [s for s in _steps() if "evidence" in str(s.get("name", "")).lower()
+            and "pull request" in str(s.get("name", "")).lower()]
+    assert step, "the evidence bundles must still be routed to main somehow"
+    run = step[0]["run"]
+    assert "gh pr create" in run
+    assert "evidence/run-" in run, (
+        "one branch per run — concurrent applies must not race for one branch")
+    assert "the audit record is NOT in main" in run, (
+        "a failure to open the PR must say what was lost, not just fail")
+
+
+def test_the_required_checks_run_on_every_pull_request():
+    """A required status check that never runs is pending forever, and its PR
+    can never be merged. `compile-and-plan` used to carry a `paths:` filter
+    listing intent/, catalog/, terraform/ and src/ — none of which an
+    evidence-bundle PR touches, so every one of them would have deadlocked.
+
+    Both checks are required on `main`, so both must be unfiltered."""
+    for f, job in (("test.yml", "pytest"), ("pr-validate.yml", "compile-and-plan")):
+        wf = _all_workflows()[f]
+        on = wf[True]                      # `on:` parses as the bool True
+        assert "pull_request" in on, f"{f} must run on pull requests"
+        pr = on["pull_request"] or {}
+        assert "paths" not in pr, (
+            f"{f} gates '{job}' behind a paths filter; as a REQUIRED check that "
+            f"is a PR which can never merge")

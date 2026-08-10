@@ -11,12 +11,17 @@ name: pr-validate
 # meant a PR touching only tests/ or .github/ ran nothing at all.
 on:
   workflow_dispatch: {}
+  # NO `paths:` FILTER, DELIBERATELY. `compile-and-plan` is a REQUIRED status
+  # check on `main`, and GitHub treats a required check that never runs as
+  # pending forever — so a filtered-out PR cannot merge at all. That is the
+  # deadlock, and it is not hypothetical: evidence-bundle PRs touch only
+  # `evidence/`, which no filter here would have matched.
+  #
+  # The cost of running it on a docs-only PR is one `compile` and one `plan`
+  # over an unchanged tree, about a minute. The cost of the filter is a class of
+  # PR that can never be merged, or a required check quietly downgraded to
+  # advisory to work around it.
   pull_request:
-    paths:
-      - "intent/**"
-      - "catalog/**"
-      - "terraform/**"
-      - "src/**"
 
 permissions:
   contents: read
