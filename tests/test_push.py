@@ -19,7 +19,7 @@ NOSLEEP = lambda _s: None  # noqa: E731
 FAST = PollConfig(max_attempts=5, backoff_seconds=0)
 
 #: Our automation identity — the service account the commit is scoped to.
-US = "GitOps@1198884949.iam.panserviceaccount.com"
+US = "svc@example.iam.panserviceaccount.com"
 
 
 class FakeClient:

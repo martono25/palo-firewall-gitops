@@ -80,13 +80,23 @@ gh secret list
 
 `.github/scripts/redact.py` strips `SCM_CLIENT_ID`, `SCM_CLIENT_SECRET` and
 `SCM_SCOPE` from anything the CI publishes — artifacts and PR comments, which
-GitHub does **not** mask even though it masks the live log stream.
+GitHub does **not** mask even though it masks the live log stream. Only the
+secret is a credential; the other two are stripped because a published artifact
+is not the place for account identifiers either.
 
-> **This rule was broken.** Until 2026-08-10 the setup docs printed the real
-> service-account identity in a comment beside `gh secret set`, and it had been
-> committed to a public repository since 2026-07-23. Redaction that exists in a
-> script and not in the docs beside it is not redaction. Use placeholders in
-> every example, always.
+> **Use placeholders in every example, always.** Until 2026-08-10 these docs
+> printed this deployment's own service-account identity and tenant id beside
+> `gh secret set`. Neither is a credential — authentication needs
+> `SCM_CLIENT_SECRET`, which was never exposed — so this was not an incident.
+> It was two smaller things worth fixing anyway: **the examples only worked for
+> one tenant**, which makes the runbook useless to anyone else, and the repo
+> asserted both positions at once, with `redact.py` stripping values the docs
+> printed.
+>
+> The position is now stated once: the identity and tenant id are account
+> identifiers, not secrets. `redact.py` still strips them from published CI
+> artifacts as defence in depth, which costs nothing, and the docs use
+> placeholders so they are portable.
 
 ### Cloud credentials
 
