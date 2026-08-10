@@ -248,3 +248,34 @@ def test_the_pr_step_never_discards_the_error_it_falls_back_from():
     assert "gh issue comment" in code and "compare/main" in code, (
         "a requester whose PR could not be opened must be told, and told how "
         "to finish it — the branch and the intent both exist")
+
+
+def test_the_pat_authors_the_pr_but_never_comments():
+    """LEAST PRIVILEGE, and it is not theoretical. `AUTOMATION_PR_TOKEN` exists
+    for ONE thing — authoring the pull request, so GitHub runs its checks
+    instead of holding them in an approval-required state. The scopes for that
+    are contents + pull-requests.
+
+    Commenting on the issue would drag `issues: write` onto a long-lived
+    credential to save a variable, when the default token already has it for the
+    life of the run. Observed 2026-08-10 on #142: the PR was created and the run
+    then died on `Resource not accessible by personal access token
+    (addComment)`, leaving the requester with an open PR and no word about it.
+
+    So every `gh issue comment` in the PR step must run under the DEFAULT token,
+    and the assertion is on executed shell rather than raw text — a comment
+    naming the variable would otherwise satisfy it."""
+    from pathlib import Path
+    wf = yaml.safe_load(
+        (Path(__file__).resolve().parents[1]
+         / ".github" / "workflows" / "intake.yml").read_text())
+    step = [s for s in wf["jobs"]["intake"]["steps"]
+            if s.get("name") == "Open the pull request"][0]
+    code = "\n".join(l for l in step["run"].splitlines()
+                     if not l.lstrip().startswith("#"))
+    assert "AUTOMATION_PR_TOKEN" in str(step["env"]["GH_TOKEN"]), (
+        "the PR itself must be authored by the token that makes checks run")
+    for line in code.splitlines():
+        if "gh issue comment" in line:
+            assert 'GH_TOKEN="$DEFAULT_TOKEN"' in line, (
+                f"this comment would run under the PAT: {line.strip()}")

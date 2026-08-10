@@ -111,6 +111,15 @@ jobs:
         if: steps.gen.outputs.rc == '0'
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
+          # THE PAT DOES NOT COMMENT. It exists for ONE thing — authoring the
+          # pull request, so GitHub runs its checks — and the least-privilege
+          # scopes for that are contents + pull-requests. Commenting on the
+          # issue would drag `issues: write` onto a long-lived credential to
+          # save a variable, and the default token already has it for the life
+          # of the run. Observed 2026-08-10 on #142: the PR was created and the
+          # run then died on `Resource not accessible by personal access token
+          # (addComment)`, leaving the requester with an open PR and silence.
+          DEFAULT_TOKEN: ${{ github.token }}
           HAS_PAT: ${{ secrets.AUTOMATION_PR_TOKEN != '' }}
           NUMBER: ${{ github.event.issue.number }}
           AUTHOR: ${{ github.event.issue.user.login }}
@@ -183,9 +192,10 @@ jobs:
                 echo
                 echo "Nothing is lost — [open the PR manually](../../compare/main...${branch}?expand=1)."
               } > /tmp/prfail.md
-              gh issue comment "$NUMBER" --body-file /tmp/prfail.md
+              GH_TOKEN="$DEFAULT_TOKEN" gh issue comment "$NUMBER" --body-file /tmp/prfail.md
               exit 1
             fi
           fi
           url=$(gh pr view "$branch" --json url -q .url)
-          gh issue comment "$NUMBER" --body "Opened ${url} with your request. It will be reviewed there."
+          GH_TOKEN="$DEFAULT_TOKEN" gh issue comment "$NUMBER" \
+            --body "Opened ${url} with your request. It will be reviewed there."

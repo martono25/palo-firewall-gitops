@@ -41,7 +41,10 @@ A **fine-grained personal access token**, scoped to this repository only:
 | Pull requests | Read and write |
 | Expiration | Your call; **90 days is the sensible ceiling** |
 
-Nothing else. It does not need workflow, admin, or org scopes.
+Nothing else. **In particular it does not need `Issues`** — the workflows comment
+on issues with the run's own default token, so the long-lived credential is never
+scoped to write them. Adding `Issues` to save one variable would widen a
+credential that outlives every run that uses it.
 
 Then store it:
 
@@ -58,6 +61,8 @@ Paste when prompted. Do not put it on the command line — the shell records tha
 - **It does not approve anything.** The `firewall-apply` environment reviewer is
   untouched — a HIGH or CRITICAL change still waits for a human.
 - **It is not used for the apply itself.** SCM credentials are separate secrets.
+- **It does not comment.** Rejections and "opened your PR" notices go out under
+  the default token, which holds `issues: write` only for the duration of a run.
 
 Its whole job is authorship: a PR opened by a user account gets its checks run,
 which a PR opened by the bot does not.
