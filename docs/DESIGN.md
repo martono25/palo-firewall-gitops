@@ -64,7 +64,7 @@ automated risk gate, no rollback beyond manual GUI revert.
 | Intake | **Intent abstraction** (declared intent → compiler → PAN-OS) | Best self-service; strongest audit story |
 | Risk classifier | **Built in-house** (Python policy-as-code) — no commercial tool owned | Semantic checks need current-policy context; Rego awkward for stateful decisions |
 | VM-Series pilot clouds | **AWS + GCP** (skeleton on one first, then the second front door) | Two bootstrap mechanisms, one shared SCM spine |
-| CI/CD + governance | **GitHub Actions** (OIDC to Palo, environment protection for the approval gate) | Run history + RBAC + scheduling; also hosts the intake (Issue Forms → PR) |
+| CI/CD + governance | **GitHub Actions** (OIDC to Palo, per-tier environments for the approval gate) | Run history + RBAC + scheduling. Intake is a PR against `intent/`; Issue Forms are designed, NOT built |
 | Evidence + SSoT | **Git** — evidence bundles Git-resident, Git is authoritative | Self-consistent audit story; no external evidence store to reconcile |
 | Requesters | **Broad** (not just engineers) | Intent schema must speak app/business language; compiler resolves all firewall internals |
 
@@ -95,8 +95,9 @@ Intent YAML (in Git)  ──PR──▶  CI pipeline
                                   │
                                   ▼
                         Risk tier gate:
-                          low  → auto-merge + auto-apply
-                          high → human approval → apply
+                          low  → firewall-apply-auto (no reviewer) → apply
+                          high → firewall-apply (required reviewer)
+                                 → human approves → apply
                                   │
                                   ▼
                         Terraform apply → SCM/Panorama commit-and-push → PAN-OS
@@ -659,7 +660,7 @@ terraform/              # Day-2 state split per SCM folder
   <folder>/             #   static module + for_each over generated rules.auto.tfvars.json
 evidence/               # Git-resident NIST-mapped bundles (Git = SSoT)
 .github/
-  ISSUE_TEMPLATE/       # Issue Forms = broad-requester intake (form → Action → intent PR)
+  ISSUE_TEMPLATE/       # PLANNED, not built — intake is a PR against intent/
   workflows/            # provision | compile → classify → plan → gate → apply
 ```
 
@@ -674,8 +675,9 @@ evidence/               # Git-resident NIST-mapped bundles (Git = SSoT)
 4. ~~Which CI platform?~~ **RESOLVED: GitHub Actions** (OIDC to Palo, environment protection
    for the approval gate; Issue Forms host the intake).
 5. ~~Requesters in v1?~~ **RESOLVED: broad** → intent schema in app-language, catalog-resolved;
-   GitHub Issue Forms → Action → intent PR is the near-term intake. Remaining: seed the initial
-   app/service catalog.
+   GitHub Issue Forms → Action → intent PR is the near-term intake — **designed, not built**
+   as of v2.0.0 (`.github/ISSUE_TEMPLATE/` is empty; requests are hand-written PRs).
+   Remaining: build the intake, and seed the initial app/service catalog.
 6. ~~Evidence destination?~~ **RESOLVED: Git** (Git-resident bundles; Git is single source of
    truth). Remaining: retention/branch-protection policy for the evidence path.
 7. ~~NGFW form factor~~ **RESOLVED: VM-Series + PA-series, both SCM-managed.** Skeleton starts

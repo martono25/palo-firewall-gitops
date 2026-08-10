@@ -89,6 +89,40 @@ against a production firewall.
 
 Discoverable from `README.md`, `intent/README.md` and `requesting-rules.md`.
 
+## [2.0.1] — 2026-08-10
+
+### Correction: v2.0.0 claimed low-risk auto-apply it did not have
+
+**v2.0.0 shipped documentation that was false at the moment it was tagged.**
+README, `docs/DESIGN.md` and the v2.0.0 release notes all described low-risk
+changes applying automatically. Earlier the same day a required reviewer had been
+added to the `firewall-apply` environment to make NIST CM-5 evidenceable — and
+GitHub environment protection is JOB-level, so it gated every apply, LOW
+included. Nothing auto-applied for the length of that release.
+
+The gate change and the release notes were written in the same session and the
+claim was never re-checked against it. That is the exact defect this project
+removes from its own code — `expires`, the approval gate in `apply.yml`,
+`BUILD_STATUS.md`, the requester guide — reintroduced in the release that was
+supposed to correct them.
+
+**The v2.0.0 entry above is left as published.** Editing it would hide that the
+release made a false claim, which is worse than the claim.
+
+**Fixed in this release** by tier routing (see `[Unreleased]`): `classify`
+computes the tier from the changeset and the apply job picks its environment from
+it, so the approval policy is a property of the pipeline rather than a sentence
+in a document. Demonstrated both ways on hardware before any doc was written —
+LOW applied with no human, HIGH held for a reviewer.
+
+Docs corrected: README, `docs/requesting-rules.md`, `docs/DESIGN.md` and
+`BUILD_STATUS.md` now describe tier routing. `DESIGN.md` also stops stating the
+Issue-Forms intake as built — `.github/ISSUE_TEMPLATE/` is empty, and it said
+otherwise from 2026-07-19.
+
+No code change in 2.0.1 beyond what `[Unreleased]` describes; this entry exists
+so the false claim is on the record rather than quietly removed.
+
 ## [2.0.0] — 2026-08-10
 
 First release since **v1.25.0**. The version number is the point of this release:

@@ -30,7 +30,7 @@ as is safe.
 | Platform | Palo Alto SCM / Panorama / PAN-OS |
 | Reconcile engine | Terraform (`panos` + `scm` providers) — `plan` is the PR preview + drift detector |
 | Logic layer | Python (`pan-os-python`) — intent compiler, risk classifier, evidence gen |
-| Change model | Risk-tiered auto-apply (low-risk auto, high-risk human-gated) |
+| Change model | Risk-tiered: the tier picks the approver (LOW applies with no human; HIGH/CRITICAL hold for a named reviewer) |
 | Intake | Intent abstraction (app-language intent → compiler → PAN-OS); requests are PRs against `intent/`. Issue Forms are designed, **not built** |
 | Risk classifier | Built in-house (Python policy-as-code) — no commercial tool owned |
 | CI / governance | GitHub Actions (OIDC to Palo, environment protection for the approval gate) |
@@ -44,16 +44,24 @@ network + security baseline. See `provisioning/`.
 
 **Day-2 (changes):** a requester declares intent (src/dst/service/app/justification) in a
 Git PR → Python compiler generates PAN-OS objects (dedup, targeting, rule placement) → risk
-classifier tiers the change → Terraform plans it → low-risk auto-applies, high-risk stops at
-the fail-closed tier gate → every change emits a NIST-mapped evidence bundle.
+classifier tiers the change → **the tier picks the approver** → Terraform plans it → low-risk
+applies with no human, high-risk waits for a named reviewer → every change emits a NIST-mapped
+evidence bundle.
 
-> **The tier gate is currently the ONLY gate.** "High-risk waits for human approval" described
-> required reviewers on the `firewall-apply` environment, which have never been enabled —
-> environment protection needs a paid plan on a private repository. HIGH changes are *blocked*
-> (the job fails), not *queued for review*, and clearing one takes an explicit
-> `workflow_dispatch` at a higher tier. Bundles therefore record no approver and decline to
-> claim NIST CM-5 rather than asserting it over an empty list. Tracked in
-> [`TODOS.md`](TODOS.md).
+> **The tier picks the approver, and nobody types the tier.** `classify` computes it
+> from the changeset (added, modified, removed) and the apply job selects its
+> environment from that: `LOW` → `firewall-apply-auto`, which has no reviewer and
+> applies straight through; `HIGH`/`CRITICAL` → `firewall-apply`, which has a
+> required reviewer and holds. Anything that is not exactly `LOW` routes to the
+> reviewed environment, so a failed classify lands on a human.
+>
+> **CRITICAL is not dual-controlled.** It routes to the same reviewer as HIGH.
+> GitHub environment reviewers are "any one of these people approves", so a
+> separate environment would give a different approver *list*, not two approvers.
+>
+> Demonstrated on 2026-08-10: a LOW changeset applied with no human
+> ([run 31358831466](https://github.com/martono25/palo-firewall-gitops/actions/runs/31358831466)),
+> and a HIGH one held for a reviewer.
 
 ```
 Intent (YAML) → Python compiler → risk classifier → Terraform plan → tier gate → apply → SCM/PAN-OS

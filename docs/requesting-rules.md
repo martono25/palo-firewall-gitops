@@ -436,7 +436,7 @@ spec:
 | `unknown environment 'staging'; known: [...]` | Use an environment from `catalog/environments.yaml`. |
 | `unknown App-ID / security profile group / …` | Fix the name, or ask the platform team to add it to the relevant `catalog/*.yaml`. |
 | Nothing changed on the firewall after opening the PR | **A PR only proposes the change — you must *merge* it.** The rule applies on merge. |
-| Change is **HIGH/CRITICAL** and won't auto-apply | Expected for broad/any-any/exposed/negated rules — get the explicit approval, or tighten the rule. |
+| Change is **HIGH/CRITICAL** and waits for a reviewer | Expected for broad/any-any/exposed/negated rules — get the approval, or tighten the rule. |
 
 ---
 
@@ -525,24 +525,26 @@ reported success. Connected routes survived, intra-subnet traffic kept working,
 and **everything off-subnet was black-holed**. No error, no rollback.
 
 A default route (`0.0.0.0/0`) classifies **HIGH** for exactly this reason, so it
-will not auto-apply.
+waits for a reviewer rather than applying on merge.
 
 ---
 
 ## What happens after you merge
 
-**Low-risk changes apply automatically. Higher-risk ones stop and wait.**
+**Low-risk changes apply automatically. Higher-risk ones wait for a human.**
 
-Every change is tiered by the classifier: `LOW`, `HIGH` or `CRITICAL`. A merge to
-`main` applies at `LOW` only — so a HIGH change (a default route, a zone
-removal, a `deny` being removed) **fails the risk gate rather than applying**.
-That failure is the design: clearing it takes a deliberate, logged manual run at
-a higher tier, not a retry.
+The classifier tiers your change — `LOW`, `HIGH` or `CRITICAL` — and **the tier
+decides who has to approve it**. You never pick the tier, and neither does
+anyone else; it is computed from what you changed.
 
-**The apply then pauses for a human.** `firewall-apply` requires a reviewer, so
-the run sits at *"Waiting for review"* until someone approves it. That is normal
-— not a stuck pipeline — and the approver's name is recorded in your change's
-evidence bundle.
+* **LOW** — applies as soon as your PR merges. No approval, no waiting.
+* **HIGH or CRITICAL** — the run pauses at *"Waiting for review"* until a named
+  reviewer approves it. That is normal, not a stuck pipeline, and the approver's
+  name is recorded in your change's evidence bundle.
+
+A default route, a zone removal or a removed `deny` will hold for a reviewer. If
+you want to know before you open the PR, the `classify` check on the PR reports
+the tier of every change.
 
 Once applied, the change is pushed to SCM and reaches the firewall within about a
 minute.
