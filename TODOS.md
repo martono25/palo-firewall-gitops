@@ -564,10 +564,20 @@ same false-negative rejection `baseline_zones` was added to fix.
 **Priority:** P3
 **Depends on:** None.
 
-### Removing a tag from a rule and destroying that tag OBJECT is UNORDERED
+### Removing a tag from a rule and destroying that tag OBJECT is UNORDERED — CONFIRMED 2026-08-10
 
-**Found 2026-08-05 while removing the expiry tag, and it is latent for any tag
-change — not specific to expiry.**
+**Found 2026-08-05, MECHANISM CONFIRMED 2026-08-10** (`spike/tag-destroy-ordering`).
+Latent for any tag VALUE change — not specific to expiry.
+
+The inference in this entry was correct and is now measured. Phase 2 of the probe
+changed one tag value on a live rule; Terraform planned the rule update and the
+tag destroy, then ran the DESTROY FIRST and 409'd, with `-parallelism=1` so it is
+ordering rather than a race. **The rule update never ran.**
+
+NARROWED: this fires only where the rule is UPDATED in place. Removing a whole
+rule orders correctly — measured 2026-08-09 retiring `REQ-2026-07302`, where the
+rule was destroyed before its tag — because destroying the rule keeps the edge
+that an in-place update dissolves.
 
 When a tag value stops being used, one apply contains two actions: UPDATE the
 rules to drop the reference, and DESTROY the now-unused `scm_tag`. Terraform has
