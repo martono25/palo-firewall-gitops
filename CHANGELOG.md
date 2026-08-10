@@ -5,6 +5,26 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — the intake no longer hides why it could not open a PR
+
+Found on the **first live run**, which is the point of running one. The intent
+generated correctly and the branch pushed; `gh pr create` then failed because the
+repository had not enabled *Allow GitHub Actions to create and approve pull
+requests*. The step sent stderr to `/dev/null` and fell back to `gh pr edit`,
+which reported only `no pull requests found for branch` — a symptom with no
+trace of the cause.
+
+**A fallback that discards the error it is falling back from is worse than no
+fallback**: it converts one clear failure into a misleading one. The real error
+now reaches the run log, and the requester gets a comment saying the branch and
+the intent both exist, what to ask an admin for, and a link to open the PR by
+hand. A request that is recoverable should never look lost.
+
+`git checkout -b … 2>/dev/null || git checkout …` went the same way, replaced by
+`git checkout -B`: a re-run after an edited issue must regenerate from `main`,
+not stack a commit on what the previous run left behind.
+
+
 ### Added — the broad-requester intake actually exists
 
 **[Open an issue](../../issues/new?template=rule-request.yml), fill in a form, get

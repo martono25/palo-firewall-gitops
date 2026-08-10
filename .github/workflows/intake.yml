@@ -109,7 +109,11 @@ jobs:
           branch="intake/issue-${NUMBER}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch" 2>/dev/null || git checkout "$branch"
+          # -B, not `-b || checkout`: create or reset to the checked-out main,
+          # unconditionally and without discarding an error. A re-run after the
+          # requester edits the issue must REGENERATE from main, not stack a
+          # second commit on whatever the previous run left behind.
+          git checkout -B "$branch"
           git add "$FILE"
           if git diff --cached --quiet; then
             echo "no change — the issue produced the same file that is already there"
@@ -136,8 +140,37 @@ jobs:
             echo "Closes #${NUMBER}"
           } > /tmp/pr-body.md
 
-          gh pr create --base main --head "$branch" \
-            --title "intake: ${TITLE}" --body-file /tmp/pr-body.md 2>/dev/null \
-            || gh pr edit "$branch" --body-file /tmp/pr-body.md
+          # NEVER `2>/dev/null` HERE. It did, and it cost a live debugging
+          # session: `gh pr create` failed because the repository had not
+          # enabled "Allow GitHub Actions to create and approve pull requests",
+          # the fallback `gh pr edit` then said only "no pull requests found for
+          # branch", and the actual cause was discarded. A fallback that hides
+          # the error it is falling back FROM turns one clear failure into a
+          # misleading one.
+          if ! gh pr create --base main --head "$branch" \
+                 --title "intake: ${TITLE}" --body-file /tmp/pr-body.md 2>/tmp/pr-err.txt; then
+            cat /tmp/pr-err.txt
+            # An EXISTING pr for this branch is the expected benign case: the
+            # requester edited the issue and this is the second run.
+            if gh pr view "$branch" --json url >/dev/null 2>&1; then
+              gh pr edit "$branch" --body-file /tmp/pr-body.md
+            else
+              # The branch is pushed and the intent is generated — only the PR
+              # is missing, so say exactly that and give the one-click way to
+              # finish it rather than leaving the requester with a failed run.
+              {
+                echo "Your request was generated and pushed to \`${branch}\`, but I could not open the pull request:"
+                echo
+                sed 's/^/> /' /tmp/pr-err.txt
+                echo
+                echo "If that mentions permissions, a repository admin needs to enable"
+                echo "**Settings → Actions → General → Allow GitHub Actions to create and approve pull requests**."
+                echo
+                echo "Nothing is lost — [open the PR manually](../../compare/main...${branch}?expand=1)."
+              } > /tmp/prfail.md
+              gh issue comment "$NUMBER" --body-file /tmp/prfail.md
+              exit 1
+            fi
+          fi
           url=$(gh pr view "$branch" --json url -q .url)
           gh issue comment "$NUMBER" --body "Opened ${url} with your request. It will be reviewed there."
