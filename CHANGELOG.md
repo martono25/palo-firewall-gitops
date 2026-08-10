@@ -11,8 +11,9 @@ the version understate its own blast radius. `CHANGELOG.md` claims this project
 follows Semantic Versioning; 1.36.0 through 1.42.1 did not. Corrected here rather
 than carried further.
 
-Nothing new is built in 2.0.0. It is 1.42.1 with an honest number and the upgrade
-notes that should have accompanied each step.
+Nothing new is built in 2.0.0. It is 1.42.1 with an honest number, the upgrade
+notes that should have accompanied each step, and **a user guide that finally
+matches the system**.
 
 ---
 
@@ -80,6 +81,30 @@ Every kind produces evidence, so the capability flag is gone. Anything reading i
 breaks at import.
 
 ---
+
+## Documentation — brought back in line with the code
+
+The requester guide had drifted badly, and shipping a release on top of it would
+have put the same claimed-versus-actual defect in front of every new user:
+
+* **`expires` was documented for three weeks after the schema started REJECTING
+  it** (removed v1.23.0). A requester following the guide would have had their PR
+  fail on a field the guide told them to write.
+* **`intent/README.md` described an Issue-Forms intake that does not exist** —
+  `.github/ISSUE_TEMPLATE/` is empty. It said so from 2026-07-19 until now.
+* **Three of the four kinds were undocumented.** `ZoneRequest`,
+  `InterfaceRequest` and `RouteRequest` had zero mentions, including the one
+  whose removal black-holes traffic with nothing refusing it.
+* `position`, the `Removes:` trailer, ICMP, the approval pause, the risk gate and
+  `fwgitops where` were all missing or wrong.
+
+All corrected, with a worked example per kind — and **pinned by tests**: every
+complete YAML example in the guide must load against the real loader, all four
+kinds must be shown, and removed fields must not appear in the field reference.
+
+That test earned itself immediately: it rejected an `InterfaceRequest` example
+this release added, because it used `interface: "$eth-dmz"` where the field takes
+a ROLE (`dmz`). A requester copying it would have hit the error, not me.
 
 ## What else changed since v1.25.0
 

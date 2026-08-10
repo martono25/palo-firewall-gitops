@@ -27,10 +27,23 @@ is rejected. Without it, the audit record for your change would name the request
 that authorised the previous version — a different person, a different date, and
 a justification for a different rule.
 
-**To remove a rule**, delete its file. There is no "delete request" to write; the
-PR diff shows the whole rule being removed, and the pipeline classifies the
-removal on its own terms (removing a `deny` is treated more seriously than
-removing an `allow`).
+**To remove a rule**, delete its file **and put a `Removes:` line in your PR
+description**:
+
+```
+Removes: REQ-2026-0142 (JIRA-31555)
+```
+
+That is required, and a PR without it is rejected. The reason is the same as for
+an update: the ticket inside the file authorised CREATING the rule, and deleting
+the file leaves nowhere to record who authorised removing it — so the trailer
+carries that. Put it in the PR description, because a squash merge is what lands
+on `main` and that is the text the pipeline reads.
+
+There is no "delete request" file to write. The PR diff shows the whole rule
+being removed, and the pipeline classifies the removal on its own terms —
+removing a `deny` is treated more seriously than removing an `allow`, because
+traffic the deny blocked may now match a permissive rule below it.
 
 **To see a rule's history**, follow its file: `git log --follow
 intent/<env>/<app>/REQ-....yaml`.
@@ -237,7 +250,7 @@ shortly after (a brand-new device can take 20–30 min on its very first sync).
 
 ## Field reference
 
-### `metadata` (all required except `expires`)
+### `metadata` (all fields required)
 
 | Field | Meaning |
 |---|---|
@@ -246,7 +259,10 @@ shortly after (a brand-new device can take 20–30 min on its very first sync).
 | `ticket` | Change ticket id (audit linkage). Same character rules as `id`. |
 | `justification` | One line: why you need this. |
 | `requested` | Date requested, `YYYY-MM-DD`. |
-| `expires` | *(optional)* Review/removal date, `YYYY-MM-DD`. |
+
+> There is **no `expires` field**. It was removed in v1.23.0 and is now REJECTED,
+> not ignored: nothing ever read it, so a rule with an expiry date sat there
+> looking governed and expired on nothing. To retire a rule, remove it (below).
 
 ### `spec`
 
@@ -267,7 +283,21 @@ shortly after (a brand-new device can take 20–30 min on its very first sync).
 | `log` | | `true` | Log at session **end**. |
 | `log_start` | | `false` | Also log at session **start**. |
 | `description` | | *(none)* | Free-text rule note. |
-| `position` | | `bottom` | Ordering: `top` · `bottom` · `before:<rule-id>` · `after:<rule-id>`. |
+| `position` | | *(unspecified)* | Ordering: `top` · `bottom` · `before:<rule-id>` · `after:<rule-id>`. **Omit it unless you mean it** — see below. |
+
+#### A word on `position`
+
+**Leave it out unless the rule's placement actually matters.** Omitted is not the
+same as `bottom`: an omitted position means *"I have no opinion"*, and the
+platform then leaves the rule where the firewall puts it. Naming a position is an
+instruction to MOVE the rule, and rule order is policy — a permissive rule above a
+deny is a different firewall.
+
+Until v2.0.0 this defaulted to `bottom`, which made "I didn't ask" indistinguishable
+from "put it at the bottom" and would have silently re-stacked live rulebases.
+
+`before:`/`after:` are applied after the rule exists, so the rule they name must
+be in the same folder.
 
 ### Endpoints (`source` / `destination`)
 
@@ -287,6 +317,25 @@ Each entry is exactly one of:
 - {protocol: udp, port: "53"}
 - {protocol: tcp, port: "8000-8100"}   # a range
 - {name: "https"}                       # a named service from catalog/services.yaml
+- {protocol: icmp}                      # ping — NO port (ICMP has none)
+```
+
+**ICMP / ping.** Write `{protocol: icmp}` with **no `port`** — ICMP has no ports,
+and a `port` alongside it is rejected rather than ignored, because a number that
+looks like a restriction and enforces nothing is worse than no number at all.
+
+Two things follow from how PAN-OS matches ICMP:
+
+* It is matched by **application**, not by a port-based service, so the compiler
+  emits the `ping` App-ID for you. Do **not** also set `application:` on an ICMP
+  request.
+* **Do not mix `icmp` with `tcp`/`udp` in one request** — it is rejected.
+  `service` is a rule-level list, so an ICMP entry changes what the port entries
+  beside it match. File them as two requests, each meaning what it says.
+
+```yaml
+  service:
+    - protocol: icmp
 ```
 
 ---
@@ -295,6 +344,28 @@ Each entry is exactly one of:
 
 Every example below is a **complete file** — copy the whole thing into a new
 `intent/prod/<team>/REQ-<id>.yaml` and change the values.
+
+**Ping, for monitoring (ICMP):**
+```yaml
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0210
+  requester: you@corp.com
+  ticket: JIRA-12345
+  justification: "Collector must ping the web tier to tell a dead host from a dead service"
+  requested: 2026-08-10
+spec:
+  environment: prod
+  action: allow
+  source:
+    - cidr: 10.20.20.10/32
+  destination:
+    - cidr: 10.20.1.0/24
+  service:
+    - protocol: icmp        # no port
+  log: true
+```
 
 **Inspected HTTPS allow (App-ID + profile + logging):**
 ```yaml
@@ -366,6 +437,144 @@ spec:
 | `unknown App-ID / security profile group / …` | Fix the name, or ask the platform team to add it to the relevant `catalog/*.yaml`. |
 | Nothing changed on the firewall after opening the PR | **A PR only proposes the change — you must *merge* it.** The rule applies on merge. |
 | Change is **HIGH/CRITICAL** and won't auto-apply | Expected for broad/any-any/exposed/negated rules — get the explicit approval, or tighten the rule. |
+
+---
+
+## The other three kinds
+
+Most requests are `AccessRequest` — a rule. Three other kinds exist, normally
+written by the platform team, and they are documented here because **you will see
+them in this directory and their failure modes are worse than a rule's**
+(ADR-0008 measured each one on hardware).
+
+### `ZoneRequest` — declare a zone, bind interfaces to it
+
+```yaml
+apiVersion: fw-intent/v1
+kind: ZoneRequest
+metadata:
+  id: REQ-2026-0301
+  requester: you@corp.com
+  ticket: JIRA-12345
+  justification: "DMZ zone on the edge firewall, bound to the DMZ interface"
+  requested: 2026-08-10
+spec:
+  folder: prod-edge          # or device: <serial>
+  zone: dmz
+  type: layer3
+  interfaces: ["$eth-dmz"]
+```
+
+**On removal:** SCM REFUSES to delete a zone while any rule references it (409).
+Unreferenced, it deletes — and any interface bound to it is left **addressed but
+unzoned**, which PAN-OS treats as unusable: traffic on it is dropped.
+
+### `InterfaceRequest` — put an address on one firewall's interface
+
+```yaml
+apiVersion: fw-intent/v1
+kind: InterfaceRequest
+metadata:
+  id: REQ-2026-0302
+  requester: you@corp.com
+  ticket: JIRA-12346
+  justification: "Address the DMZ interface on the edge firewall"
+  requested: 2026-08-10
+spec:
+  device: "007955000894453"   # a firewall SERIAL — addressing is per-device
+  interface: dmz              # a ROLE from catalog/interfaces.yaml, not a port
+  ip:
+    - 10.100.3.1/24
+```
+
+It **configures an interface that already exists** (ADR-0005) — it cannot create
+one. `device:` not `folder:`, because two firewalls cannot share an IP.
+
+`interface:` takes a **role** (`local`, `internet`, `dmz` — see
+`catalog/interfaces.yaml`), not a port name and not the `$eth-` variable. The
+catalog maps the role to the physical port, which is what stops a requester
+conjuring an interface the firewall does not have.
+
+**On removal:** the device-scope override reverts to the inherited object, which
+carries **no addressing** — the firewall loses the IP on that interface.
+
+### `RouteRequest` — a static route. The most dangerous kind.
+
+```yaml
+apiVersion: fw-intent/v1
+kind: RouteRequest
+metadata:
+  id: REQ-2026-0303
+  requester: you@corp.com
+  ticket: JIRA-12347
+  justification: "Default route out the untrust interface"
+  requested: 2026-08-10
+spec:
+  folder: prod-edge
+  destination: 0.0.0.0/0
+  nexthop: 10.100.2.1
+```
+
+**On removal: NOTHING REFUSES IT, at any layer.** Measured 2026-08-06 — the
+default route disappeared from the device about 40 seconds after the push
+reported success. Connected routes survived, intra-subnet traffic kept working,
+and **everything off-subnet was black-holed**. No error, no rollback.
+
+A default route (`0.0.0.0/0`) classifies **HIGH** for exactly this reason, so it
+will not auto-apply.
+
+---
+
+## What happens after you merge
+
+**Low-risk changes apply automatically. Higher-risk ones stop and wait.**
+
+Every change is tiered by the classifier: `LOW`, `HIGH` or `CRITICAL`. A merge to
+`main` applies at `LOW` only — so a HIGH change (a default route, a zone
+removal, a `deny` being removed) **fails the risk gate rather than applying**.
+That failure is the design: clearing it takes a deliberate, logged manual run at
+a higher tier, not a retry.
+
+**The apply then pauses for a human.** `firewall-apply` requires a reviewer, so
+the run sits at *"Waiting for review"* until someone approves it. That is normal
+— not a stuck pipeline — and the approver's name is recorded in your change's
+evidence bundle.
+
+Once applied, the change is pushed to SCM and reaches the firewall within about a
+minute.
+
+---
+
+## Finding out why traffic is allowed
+
+`fwgitops where` answers the question an incident starts with: **which request
+authorised this?**
+
+```
+$ fwgitops where 10.20.1.55
+
+RULES — what permits or denies it
+  AccessRequest  REQ-2026-0725  (prod-edge)
+      matched : address_objects[0].value = 10.20.1.0/24
+      why     : 10.20.1.0/24 contains 10.20.1.55
+      ticket  : JIRA-20725  (martono@corp, 2026-07-25)
+      intent  : intent/prod/observability/REQ-2026-0725.yaml
+      evidence: evidence/prod-edge/REQ-2026-0725.json
+
+ROUTES — what carries it
+  RouteRequest  REQ-2026-0803  (prod-edge)   <- CARRIES IT
+```
+
+It matches by **containment**, which is why `grep` is not a substitute: your log
+line holds a host (`10.20.1.55`), the intent holds a range (`10.20.1.0/24`), and
+grep finds nothing — which reads exactly like "no rule permits this".
+
+It also takes a CIDR, a zone or app name, a request id, a **ticket**, or a
+requester. `--json` for piping into an incident timeline.
+
+If nothing matches, that is an answer, not an error: no request in this
+repository authorised it, and `fwgitops drift` is the tool for config that
+arrived some other way.
 
 ---
 
