@@ -1,13 +1,18 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31362787750"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31366301625"
   },
   "approval": {
-    "approvers": [],
+    "approvers": [
+      {
+        "login": "martono25",
+        "via": "deployment_gate"
+      }
+    ],
     "gate": null,
-    "merge_commit": "63a59082a85b86dcc5e2ce43444c948e09657c86",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/123"
+    "merge_commit": "ca2bc988d97c53934680fcb3cda59a04fa694ac4",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/133"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -85,30 +90,32 @@
         }
       ]
     },
+    "object_is": "the LAST APPLIED state, from the baseline tree",
     "object_sha256": "923bab8abcba053853d03f8a117f82bd01d159e5664719024dfed8de7f7ae260",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "63f2c20dcf2aa06643b0bf3163aeb2b9a8deb97ac1126971ee79d01cf7ee7b2e"
+    "tfvars_sha256": null
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7"
+    "SC-7",
+    "CM-5"
   ],
-  "controls_not_evidenced": [
-    {
-      "control": "CM-5",
-      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
-    }
-  ],
-  "generated_at": "2026-08-10T06:41:13Z",
+  "controls_not_evidenced": [],
+  "generated_at": "2026-08-10T07:36:38Z",
   "kind": "AccessRequest",
   "push": null,
+  "removal": {
+    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
+    "commit": "ca2bc988d97c53934680fcb3cda59a04fa694ac4",
+    "ticket": "JIRA-9001"
+  },
   "req_id": "REQ-2026-121",
   "request": {
     "intent_file": "intent/prod/intake-probe/REQ-2026-121.yaml",
@@ -119,11 +126,17 @@
     "ticket": "JIRA-9001"
   },
   "risk": {
-    "checks_fired": [],
-    "classifier_version": "1.0",
-    "thresholds_version": "2026-07-26",
-    "tier": "LOW"
+    "checks_fired": [
+      {
+        "check": "deny_rule_removed",
+        "reason": "removes a deny rule (REQ-2026-121) \u2014 traffic it blocked may now match a permissive rule below it. A removal that INCREASES effective access.",
+        "tier": "HIGH"
+      }
+    ],
+    "classifier_version": "1.0.0",
+    "thresholds_version": null,
+    "tier": "HIGH"
   },
   "schema": "fw-evidence/v2",
-  "status": "applied"
+  "status": "removed"
 }
