@@ -3,6 +3,126 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed — the risk tier picks the approver; the human-entered ceiling is gone
+
+**BREAKING for the apply workflow.** `max_auto_tier` is removed, and so is the
+`Risk gate (fail-closed)` step. The `classify` job computes the tier and the
+`apply` job selects its environment from it:
+
+```
+LOW           -> firewall-apply-auto  (no reviewer)      -> applies
+HIGH/CRITICAL -> firewall-apply       (required reviewer) -> applies once approved
+```
+
+**Why the ceiling had to go.** It asked a human to RESTATE the tier the
+classifier had already computed — two sources of truth for one fact. Picking LOW
+on a HIGH change failed the run for no reason; habitually picking CRITICAL made
+the gate mean nothing. It existed only because tier routing did not.
+
+**Why routing had to arrive now.** A required reviewer was added to
+`firewall-apply` on 2026-08-10 to make CM-5 evidenceable. GitHub environment
+protection is JOB-level and cannot be conditional on a tier, so it gated LOW too
+— and **v2.0.0 shipped with README, DESIGN.md and its own release notes all still
+saying low-risk changes auto-apply. They did not, for the length of that
+release.** The approval policy is now a property of the pipeline instead of a
+claim in a document.
+
+**A HIGH change now applies from a push once a human approves it**, where before
+it could not apply from a push at all. That is a deliberate loosening: it is what
+"high-risk human-gated" was always specified to mean, and it removes an approval
+prompt that was requested three steps BEFORE the gate that rejected it — a
+prompt that routinely led nowhere is how people learn to approve without reading.
+
+Human touchpoints, merge to live: LOW **1** (merge), HIGH **2** (merge, approve).
+Previously HIGH took four, one of them wasted.
+
+**CRITICAL IS NOT DUAL-CONTROLLED**, and the workflow now says so. It routes to
+the same reviewer as HIGH. GitHub environment reviewers are "any one of these
+people approves", so a separate environment would give a different approver LIST,
+not two approvers. Recorded rather than claimed.
+
+**The tier is computed from the CHANGESET, not the tree** — added, modified and
+removed intents only. The first version maximised over every intent that exists,
+which made the whole feature inert: `REQ-2026-0803` is a default route and
+permanently HIGH, so every apply routed to the reviewed environment including a
+changeset that was entirely LOW. LOW auto-apply was unreachable on any repo that
+had ever declared a default route. Found by running the demonstration, not by
+reading the diff.
+
+"How risky is this change?" is the question the approver is being asked. "Does
+anything risky exist anywhere?" is a different one, and the answer is
+permanently yes.
+
+Fail-safe direction throughout: anything that is not exactly `LOW` routes to the
+reviewed environment, and a run with no resolvable baseline tiers the whole tree
+— which over-reports, and says so. A failed classify, an empty output or an
+unknown tier all land on "a human looks at it". Mutation-tested.
+
+
+### Added — `docs/building-a-folder.md`, the Day-1 walkthrough
+
+The platform-team counterpart to `requesting-rules.md`. `ZoneRequest`,
+`InterfaceRequest` and `RouteRequest` had reference documentation as of 2.0.0,
+but nothing showed the **chain**: what order they go in, why, and the
+prerequisites that appear in no intent file — the Terraform root, the folder
+interface variables, the catalog entry.
+
+**Written as a reconstruction of a real build**, not an imagined one: how
+`prod-edge` and the pilot firewall were actually brought up. A tutorial is the
+format most prone to describing a system instead of reading it, which is the
+defect this project has removed from `expires`, from `apply.yml`, from
+`BUILD_STATUS.md` and from `intent/README.md` — so it is pinned rather than
+trusted.
+
+**A test asserts each `spec:` still matches the intent file it cites**, and that
+all three Day-1 kinds appear. Metadata is abbreviated for reading and the guide
+says so; behaviour is verbatim. Every `fwgitops` command and every relative link
+was checked against the CLI and the filesystem.
+
+It also records the two things that went wrong the first time — three spikes that
+wrongly concluded device scope was unsupported (the control was the one resource
+still working on a broken registration), and the re-onboard that silently wiped
+every device-scope override. Those are the parts you would otherwise rediscover
+against a production firewall.
+
+Discoverable from `README.md`, `intent/README.md` and `requesting-rules.md`.
+
+## [2.0.1] — 2026-08-10
+
+### Correction: v2.0.0 claimed low-risk auto-apply it did not have
+
+**v2.0.0 shipped documentation that was false at the moment it was tagged.**
+README, `docs/DESIGN.md` and the v2.0.0 release notes all described low-risk
+changes applying automatically. Earlier the same day a required reviewer had been
+added to the `firewall-apply` environment to make NIST CM-5 evidenceable — and
+GitHub environment protection is JOB-level, so it gated every apply, LOW
+included. Nothing auto-applied for the length of that release.
+
+The gate change and the release notes were written in the same session and the
+claim was never re-checked against it. That is the exact defect this project
+removes from its own code — `expires`, the approval gate in `apply.yml`,
+`BUILD_STATUS.md`, the requester guide — reintroduced in the release that was
+supposed to correct them.
+
+**The v2.0.0 entry above is left as published.** Editing it would hide that the
+release made a false claim, which is worse than the claim.
+
+**Fixed in this release** by tier routing (see `[Unreleased]`): `classify`
+computes the tier from the changeset and the apply job picks its environment from
+it, so the approval policy is a property of the pipeline rather than a sentence
+in a document. Demonstrated both ways on hardware before any doc was written —
+LOW applied with no human, HIGH held for a reviewer.
+
+Docs corrected: README, `docs/requesting-rules.md`, `docs/DESIGN.md` and
+`BUILD_STATUS.md` now describe tier routing. `DESIGN.md` also stops stating the
+Issue-Forms intake as built — `.github/ISSUE_TEMPLATE/` is empty, and it said
+otherwise from 2026-07-19.
+
+No code change in 2.0.1 beyond what `[Unreleased]` describes; this entry exists
+so the false claim is on the record rather than quietly removed.
+
 ## [2.0.0] — 2026-08-10
 
 First release since **v1.25.0**. The version number is the point of this release:

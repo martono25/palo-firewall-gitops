@@ -6,8 +6,12 @@ You declare **what you want** — source, destination, service, justification,
 ticket. You never name zones, folders, address objects or rule positions: the
 compiler derives all of that from your intent plus `catalog/`.
 
-**New here? Read [`docs/requesting-rules.md`](../docs/requesting-rules.md).** It
-is the step-by-step guide, with a worked example for every kind.
+**Want a rule?** Read [`docs/requesting-rules.md`](../docs/requesting-rules.md)
+— step by step, with a worked example for every kind.
+
+**Standing up a folder?** Read
+[`docs/building-a-folder.md`](../docs/building-a-folder.md) — the Day-1 chain end
+to end, reconstructed from a real build.
 
 ## The four kinds
 

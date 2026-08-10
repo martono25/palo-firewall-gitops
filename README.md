@@ -4,11 +4,12 @@ GitOps-driven firewall automation for Palo Alto (Strata Cloud Manager / Panorama
 covering **Day-1 provisioning + onboarding** through **Day-2 rule changes**, automated as far
 as is safe.
 
-> **Status: v1.0 — Day-2 rule provisioning shipped.** The full Day-2 loop
-> (`intent → compile → classify → risk-gate → terraform apply → enrich → push`) is
-> implemented, tested, and **proven end-to-end on live VM-Series hardware** (rule
-> verified in the device running config). See [`CHANGELOG.md`](CHANGELOG.md) and
-> [`docs/adr/`](docs/adr/). Day-1 provisioning is the v2.0 target. Full design:
+> **Status: v2.0.0.** The Day-2 loop (`intent → tags ensure → compile → classify →
+> risk-gate → terraform apply → enrich → push → tags sweep`) and the **Day-1 chain**
+> (`InterfaceRequest → ZoneRequest → RouteRequest`) are both implemented, tested, and
+> **proven end-to-end on live VM-Series hardware**. Four intent kinds, evidence bundles
+> for every one, and drift detection across two engines. See
+> [`CHANGELOG.md`](CHANGELOG.md) and [`docs/adr/`](docs/adr/). Full design:
 > [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Guides
@@ -17,6 +18,8 @@ as is safe.
 |---|---|---|
 | **Request a firewall rule** (write intent → PR) | [`docs/requesting-rules.md`](docs/requesting-rules.md) | any engineer |
 | **Provision a firewall** (stand up a VM-Series) | [`docs/provisioning.md`](docs/provisioning.md) | platform operator |
+| **Stand up a folder** (the Day-1 chain, end to end) | [`docs/building-a-folder.md`](docs/building-a-folder.md) | platform operator |
+| Wire up CI (OIDC, secrets, environments) | [`docs/GITHUB-SETUP.md`](docs/GITHUB-SETUP.md) | platform operator |
 | What each rule field maps to on the firewall | [`docs/adr/0003-security-rule-component-model.md`](docs/adr/0003-security-rule-component-model.md) | — |
 | Release notes | [`CHANGELOG.md`](CHANGELOG.md) | — |
 
@@ -27,8 +30,8 @@ as is safe.
 | Platform | Palo Alto SCM / Panorama / PAN-OS |
 | Reconcile engine | Terraform (`panos` + `scm` providers) — `plan` is the PR preview + drift detector |
 | Logic layer | Python (`pan-os-python`) — intent compiler, risk classifier, evidence gen |
-| Change model | Risk-tiered auto-apply (low-risk auto, high-risk human-gated) |
-| Intake | Intent abstraction (app-language intent → compiler → PAN-OS); broad requesters via GitHub Issue Forms |
+| Change model | Risk-tiered: the tier picks the approver (LOW applies with no human; HIGH/CRITICAL hold for a named reviewer) |
+| Intake | Intent abstraction (app-language intent → compiler → PAN-OS); requests are PRs against `intent/`. Issue Forms are designed, **not built** |
 | Risk classifier | Built in-house (Python policy-as-code) — no commercial tool owned |
 | CI / governance | GitHub Actions (OIDC to Palo, environment protection for the approval gate) |
 | Evidence + SSoT | Git — evidence bundles Git-resident, Git is authoritative |
@@ -41,16 +44,24 @@ network + security baseline. See `provisioning/`.
 
 **Day-2 (changes):** a requester declares intent (src/dst/service/app/justification) in a
 Git PR → Python compiler generates PAN-OS objects (dedup, targeting, rule placement) → risk
-classifier tiers the change → Terraform plans it → low-risk auto-applies, high-risk stops at
-the fail-closed tier gate → every change emits a NIST-mapped evidence bundle.
+classifier tiers the change → **the tier picks the approver** → Terraform plans it → low-risk
+applies with no human, high-risk waits for a named reviewer → every change emits a NIST-mapped
+evidence bundle.
 
-> **The tier gate is currently the ONLY gate.** "High-risk waits for human approval" described
-> required reviewers on the `firewall-apply` environment, which have never been enabled —
-> environment protection needs a paid plan on a private repository. HIGH changes are *blocked*
-> (the job fails), not *queued for review*, and clearing one takes an explicit
-> `workflow_dispatch` at a higher tier. Bundles therefore record no approver and decline to
-> claim NIST CM-5 rather than asserting it over an empty list. Tracked in
-> [`TODOS.md`](TODOS.md).
+> **The tier picks the approver, and nobody types the tier.** `classify` computes it
+> from the changeset (added, modified, removed) and the apply job selects its
+> environment from that: `LOW` → `firewall-apply-auto`, which has no reviewer and
+> applies straight through; `HIGH`/`CRITICAL` → `firewall-apply`, which has a
+> required reviewer and holds. Anything that is not exactly `LOW` routes to the
+> reviewed environment, so a failed classify lands on a human.
+>
+> **CRITICAL is not dual-controlled.** It routes to the same reviewer as HIGH.
+> GitHub environment reviewers are "any one of these people approves", so a
+> separate environment would give a different approver *list*, not two approvers.
+>
+> Demonstrated on 2026-08-10: a LOW changeset applied with no human
+> ([run 31358831466](https://github.com/martono25/palo-firewall-gitops/actions/runs/31358831466)),
+> and a HIGH one held for a reviewer.
 
 ```
 Intent (YAML) → Python compiler → risk classifier → Terraform plan → tier gate → apply → SCM/PAN-OS
@@ -115,8 +126,29 @@ factor is VM-Series on AWS.
 | `policy/` | Risk classifier (Python) — shares current-policy state model with compiler |
 | `terraform/` | Day-2 reconcile state, split per SCM folder; static module + `for_each` |
 | `evidence/` | Git-resident NIST-mapped evidence bundles (Git = SSoT) |
-| `.github/ISSUE_TEMPLATE/` | Broad-requester intake: Issue Forms → Action → intent PR |
+| `.github/ISSUE_TEMPLATE/` | *(empty)* — Issue-Forms intake is designed, **not built**; requests are hand-written PRs |
 | `.github/workflows/` | CI: provision \| compile → classify → plan → gate → apply |
+
+## Standing up a folder
+
+[`docs/building-a-folder.md`](docs/building-a-folder.md) walks the Day-1 chain —
+`InterfaceRequest` → `ZoneRequest` → `RouteRequest` → `AccessRequest` — from how
+`prod-edge` and the pilot firewall were actually brought up, including the
+prerequisites that are not in any intent file (the Terraform root, the folder
+interface variables, the catalog entry) and the two things that went wrong the
+first time.
+
+## Operating it
+
+| Command | What it answers |
+|---|---|
+| `fwgitops drift` | has SCM drifted from what Git declares? |
+| `fwgitops device-sync` | is the FIREWALL running what SCM holds? Drift compares Git to SCM; this compares SCM to the device, which is the gap between "pushed" and "live" |
+| `fwgitops verify-catalog` | does `catalog/folders.yaml` still match SCM's real hierarchy? |
+| `fwgitops tags ensure \| sweep` | create the tag objects a rule references, and remove unreferenced ones. **Terraform no longer destroys tags** — it ran a tag destroy before the rule update that released it and 409'd (ADR-0009), so the halves are separated in time |
+
+`ensure` runs before apply and `sweep` after push; the pipeline does both, so you
+only reach for them by hand when investigating.
 
 ## Incident response: `fwgitops where`
 
