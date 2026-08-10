@@ -218,3 +218,33 @@ def test_the_generated_intent_is_validated_BEFORE_the_PR_is_opened():
     ip = next(i for i, n in enumerate(names) if "Open the pull request" in n)
     assert iv < ip
     assert "fwgitops compile intent --check" in steps[iv]["run"]
+
+
+def test_the_pr_step_never_discards_the_error_it_falls_back_from():
+    """MEASURED 2026-08-10, on the first live run. `gh pr create` failed because
+    the repository had not enabled "Allow GitHub Actions to create and approve
+    pull requests". The step sent its stderr to /dev/null and fell back to
+    `gh pr edit`, which reported only "no pull requests found for branch" — so
+    the run showed a symptom with no trace of the cause.
+
+    A fallback that hides the error it is falling back FROM converts one clear
+    failure into a misleading one, which is strictly worse than not having the
+    fallback at all. The requester must also learn what happened: the branch is
+    pushed and the intent generated, so the request is recoverable, and a run
+    that fails silently makes it look lost."""
+    from pathlib import Path
+    wf = yaml.safe_load(
+        (Path(__file__).resolve().parents[1]
+         / ".github" / "workflows" / "intake.yml").read_text())
+    step = [s for s in wf["jobs"]["intake"]["steps"]
+            if s.get("name") == "Open the pull request"][0]["run"]
+    # The property is about what RUNS. The comment above the fix says
+    # `2>/dev/null` in order to name what went wrong, and a test that could not
+    # tell prose from code would forbid explaining the bug it guards.
+    code = "\n".join(l for l in step.splitlines() if not l.lstrip().startswith("#"))
+    assert "gh pr create" in code
+    assert "2>/dev/null" not in code, "the failure reason must survive"
+    assert "cat /tmp/pr-err.txt" in code, "and must reach the run log"
+    assert "gh issue comment" in code and "compare/main" in code, (
+        "a requester whose PR could not be opened must be told, and told how "
+        "to finish it — the branch and the intent both exist")
