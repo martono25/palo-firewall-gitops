@@ -1,6 +1,6 @@
 # BUILD STATUS — palo-firewall-gitops
 
-_As of 2026-08-09, **v1.39.2**, 735 passing tests. Design + decision record:
+_As of 2026-08-10, **v2.0.0**, 765 passing tests. Design + decision record:
 [`docs/DESIGN.md`](docs/DESIGN.md), [`docs/adr/`](docs/adr/)._
 
 > **This file was three weeks stale until 2026-08-09.** It described a
@@ -60,14 +60,14 @@ Ordered by what blocks a launch, not by size. Tracked in [`TODOS.md`](TODOS.md).
 
 | # | Gap | Status |
 |---|---|---|
-| 1 | **No approval path.** The tier gate BLOCKS but cannot ROUTE — a HIGH change can only be cleared by a `workflow_dispatch` override, recorded as neither approval nor override. | P1, unblocked 2026-08-09 (repo made public, so environment protection is now available) |
+| 1 | ~~No approval path~~ | **DONE 2026-08-10** — `firewall-apply` now requires a reviewer; an approved apply records `CM-5` with the approver. NOTE: self-approval, so AC-5 (separation of duties) is still unearned |
 | 2 | **No requester intake.** `.github/ISSUE_TEMPLATE/` does not exist, so an app team must hand-write intent YAML — which contradicts the app-language premise. | next |
-| 3 | **ICMP is unrequestable.** `Service` is `protocol`+`port`, tcp/udp only. Ping is the first thing anyone asks for. | needs a live probe: the provider permits a serviceless rule, but PAN-OS enforcement for one is unverified |
-| 4 | **Rule ordering unwired.** Everything lands `pre:bottom`; `relative_position` needs a UUID the intent model cannot express. Shadowing is DETECTED (LOW) but not fixable. | deferred |
+| 3 | ~~ICMP is unrequestable~~ | **DONE v1.40.0** — `protocol: icmp` -> `application-default` + `ping`, measured in `spike/icmp-service-shape`; live in SCM |
+| 4 | ~~Rule ordering unwired~~ | **DONE v1.41.0** — `top`/`bottom` wired; `before`/`after` stay with `enrich` (UUID anchor is a Terraform `Error: Cycle`) |
 | 5 | **NatRequest** | deferred by decision, 2026-08-09 |
 | 6 | **Second firewall / non-prod environment** | deferred by decision, 2026-08-09 |
-| 7 | `push` no-op detection never fires — a no-change apply still creates SCM commit jobs | P2 |
-| 8 | Removing a tag and destroying the tag OBJECT is unordered | P2 |
+| 7 | ~~`push` no-op never fires~~ | **DONE v1.39.3 / v1.40.1** — the push is skipped when nothing was staged, decided from what the apply DID |
+| 8 | ~~Removing a tag and destroying the tag OBJECT is unordered~~ | **DONE v1.42.0** — measured, then fixed by ADR-0009 |
 
 **Everything is validated at N=1**: one environment, one firewall, three folders.
 The bugs found in this codebase have been overwhelmingly in the multi-scope paths

@@ -3,6 +3,108 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] — 2026-08-10
+
+First release since **v1.25.0**. The version number is the point of this release:
+several changes below are **breaking**, and shipping them under minor bumps made
+the version understate its own blast radius. `CHANGELOG.md` claims this project
+follows Semantic Versioning; 1.36.0 through 1.42.1 did not. Corrected here rather
+than carried further.
+
+Nothing new is built in 2.0.0. It is 1.42.1 with an honest number and the upgrade
+notes that should have accompanied each step.
+
+---
+
+## ⚠ BREAKING CHANGES — read before upgrading
+
+### 1. Terraform no longer manages tag objects (1.42.0, ADR-0009)
+
+**Requires Terraform ≥ 1.7** (was `>= 1.6`) for `removed` blocks, and a state
+migration on first apply.
+
+`scm_tag` left the module because Terraform ran a tag DESTROY before the rule
+UPDATE that released it and SCM refused with `409 NON_ZERO_REFS` — measured, not
+inferred (`spike/tag-destroy-ordering`). Tags are now created by
+`fwgitops tags ensure` before apply and removed by `fwgitops tags sweep` after
+push.
+
+**What an operator must do:** nothing manual — a `removed { lifecycle { destroy
+= false } }` block makes Terraform forget the existing tags rather than destroy
+them. **Verify before applying**: the plan must read
+`will no longer be managed by Terraform, but will not be destroyed` and
+`0 to add, 0 to change, 0 to destroy`. If it shows destroys instead, stop: it
+would 409 on every tag at once.
+
+**Known gap:** nothing enumerates tag objects, so if the sweep stops running,
+the accumulating garbage is unreported. Deliberate, and recorded in ADR-0009.
+
+### 2. Evidence schema `fw-evidence/v1` → `v2` (1.36.0)
+
+Every consumer of a bundle is affected. `request` now carries **paperwork only**
+— `action` and `environment` moved under `compiled`; the path is keyed on
+**scope**, so a device-scoped change lands in `evidence/device-<serial>/`; and
+the object is the compiled dataclass serialised whole rather than a hand-listed
+subset. Bundles now exist for **every kind**, not just `AccessRequest`.
+
+### 3. `spec.position` no longer defaults to `bottom` (1.41.0)
+
+An unspecified position is now `None` and stays null to the provider. This
+**changes compiled output for every rule that did not name a position** —
+`relative_position` moves from `"bottom"` to `null`, which changes
+`object_sha256` and therefore rewrites those evidence bundles once.
+
+It is what makes ordering safe to wire: writing a concrete position MOVES the
+rule, and a blanket default would have re-stacked live rulebases silently.
+
+### 4. `Service.port` is optional (1.40.0)
+
+`protocol: icmp` carries no port, and a `port` alongside it is now **rejected**
+rather than ignored. Mixing `icmp` with tcp/udp in one request is also rejected.
+
+### 5. Controls are evidenced, not assumed (1.38.0)
+
+`CM-5` is no longer in `BASE_CONTROLS`. A bundle claims it only when an approver
+is named, and states the omission in a new `controls_not_evidenced` block when it
+cannot. Anything asserting "every bundle claims CM-5" will stop being true.
+
+### 6. A removal must carry its own change ticket (1.37.0)
+
+Deleting an intent now requires a `Removes: <REQ-id> (TICKET)` trailer in the
+text that lands on `main`. Without it `classify` exits 2. The intent's own ticket
+authorised CREATING the object; it cannot authorise removing it.
+
+### 7. `KindHandler.has_evidence` removed (1.36.0)
+
+Every kind produces evidence, so the capability flag is gone. Anything reading it
+breaks at import.
+
+---
+
+## What else changed since v1.25.0
+
+**Audit trail.** Evidence bundles for every kind, committed to Git rather than
+uploaded as an expiring artifact; a bundle is rewritten only when its change
+actually changed, so `git log evidence/<scope>/<REQ>.json` is a change history
+rather than an apply history; removals leave a tombstone carrying both tickets;
+approvers are recorded with the route they exercised.
+
+**Incident response.** `fwgitops where` maps an address, name or ticket back to
+the intent that authorised it — by CIDR containment, because a log line holds a
+host and an intent holds a range.
+
+**Correctness on the apply path.** A scope with no rules is applied rather than
+skipped; a dispatched apply records removals; an empty push no longer mints a
+config version; the push decision reads what the apply DID rather than a
+prediction.
+
+**Honesty fixes.** `apply.yml` claimed a human-approval gate that had never been
+enabled; `BUILD_STATUS.md` described a system three weeks gone; the OIDC backend
+was documented as unbuilt while working. All corrected against measurements.
+
+**Day-1 and Day-2 verified on hardware**, including the first successful
+production apply, ICMP end to end, and a real removal.
+
 ## [1.42.1] — 2026-08-10
 
 ### The nightly drift run is gated on the firewall being up
