@@ -30,6 +30,7 @@ from fwgitops.compiler import (
     CompileError,
     CompiledChange,
     CompiledZone,
+    Scope,
     check_zone_collisions,
     check_zone_consistency,
     dumps_payload,
@@ -1757,6 +1758,39 @@ def _read_snapshot_rows(path: Path, err):
     return rows, 0
 
 
+def _push_results(paths: Optional[List[Path]], err) -> Optional[Dict[str, Any]]:
+    """`scope dirname -> PushResult`, from files written by `fwgitops push --record`.
+
+    FAIL CLOSED. An unreadable or malformed record returns None (the caller
+    exits 1) rather than an empty map. "No push happened" and "the record could
+    not be read" produce the same `"push": null` in a bundle, and that is the
+    one distinction this field exists to make — a silent fallback would let a
+    broken record file quietly restore the very defect being fixed.
+
+    A MISSING record is different, and legitimate: a scope with nothing staged
+    is never pushed, so no file is written and its bundles keep `push: null`.
+    Those bundles are also the ones `write_bundle_if_changed` leaves alone.
+    """
+    from fwgitops.push import PushResult
+
+    if not paths:
+        return {}
+    out: Dict[str, Any] = {}
+    for p in paths:
+        try:
+            d = json.loads(Path(p).read_text())
+            scope_dir = d["scope_dir"]
+            out[scope_dir] = PushResult(folder=d["folder"], status=d["status"],
+                                        job_id=d.get("job_id"),
+                                        admins=tuple(d.get("admins") or ()))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            print(f"error: push record {p} is unreadable ({e}). Refusing to write "
+                  f"bundles that would claim nothing was pushed when the record "
+                  f"simply could not be read.", file=err)
+            return None
+    return out
+
+
 def run_evidence(
     intent_root: Path,
     env_map_path: Path,
@@ -1770,6 +1804,7 @@ def run_evidence(
     change_message_path: Optional[Path] = None,
     approvers: Optional[List[str]] = None,
     pr_url: Optional[str] = None,
+    push_records: Optional[List[Path]] = None,
     out=None,
     err=None,
 ) -> int:
@@ -1831,6 +1866,22 @@ def run_evidence(
     # claim CM-5 rather than claiming it over an empty list.
     ci = CIContext.from_env(os.environ, approvers=tuple(approvers or ()),
                             pr_url=pr_url)
+
+    # WHAT REACHED SCM, per scope. Written by `fwgitops push --record`; keyed by
+    # Terraform root directory because that is how a change knows its own scope.
+    pushes = _push_results(push_records, err)
+    if pushes is None:
+        return 1
+    # SAY WHEN NOTHING WAS SUPPLIED. `push: null` means either "this scope was
+    # not pushed" or "nobody told me", and only the first is a fact about the
+    # change. The bundle cannot distinguish them, so the RUN does — the same
+    # reason `--baseline`'s absence is announced rather than left to look like
+    # "no removals".
+    if not push_records and status in ("applied", STATUS_REMOVED):
+        print("note: no --push-record, so every bundle will record `push: null` — "
+              "proving only that Terraform applied the change, not that it reached "
+              "SCM. The apply workflow passes one per scope.", file=out)
+
     now = datetime.now(timezone.utc)
     written: List[Path] = []
     unchanged: List[Path] = []
@@ -1848,6 +1899,7 @@ def run_evidence(
                 intent_sha256=sha256_file(path), intent_path=_display_path(path),
                 tfvars_sha256=sha256_file(tfvars) if tfvars.is_file() else None,
                 risk=handler.classify(ch, policy=policy), ci=ci,
+                push=pushes.get(handler.scope_of(ch).dirname),
             )
         except EvidenceError as e:
             print(f"error: could not build evidence for {handler.name_of(ch)}: {e}", file=err)
@@ -1897,6 +1949,12 @@ def run_evidence(
                     intent_path=str(Path(_display_path(intent_root)) / r.path),
                     intent_sha256=r.sha256,
                     risk=classify_removal(r), ci=ci,
+                    # A DESTROY IS DELIVERED BY THE SAME PUSH. `removed` is
+                    # documented as meeting the same bar as `applied` — the
+                    # object is gone in SCM AND the push that delivered the
+                    # deletion succeeded — so the tombstone has to carry the
+                    # push that makes that true, or it asserts it on nothing.
+                    push=pushes.get(handler.scope_of(gone).dirname),
                     removal=RemovalContext(ticket=trailers[r.req_id],
                                            commit=ci.merge_commit),
                 )
@@ -2037,6 +2095,7 @@ def run_push(
     device: Optional[str] = None,
     admins: Optional[List[str]] = None,
     all_admins: bool = False,
+    record: Optional[Path] = None,
     session=None,
     out=None,
     err=None,
@@ -2075,7 +2134,27 @@ def run_push(
 
     label = "device" if device else "folder"
     print(f"OK — {result.status} ({label}={result.folder} job={result.job_id})", file=out)
-    print(json.dumps(result.to_evidence(), sort_keys=True), file=out)
+    payload = result.to_evidence()
+    print(json.dumps(payload, sort_keys=True), file=out)
+
+    # `--record` EXISTS SO THE EVIDENCE BUNDLE CAN NAME THE PUSH. Every bundle
+    # ever written carried `"push": null` — the field, the `PushResult` and its
+    # `to_evidence()` all existed, and nothing passed one. So the record proved
+    # the change was applied to Terraform state and said NOTHING about whether it
+    # reached SCM, which is the step that can silently not happen: `devicesync`
+    # documents applied-but-unpushed as a real state, and a run once left the
+    # ICMP rule uncommitted at version 77 while its bundle read `applied`.
+    #
+    # SCOPE, NOT FOLDER, is the key. `result.folder` is the SCM address —
+    # a bare serial for a device — while evidence groups by Terraform root
+    # directory (`device-<serial>`). Writing the address here would silently
+    # match nothing for every device-scoped change.
+    if record is not None:
+        scope = Scope("device", device) if device else Scope("folder", folder)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps({"scope_dir": scope.dirname, **payload},
+                                     sort_keys=True, indent=2) + "\n")
+        print(f"push record: {record}", file=out)
     return 0
 
 
@@ -2415,6 +2494,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "WITHOUT AT LEAST ONE, the bundle does NOT claim NIST CM-5 — "
                         "that control is about who approved, and an empty list is "
                         "not an answer.")
+    e.add_argument("--push-record", dest="push_records", action="append", default=None,
+                   type=Path, metavar="FILE",
+                   help="a record written by `fwgitops push --record`, repeatable "
+                        "(one per scope). WITHOUT IT the bundle says nothing about "
+                        "whether the change reached SCM — it proves only that "
+                        "Terraform applied it, and applied-but-unpushed is a real "
+                        "state this platform has actually been in.")
     e.add_argument("--pr", dest="pr_url", default=None,
                    help="URL of the pull request this change came from (CI resolves "
                         "it from the merge commit).")
@@ -2530,6 +2616,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="identity whose staged changes to commit (repeatable); "
                         "default: SCM_CLIENT_ID. Scopes the commit so out-of-band "
                         "edits are never swept in.")
+    p.add_argument("--record", default=None, type=Path, metavar="FILE",
+                   help="write the push outcome here as JSON, for "
+                        "`fwgitops evidence --push-record`. Keyed by Terraform root "
+                        "directory, not by the SCM address, because that is how a "
+                        "change knows its own scope.")
     p.add_argument("--all-admins", action="store_true",
                    help="BREAK-GLASS: push the WHOLE candidate (every editor's staged "
                         "changes), e.g. to absorb the device-onboarding baseline")
@@ -2601,6 +2692,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
             baseline_root=args.baseline_root, change_message_path=args.change_message,
             approvers=args.approvers, pr_url=args.pr_url,
+            push_records=args.push_records,
         )
     if args.command == "drift":
         return run_drift(
@@ -2691,6 +2783,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 scope.value if scope.kind == "folder" else None,
                 device=scope.value if scope.kind == "device" else None,
                 admins=args.admins, all_admins=args.all_admins,
+                record=args.record,
             )
         if bool(args.folder) == bool(args.device):
             print("error: give exactly one of <folder> or --device <serial>. A device-scope "
@@ -2702,6 +2795,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             device=args.device,
             admins=args.admins,
             all_admins=args.all_admins,
+            record=args.record,
         )
     if args.command == "enrich":
         return run_enrich(

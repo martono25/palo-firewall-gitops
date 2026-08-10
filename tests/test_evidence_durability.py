@@ -564,3 +564,43 @@ def test_tiering_and_evidence_read_the_message_the_same_way():
     for body in builders:
         assert "HEAD_MESSAGE" in body and 'git log -1 --format=%B' in body, (
             "a dispatch has no head_commit; both must fall back to the tip")
+
+
+def test_the_apply_workflow_records_every_push_it_makes():
+    """The CLI can carry the push; this asserts the pipeline actually feeds it.
+    `--push-record` existing while the workflow never passes one would leave
+    every bundle reading `push: null` exactly as before — the same shape as the
+    defect itself, where `PushResult.to_evidence()` had existed unused all
+    along."""
+    def code(body):
+        # COMMENTS STRIPPED. The comment above the fix names `--record` in order
+        # to explain it, and an assertion that cannot tell prose from shell
+        # passes on the explanation while the flag itself is gone. That is not
+        # hypothetical: this test did exactly that until the mutation run caught
+        # it, which is the same trap the intake guard fell into.
+        return "\n".join(l for l in str(body).splitlines()
+                          if not l.lstrip().startswith("#"))
+
+    steps = _steps()
+    push = [s for s in steps if "fwgitops push --scope-dir" in str(s.get("run", ""))]
+    assert push, "the apply job must still push"
+    assert "--record" in code(push[0]["run"]), (
+        "a push that records nothing leaves its bundle unable to say it happened")
+
+    ev = code([s for s in steps if "fwgitops evidence" in str(s.get("run", ""))][0]["run"])
+    assert "--push-record" in ev, "and the evidence step must read them back"
+    assert "[ -e \"$rec\" ] || continue" in ev, (
+        "an unmatched glob expands to the literal pattern without `nullglob`, "
+        "which would fail a perfectly normal no-op apply")
+
+
+def test_a_scope_that_was_not_pushed_writes_no_record():
+    """The skip branch must NOT write one. A bundle claiming a push for a scope
+    where nothing was staged would be a false statement about delivery, which is
+    worse than the null it replaces — and the empty-push skip exists precisely
+    because an empty commit job is indistinguishable from a real one."""
+    step = [s for s in _steps()
+            if "fwgitops push --scope-dir" in str(s.get("run", ""))][0]["run"]
+    skip = step.split("else", 1)[1] if "else" in step else ""
+    assert "--record" not in skip, (
+        "the nothing-staged branch must not write a push record")

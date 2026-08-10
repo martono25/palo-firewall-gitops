@@ -409,10 +409,24 @@ jobs:
             # anything — plan's exit code plus enrich's move count — and since
             # the push is admin-scoped it can only ever commit our own changes.
             if [ "${staged:-1}" -gt 0 ] || [ "${moved:-0}" -gt 0 ]; then
-              fwgitops push --scope-dir "$folder"
+              # `--record` FEEDS THE EVIDENCE BUNDLE. Without it every bundle
+              # says `"push": null` — proof that Terraform applied the change and
+              # nothing at all about whether it reached SCM, which is the step
+              # that can silently not happen (devicesync documents
+              # applied-but-unpushed, and a run once left the ICMP rule
+              # uncommitted at version 77 while its bundle read `applied`).
+              #
+              # Into the workspace, not /tmp: the evidence step is a later step
+              # in the SAME job, and $RUNNER_TEMP would work too, but keeping the
+              # records beside the plan and apply logs means one place to look
+              # when a run has to be reconstructed.
+              fwgitops push --scope-dir "$folder" --record "push-$folder.json"
             else
               echo "nothing staged for $folder (apply: 0 changed, enrich: no moves)"
               echo "  — skipping push, which would mint an empty commit job"
+              # NO RECORD ON PURPOSE. A scope that was not pushed must not carry
+              # a push in its bundle, and those bundles are the unchanged ones
+              # `write_bundle_if_changed` leaves alone anyway.
             fi
 
             # SWEEP AFTER THE PUSH, and never in the same operation as the rule
@@ -568,6 +582,20 @@ jobs:
           if [ -n "${BASELINE:-}" ]; then
             args+=(--baseline "$BASELINE" --change-message /tmp/change-message.txt)
           fi
+
+          # ONE RECORD PER SCOPE THAT WAS PUSHED, so each bundle can name the
+          # commit job that delivered it. A scope that staged nothing wrote no
+          # record and correctly keeps `push: null`.
+          #
+          # The glob is quoted-tested rather than expanded blind: with `nullglob`
+          # unset an unmatched `push-*.json` expands to the LITERAL pattern, and
+          # `--push-record 'push-*.json'` would fail the run for a perfectly
+          # normal no-op apply.
+          for rec in push-*.json; do
+            [ -e "$rec" ] || continue
+            args+=(--push-record "$rec")
+          done
+
           fwgitops evidence intent --out evidence --status applied \
             ${args[@]+"${args[@]}"}
 

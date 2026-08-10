@@ -5,6 +5,36 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — the evidence bundle now says whether the change reached SCM
+
+**Every bundle ever written recorded `"push": null`.** The field, the
+`PushResult` and its `to_evidence()` all existed. Nothing ever passed one.
+
+So the audit record proved a change was applied to Terraform state and said
+nothing about whether it reached SCM — the step that can silently not happen.
+`devicesync.py` documents applied-but-unpushed as a real state, and on
+2026-08-09 a run left the ICMP rule uncommitted at config version 77 while its
+bundle read `applied`. A record that cannot distinguish "live on the firewall"
+from "staged and abandoned" is not evidence of the change.
+
+`fwgitops push --record FILE` writes the outcome; `fwgitops evidence
+--push-record FILE` (repeatable, one per scope) reads them back and attaches
+each to the bundles in its scope. Tombstones carry it too — `removed` is
+documented as meeting the same bar as `applied`, so a destroy has to name the
+push that delivered it.
+
+**Keyed by Terraform root directory, not by the SCM address.** `PushResult.
+folder` is a bare serial for a device while evidence groups by
+`device-<serial>`; keying on the address would have attached nothing to any
+device-scoped change, silently. A folder-scoped test cannot catch that — there
+the two strings are identical — so the test uses a device.
+
+An unreadable record **fails the run** rather than recording no push: "nothing
+was pushed" and "the record could not be read" produce the same `null`, and that
+is the one distinction this field exists to make. A run given no records at all
+says so, for the same reason `--baseline`'s absence is announced.
+
+
 ### Fixed — `--max-tier` printed two lines when the changeset had a removal
 
 `--max-tier` exists so a workflow can do `tier=$(fwgitops classify ...)` and
