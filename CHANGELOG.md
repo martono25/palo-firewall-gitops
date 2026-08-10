@@ -5,6 +5,25 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — a docs edit no longer applies to production
+
+`intent/README.md` gained a paragraph; `intent/**` matched; a full apply ran
+against the live tenant. It was harmless in itself — `0 added, 0 changed, 0
+destroyed`, push correctly skipped — but it held the S3 state lock for 80
+seconds and **failed the `terraform plan` of an unrelated pull request** that
+happened to be running. A green PR went red for a reason that had nothing to do
+with the PR.
+
+A markdown file cannot change compiled Terraform; nothing in the compiler reads
+one. So every run a `.md` starts is either a no-op or a collision. `!**/*.md`
+subtracts prose from the trigger — after the includes, because a `paths:`
+negation only subtracts from what precedes it.
+
+This narrows WHAT STARTS a run, not what a run applies: a push touching both a
+`.md` and an intent still matches on the intent, and an apply always reconciles
+the whole tree.
+
+
 ### Changed — the risk tier picks the approver; the human-entered ceiling is gone
 
 **BREAKING for the apply workflow.** `max_auto_tier` is removed, and so is the

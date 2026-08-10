@@ -42,6 +42,21 @@ on:
       - "intent/**"
       - "catalog/**"
       - "terraform/**"
+      # ...BUT NOT THE PROSE INSIDE THEM. Observed 2026-08-10: a one-paragraph
+      # edit to `intent/README.md` matched `intent/**` and ran a full apply
+      # against the live tenant. It was a no-op and the push was correctly
+      # skipped, but it took the S3 state lock for 80 seconds and failed the
+      # `terraform plan` of an unrelated PR that was running at the time.
+      #
+      # A markdown file cannot change compiled Terraform — nothing in the
+      # compiler reads one — so an apply it triggers can only ever be a no-op
+      # or a collision. `!` here is a negation within the same filter, and
+      # ORDER MATTERS: it must come after the includes it subtracts from.
+      #
+      # This narrows WHAT STARTS a run, not what a run then applies: a push
+      # touching a .md AND an intent still matches on the intent and applies
+      # everything, because the apply always reconciles the whole tree.
+      - "!**/*.md"
   # Manual re-run — same routing, no knobs. There is deliberately no
   # `max_auto_tier` input: it asked a human to RESTATE the tier the classifier
   # had already computed, which is two sources of truth for one fact. Picking
