@@ -759,3 +759,59 @@ def test_icmp_cannot_be_MIXED_with_port_services_in_one_request():
     hit = [p for p in ei.value.problems if p.path == "spec.service"]
     assert hit, [p.path for p in ei.value.problems]
     assert "cannot mix" in hit[0].message and "separate requests" in hit[0].message
+
+
+def test_every_example_in_the_requester_guide_actually_LOADS():
+    """`docs/requesting-rules.md` tells a requester to copy an example whole. If
+    one no longer validates, the first thing a new user does is get an error —
+    and the guide has drifted before: it documented `expires` for three weeks
+    after the field was REMOVED from the schema in v1.23.0, and described a
+    `position` default that v2.0.0 changed.
+
+    Copy-pasteable is a claim. This is the check."""
+    import re
+    from pathlib import Path
+
+    import yaml as _yaml
+
+    from fwgitops.resolve import EnvMap
+    root = Path(__file__).resolve().parents[1]
+    env = EnvMap.from_dict(_yaml.safe_load((root / "catalog" / "environments.yaml").read_text()))
+    from fwgitops.catalog import (
+        FolderHierarchy, InterfaceCatalog, RouterCatalog, ServiceCatalog,
+    )
+
+    def _cat(cls, name):
+        f = root / "catalog" / name
+        return cls.from_dict(_yaml.safe_load(f.read_text())) if f.is_file() else None
+
+    kw = dict(
+        env_map=env,
+        folder_hierarchy=_cat(FolderHierarchy, "folders.yaml"),
+        interface_catalog=_cat(InterfaceCatalog, "interfaces.yaml"),
+        router_catalog=_cat(RouterCatalog, "routers.yaml"),
+        service_catalog=_cat(ServiceCatalog, "services.yaml"),
+    )
+    text = (root / "docs" / "requesting-rules.md").read_text()
+    # EVERY kind, not just AccessRequest. The guide gained Zone/Interface/Route
+    # examples in v2.0.0, and an example a requester is told to copy is a claim
+    # that it works.
+    blocks = [b for b in re.findall(r"```yaml\n(.*?)```", text, re.S) if "kind: " in b]
+    assert len(blocks) >= 4, f"expected an example per kind, found {len(blocks)}"
+    kinds = set()
+    for b in blocks:
+        doc = _yaml.safe_load(b)
+        load_intent(doc, **kw)          # raises IntentError with the detail
+        kinds.add(doc["kind"])
+    assert kinds == {"AccessRequest", "ZoneRequest", "InterfaceRequest", "RouteRequest"}, (
+        f"the guide must show every shipped kind; it shows {sorted(kinds)}")
+
+
+def test_the_requester_guide_does_not_document_removed_fields():
+    """`expires` was removed in v1.23.0 and is now REJECTED, not ignored. The
+    guide listed it in the metadata table until v2.0.0 — telling requesters to
+    write a field that fails their PR."""
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[1] / "docs" / "requesting-rules.md").read_text()
+    table = text[text.index("### `metadata`"):text.index("### `spec`")]
+    assert "| `expires` |" not in table, "removed fields must not be in the field reference"
