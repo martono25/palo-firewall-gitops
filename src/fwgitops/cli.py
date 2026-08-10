@@ -631,6 +631,7 @@ def run_classify(
     state_snapshot_paths: Optional[List[Path]] = None,
     baseline_root: Optional[Path] = None,
     change_message_path: Optional[Path] = None,
+    max_tier: bool = False,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     out=None,
@@ -731,6 +732,12 @@ def run_classify(
             print(f"  - {p}", file=err)
         return 2
 
+    # --max-tier wants ONE token on stdout. The per-change report still runs (the
+    # tiers must be computed) but goes to a sink, so a caller can do
+    # `tier=$(fwgitops classify intent --max-tier)` without parsing.
+    import io as _io
+    report = _io.StringIO() if max_tier else out
+
     # The rest of the declared policy — each change is classified against it
     # (GitOps = source of truth), enabling stateful checks (novel zone-pair, etc.).
     changes = of_kind(compiled, "AccessRequest")
@@ -753,7 +760,7 @@ def run_classify(
             tiers[v.tier] = tiers.get(v.tier, 0) + 1
             checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
             label = f"{handler.report_prefix}{handler.name_of(obj)}"
-            print(f"  {label:22} {v.tier:9} {checks}", file=out)
+            print(f"  {label:22} {v.tier:9} {checks}", file=report)
             if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
                 exceeded.append(f"{label}={v.tier}")
     # ── REMOVALS ──────────────────────────────────────────────────────────
@@ -805,6 +812,17 @@ def run_classify(
             print(f"  {label:22} {v.tier:9} {checks}", file=out)
             if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
                 exceeded.append(f"{label}={v.tier}")
+
+    # --max-tier: the HIGHEST tier in the changeset, and nothing else on stdout,
+    # so CI can route on it. The apply workflow picks which environment (which
+    # approver) a run needs from this, which is what makes "LOW auto-applies,
+    # HIGH waits for a human" a property of the pipeline rather than a claim in
+    # a README. Empty changeset -> LOW: nothing to apply cannot need an
+    # approver, and the alternative (defaulting high) would gate every no-op.
+    if max_tier:
+        highest = next((t for t in reversed(TIERS) if tiers.get(t)), "LOW")
+        print(highest, file=out)
+        return 0
 
     print(
         f"classified {len(compiled) + removed_count}: "
@@ -2253,6 +2271,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="live snapshot from `fwgitops snapshot <kind> <folder>`; repeatable. "
                          "Enables state-aware checks (a zone gaining its first interface, an "
                          "interface gaining addressing). Absent = those checks are skipped.")
+    cl.add_argument("--max-tier", action="store_true",
+                    help="print ONLY the highest tier in the changeset (LOW|HIGH|CRITICAL) "
+                         "and exit 0. The apply workflow routes on this to pick which "
+                         "environment — which approver — a run needs.")
     cl.add_argument("--gate", choices=("LOW", "HIGH", "CRITICAL"),
                     help="fail (exit 3) if any change's tier exceeds this max-auto tier")
     cl.add_argument("--baseline", type=Path,
@@ -2469,6 +2491,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.intent_root, args.env_map, gate=args.gate,
             state_snapshot_paths=args.state_snapshots,
             baseline_root=args.baseline, change_message_path=args.change_message,
+            max_tier=args.max_tier,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
     if args.command == "evidence":

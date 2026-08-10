@@ -4,11 +4,12 @@ GitOps-driven firewall automation for Palo Alto (Strata Cloud Manager / Panorama
 covering **Day-1 provisioning + onboarding** through **Day-2 rule changes**, automated as far
 as is safe.
 
-> **Status: v1.0 — Day-2 rule provisioning shipped.** The full Day-2 loop
-> (`intent → compile → classify → risk-gate → terraform apply → enrich → push`) is
-> implemented, tested, and **proven end-to-end on live VM-Series hardware** (rule
-> verified in the device running config). See [`CHANGELOG.md`](CHANGELOG.md) and
-> [`docs/adr/`](docs/adr/). Day-1 provisioning is the v2.0 target. Full design:
+> **Status: v2.0.0.** The Day-2 loop (`intent → tags ensure → compile → classify →
+> risk-gate → terraform apply → enrich → push → tags sweep`) and the **Day-1 chain**
+> (`InterfaceRequest → ZoneRequest → RouteRequest`) are both implemented, tested, and
+> **proven end-to-end on live VM-Series hardware**. Four intent kinds, evidence bundles
+> for every one, and drift detection across two engines. See
+> [`CHANGELOG.md`](CHANGELOG.md) and [`docs/adr/`](docs/adr/). Full design:
 > [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Guides
@@ -17,6 +18,8 @@ as is safe.
 |---|---|---|
 | **Request a firewall rule** (write intent → PR) | [`docs/requesting-rules.md`](docs/requesting-rules.md) | any engineer |
 | **Provision a firewall** (stand up a VM-Series) | [`docs/provisioning.md`](docs/provisioning.md) | platform operator |
+| **Stand up a folder** (the Day-1 chain, end to end) | [`docs/building-a-folder.md`](docs/building-a-folder.md) | platform operator |
+| Wire up CI (OIDC, secrets, environments) | [`docs/GITHUB-SETUP.md`](docs/GITHUB-SETUP.md) | platform operator |
 | What each rule field maps to on the firewall | [`docs/adr/0003-security-rule-component-model.md`](docs/adr/0003-security-rule-component-model.md) | — |
 | Release notes | [`CHANGELOG.md`](CHANGELOG.md) | — |
 
@@ -28,7 +31,7 @@ as is safe.
 | Reconcile engine | Terraform (`panos` + `scm` providers) — `plan` is the PR preview + drift detector |
 | Logic layer | Python (`pan-os-python`) — intent compiler, risk classifier, evidence gen |
 | Change model | Risk-tiered auto-apply (low-risk auto, high-risk human-gated) |
-| Intake | Intent abstraction (app-language intent → compiler → PAN-OS); broad requesters via GitHub Issue Forms |
+| Intake | Intent abstraction (app-language intent → compiler → PAN-OS); requests are PRs against `intent/`. Issue Forms are designed, **not built** |
 | Risk classifier | Built in-house (Python policy-as-code) — no commercial tool owned |
 | CI / governance | GitHub Actions (OIDC to Palo, environment protection for the approval gate) |
 | Evidence + SSoT | Git — evidence bundles Git-resident, Git is authoritative |
@@ -115,7 +118,7 @@ factor is VM-Series on AWS.
 | `policy/` | Risk classifier (Python) — shares current-policy state model with compiler |
 | `terraform/` | Day-2 reconcile state, split per SCM folder; static module + `for_each` |
 | `evidence/` | Git-resident NIST-mapped evidence bundles (Git = SSoT) |
-| `.github/ISSUE_TEMPLATE/` | Broad-requester intake: Issue Forms → Action → intent PR |
+| `.github/ISSUE_TEMPLATE/` | *(empty)* — Issue-Forms intake is designed, **not built**; requests are hand-written PRs |
 | `.github/workflows/` | CI: provision \| compile → classify → plan → gate → apply |
 
 ## Standing up a folder
@@ -126,6 +129,18 @@ factor is VM-Series on AWS.
 prerequisites that are not in any intent file (the Terraform root, the folder
 interface variables, the catalog entry) and the two things that went wrong the
 first time.
+
+## Operating it
+
+| Command | What it answers |
+|---|---|
+| `fwgitops drift` | has SCM drifted from what Git declares? |
+| `fwgitops device-sync` | is the FIREWALL running what SCM holds? Drift compares Git to SCM; this compares SCM to the device, which is the gap between "pushed" and "live" |
+| `fwgitops verify-catalog` | does `catalog/folders.yaml` still match SCM's real hierarchy? |
+| `fwgitops tags ensure \| sweep` | create the tag objects a rule references, and remove unreferenced ones. **Terraform no longer destroys tags** — it ran a tag destroy before the rule update that released it and 409'd (ADR-0009), so the halves are separated in time |
+
+`ensure` runs before apply and `sweep` after push; the pipeline does both, so you
+only reach for them by hand when investigating.
 
 ## Incident response: `fwgitops where`
 

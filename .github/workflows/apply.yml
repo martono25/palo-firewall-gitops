@@ -1,27 +1,32 @@
 # ─────────────────────────────────────────────────────────────────────────
 # Applies the reviewed desired-state after merge.
 #
-# WHAT ACTUALLY GATES A CHANGE HERE — measured 2026-08-09, because this header
-# claimed a control that does not exist:
+# WHAT GATES A CHANGE HERE — the risk tier picks the approver.
 #
-#   * THE RISK GATE (real, and currently the only one). `fwgitops classify
-#     --gate` fails the job when any change exceeds the max-auto tier, which a
-#     push pins to LOW. It has been holding since 2026-08-05: `REQ-2026-0803`
-#     classifies HIGH (`default_route`), so every push-triggered apply stops
-#     there. Raising it requires an explicit, logged `workflow_dispatch`.
+#   LOW           -> firewall-apply-auto  (no reviewer) -> applies
+#   HIGH/CRITICAL -> firewall-apply       (required reviewer) -> applies once approved
 #
-#   * REQUIRED REVIEWERS ON `firewall-apply` — CLAIMED HERE UNTIL v1.39.0, AND
-#     NEVER PRESENT. `GET /environments/firewall-apply` returns
-#     `"protection_rules": []`. Environment protection needs Pro/Team/Enterprise
-#     on a PRIVATE repository, and this one is private on a personal account, so
-#     it was never configurable — and nothing said so. The header asserted
-#     "human approval on EVERY change" over a control that had never been
-#     enabled, which is the same claimed-but-not-operating defect this project
-#     removed from `expires`, from `DESIGN.md`, and from the bundle's own CM-5.
+# The `classify` job computes the tier and the `apply` job selects its
+# environment from it, so the approval policy is a PROPERTY OF THE PIPELINE
+# rather than a claim in a document. Anything that is not exactly LOW routes to
+# the reviewed environment, so a failed classify lands on "a human looks at it".
 #
-#     This is why evidence bundles record no approver: nothing requires an
-#     approval, so `controls_not_evidenced` names CM-5 rather than claiming it.
-#     Tracked in TODOS.md with the options; NOT quietly re-asserted here.
+# HISTORY, because both halves of this were wrong at different times:
+#
+#   * Until v2.1.0 a `max_auto_tier` input gated the run instead. It asked a
+#     human to RESTATE the tier the classifier had already computed — two
+#     sources of truth for one fact, and error-prone in both directions.
+#   * A required reviewer was added to `firewall-apply` on 2026-08-10 to make
+#     NIST CM-5 evidenceable. Environment protection is JOB-level and cannot be
+#     conditional on a tier, so it silently gated LOW too — and v2.0.0 shipped
+#     with README, DESIGN.md and the release notes all still saying low-risk
+#     changes auto-apply. They did not, for the length of that release.
+#
+# CRITICAL IS NOT DUAL-CONTROLLED. It routes to the same reviewer as HIGH.
+# GitHub environment reviewers are "any one of these people approves", so a
+# separate environment would give a different approver LIST, not two approvers.
+# Stated because "CRITICAL = dual control" would otherwise be a claim the
+# pipeline cannot back.
 #
 # PHASE 2 slots for tier-driven routing (LOW auto / HIGH review / CRITICAL
 # security sign-off) and the window-aware scheduler are marked below.
@@ -29,23 +34,21 @@
 name: apply
 
 on:
-  # Auto-apply on merge to main. Fail-closed: a push runs the risk gate at LOW
-  # (see the gate step's `|| 'LOW'`), so only LOW-risk changes auto-apply; HIGH/
-  # CRITICAL require an explicit manual dispatch with a higher max_auto_tier.
+  # Apply on merge to main. WHICH HUMAN, IF ANY, has to approve is decided by the
+  # risk tier (see the `classify` job) — not by an input a person fills in.
   push:
     branches: [main]
     paths:
       - "intent/**"
       - "catalog/**"
       - "terraform/**"
-  # Manual override path: dispatch with a higher tier to apply HIGH/CRITICAL.
-  workflow_dispatch:
-    inputs:
-      max_auto_tier:
-        description: "Highest risk tier allowed to apply without escalation (fail-closed gate)"
-        type: choice
-        options: [LOW, HIGH, CRITICAL]
-        default: LOW
+  # Manual re-run — same routing, no knobs. There is deliberately no
+  # `max_auto_tier` input: it asked a human to RESTATE the tier the classifier
+  # had already computed, which is two sources of truth for one fact. Picking
+  # LOW on a HIGH change failed the run for no reason; habitually picking
+  # CRITICAL made the gate mean nothing. It existed only because tier routing
+  # did not, and it was removed in v2.1.0 when routing replaced it.
+  workflow_dispatch: {}
 
 permissions:
   # WRITE so the run can commit its evidence bundles back to main. The audit
@@ -72,24 +75,55 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── PHASE 2 (slot): classify each change and route to the right gate ──────
-  # classify:
-  #   outputs: { tier: LOW|HIGH|CRITICAL }
-  #   run: fwgitops classify ...        # risk classifier (Phase 2, fail-closed)
-  # Then `apply` picks its `environment:` from the tier:
-  #   LOW      -> no required reviewer (auto)
-  #   HIGH     -> firewall-review  (folder CODEOWNERS)
-  #   CRITICAL -> firewall-security (dual-control), maintenance-window only
-  # and the window-aware scheduler gates WHEN (tier-driven cadence, 1:1 isolation).
+  # ── TIER ROUTING: who has to approve depends on how risky the change is ───
+  #
+  # This existed as a commented-out "Phase 2 slot" until v2.1.0, and its absence
+  # had a cost that went unnoticed for a release: when a required reviewer was
+  # put on `firewall-apply` (2026-08-10, to make NIST CM-5 evidenceable), it
+  # gated EVERY apply — because GitHub environment protection is job-level and
+  # cannot be conditional on a tier. LOW changes stopped auto-applying, while
+  # README, DESIGN.md and the v2.0.0 release notes all still said they did.
+  #
+  # The fix is to choose the ENVIRONMENT from the tier, so the approval policy is
+  # a property of the pipeline rather than a claim in a document:
+  #
+  #   LOW           -> firewall-apply-auto  (NO reviewer — auto-applies)
+  #   HIGH/CRITICAL -> firewall-apply       (required reviewer)
+  #
+  # Read-only and cheap: no SCM writes, no Terraform, no cloud credentials.
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      tier: ${{ steps.tier.outputs.tier }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      # Interface VARIABLES first: a zone binds one, and a folder with none
+      # cannot be classified. Same ordering reason as the apply job.
+      - run: fwgitops folder-interfaces
+      - id: tier
+        run: echo "tier=$(fwgitops classify intent --max-tier)" >> "$GITHUB_OUTPUT"
+      - run: |
+          echo "Highest tier in this changeset is ${{ steps.tier.outputs.tier }}"
+          echo "Routing to $([ '${{ steps.tier.outputs.tier }}' = 'LOW' ] \
+            && echo 'firewall-apply-auto (no reviewer)' \
+            || echo 'firewall-apply (required reviewer)')"
 
   apply:
     runs-on: ubuntu-latest
-    # NOT an approval gate — see the header. This environment carries no
-    # protection rules, so naming it buys deployment-history grouping and a
-    # place to scope secrets, nothing more. Kept because the protection can be
-    # switched on here the day the plan allows it; documented because a reader
-    # who sees `environment:` reasonably assumes it stops something.
-    environment: firewall-apply
+    needs: classify
+    # THE APPROVAL POLICY, chosen by risk tier. `firewall-apply` carries a
+    # required reviewer; `firewall-apply-auto` carries none, so a LOW changeset
+    # applies without a human — which is the platform's whole proposition and
+    # what a single shared environment silently removed.
+    #
+    # Fail-safe by construction: any tier that is not exactly LOW routes to the
+    # REVIEWED environment. A classify job that failed, an empty output, or a
+    # tier this expression does not know all land on "a human looks at it".
+    environment: ${{ needs.classify.outputs.tier == 'LOW' && 'firewall-apply-auto' || 'firewall-apply' }}
     # SCM auth for BOTH the scm Terraform provider and `fwgitops push`. Each does
     # its own client_credentials -> JWT exchange, so no separate token step.
     env:
@@ -152,14 +186,6 @@ jobs:
               exit 1
             fi
           done
-
-      # Fail-closed RISK GATE (Phase 2): block the apply if any change exceeds the
-      # max-auto tier. On a push (merge) the input is unset, so it defaults to LOW
-      # — only LOW-risk changes auto-apply; HIGH/CRITICAL require an explicit,
-      # logged manual dispatch with a higher tier. This tier gate does NOT need
-      # required-reviewers (works on any plan).
-      - name: Risk gate (fail-closed)
-        run: fwgitops classify intent --gate "${{ inputs.max_auto_tier || 'LOW' }}"
 
       - uses: hashicorp/setup-terraform@v4
 

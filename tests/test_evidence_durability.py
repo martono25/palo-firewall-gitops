@@ -335,3 +335,62 @@ def test_the_drift_SCHEDULE_is_gated_but_a_dispatch_is_not():
     assert "workflow_dispatch" in cond, "a deliberate dispatch must always run"
     assert "FIREWALL_ONLINE" in cond, "the schedule must be gated on the firewall being up"
     assert "schedule" in wf[True], "the cron itself stays — only the job is gated"
+
+
+# ── tier routing: the approval policy is the pipeline, not a claim ────────
+def test_the_environment_is_chosen_by_RISK_TIER():
+    """A single shared environment made the approval policy uniform, and putting
+    a required reviewer on it (2026-08-10, for CM-5) silently stopped LOW changes
+    auto-applying — while README, DESIGN.md and the v2.0.0 release notes all
+    still said they did. GitHub environment protection is job-level and cannot be
+    conditional on a tier, so the tier has to pick the ENVIRONMENT."""
+    wf = _workflow()
+    assert "classify" in wf["jobs"], "a job must compute the tier before apply runs"
+    assert wf["jobs"]["apply"]["needs"] == "classify"
+    env = wf["jobs"]["apply"]["environment"]
+    assert "needs.classify.outputs.tier" in env, "the environment must depend on the tier"
+    assert "firewall-apply-auto" in env and "firewall-apply'" in env
+
+
+def test_anything_that_is_not_LOW_routes_to_the_REVIEWED_environment():
+    """Fail-safe direction. A classify job that failed, an empty output, or a
+    tier the expression does not know must land on 'a human looks at it' — never
+    on the unreviewed environment."""
+    env = _workflow()["jobs"]["apply"]["environment"]
+    assert "== 'LOW' && 'firewall-apply-auto' || 'firewall-apply'" in env, (
+        "only an exact LOW may reach the unreviewed environment")
+
+
+def test_the_tier_job_does_not_touch_the_firewall():
+    """It runs before any approval, so it must be read-only: no SCM writes, no
+    Terraform, no cloud credentials."""
+    steps = _workflow()["jobs"]["classify"]["steps"]
+    body = " ".join(str(s.get("run", "")) + str(s.get("uses", "")) for s in steps)
+    for forbidden in ("terraform", "fwgitops push", "fwgitops apply", "aws-actions",
+                      "fwgitops tags", "fwgitops enrich"):
+        assert forbidden not in body, f"classify must not run {forbidden!r}"
+
+
+def test_there_is_NO_human_entered_risk_ceiling():
+    """`max_auto_tier` asked a human to RESTATE the tier the classifier had
+    already computed — two sources of truth for one fact. Picking LOW on a HIGH
+    change failed the run for no reason; habitually picking CRITICAL made the
+    gate mean nothing. The tier is computed in code and routes to an approver;
+    nobody types it."""
+    wf = _workflow()
+    assert wf[True]["workflow_dispatch"] in (None, {}), (
+        "a manual re-run must take no risk knobs")
+    steps = [s.get("name") or "" for s in wf["jobs"]["apply"]["steps"]]
+    assert not any("Risk gate" in n for n in steps), (
+        "routing plus approval is the control; a second ceiling is redundant")
+    assert "max_auto_tier" not in yaml.dump(wf)
+
+
+def test_the_PR_still_previews_the_tier():
+    """Removing the apply-side gate must not remove the requester's feedback: the
+    PR still reports what each change is worth, it just no longer blocks on a
+    number a human typed."""
+    pr = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "pr-validate.yml").read_text())
+    body = " ".join(str(s.get("run", "")) for j in pr["jobs"].values() for s in j["steps"])
+    assert "fwgitops classify" in body

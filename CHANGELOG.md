@@ -5,6 +5,49 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed — the risk tier picks the approver; the human-entered ceiling is gone
+
+**BREAKING for the apply workflow.** `max_auto_tier` is removed, and so is the
+`Risk gate (fail-closed)` step. The `classify` job computes the tier and the
+`apply` job selects its environment from it:
+
+```
+LOW           -> firewall-apply-auto  (no reviewer)      -> applies
+HIGH/CRITICAL -> firewall-apply       (required reviewer) -> applies once approved
+```
+
+**Why the ceiling had to go.** It asked a human to RESTATE the tier the
+classifier had already computed — two sources of truth for one fact. Picking LOW
+on a HIGH change failed the run for no reason; habitually picking CRITICAL made
+the gate mean nothing. It existed only because tier routing did not.
+
+**Why routing had to arrive now.** A required reviewer was added to
+`firewall-apply` on 2026-08-10 to make CM-5 evidenceable. GitHub environment
+protection is JOB-level and cannot be conditional on a tier, so it gated LOW too
+— and **v2.0.0 shipped with README, DESIGN.md and its own release notes all still
+saying low-risk changes auto-apply. They did not, for the length of that
+release.** The approval policy is now a property of the pipeline instead of a
+claim in a document.
+
+**A HIGH change now applies from a push once a human approves it**, where before
+it could not apply from a push at all. That is a deliberate loosening: it is what
+"high-risk human-gated" was always specified to mean, and it removes an approval
+prompt that was requested three steps BEFORE the gate that rejected it — a
+prompt that routinely led nowhere is how people learn to approve without reading.
+
+Human touchpoints, merge to live: LOW **1** (merge), HIGH **2** (merge, approve).
+Previously HIGH took four, one of them wasted.
+
+**CRITICAL IS NOT DUAL-CONTROLLED**, and the workflow now says so. It routes to
+the same reviewer as HIGH. GitHub environment reviewers are "any one of these
+people approves", so a separate environment would give a different approver LIST,
+not two approvers. Recorded rather than claimed.
+
+Fail-safe direction: anything that is not exactly `LOW` routes to the reviewed
+environment, so a failed classify, an empty output or an unknown tier all land on
+"a human looks at it". Mutation-tested.
+
+
 ### Added — `docs/building-a-folder.md`, the Day-1 walkthrough
 
 The platform-team counterpart to `requesting-rules.md`. `ZoneRequest`,
