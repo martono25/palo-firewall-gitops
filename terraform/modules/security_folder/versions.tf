@@ -6,11 +6,11 @@
 # Every schema assumption is marked `# VERIFY:`. See README.md for the checklist.
 # ─────────────────────────────────────────────────────────────────────────
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.7" # `removed` blocks with lifecycle.destroy (ADR-0009)
 
   required_providers {
     scm = {
-      source  = "PaloAltoNetworks/scm"
+      source = "PaloAltoNetworks/scm"
       # PINNED EXACTLY: 1.0.12-beta.4 is a PRE-RELEASE. `~> 1.0` would not even
       # select it (Terraform excludes pre-releases from range constraints), and a
       # floating constraint would drift off it in either direction without anyone

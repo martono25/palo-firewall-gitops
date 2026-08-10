@@ -293,3 +293,27 @@ def test_an_unreadable_APPLY_summary_pushes_rather_than_skipping():
     run = _apply_loop()
     i = run.index("could not read the apply summary")
     assert "staged=1" in run[max(0, i - 500):i], "the default before the check must be PUSH"
+
+
+# ── tag lifecycle (ADR-0009) ──────────────────────────────────────────────
+def test_tags_are_ensured_BEFORE_apply_and_swept_AFTER_push():
+    """The ordering IS the fix. Terraform ran a tag DESTROY before the rule
+    UPDATE that released it and 409'd (spike/tag-destroy-ordering), so creation
+    and removal are separated in time — and the sweep must never share an
+    operation with the rule change that released the tag."""
+    run = _apply_loop()
+    i_ensure = run.index("fwgitops tags ensure")
+    i_apply = run.index("terraform -chdir=\"$dir\" apply")
+    i_push = run.index("fwgitops push --scope-dir")
+    i_sweep = run.index("fwgitops tags sweep")
+    assert i_ensure < i_apply, "tags must exist before the rules that reference them"
+    assert i_push < i_sweep, "the sweep runs after the push, never before"
+
+
+def test_the_sweep_cannot_fail_the_apply():
+    """By the time it runs the firewall is already updated. Failing the job would
+    turn leftover garbage into a red apply for a change that succeeded."""
+    run = _apply_loop()
+    i = run.index("fwgitops tags sweep")
+    tail = run[i:i + 300]
+    assert "||" in tail and "::warning::" in tail
