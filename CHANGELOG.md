@@ -5,6 +5,49 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Added — the broad-requester intake actually exists
+
+**[Open an issue](../../issues/new?template=rule-request.yml), fill in a form, get
+a pull request.** The platform generates the intent YAML, validates it, opens the
+PR and comments back with the link. A requester never writes YAML and never needs
+to know what a zone or a folder is — which is what "app-language intent" was
+supposed to mean.
+
+This is the piece README, `DESIGN.md` and `intent/README.md` all claimed existed
+from 2026-07-19 while `.github/ISSUE_TEMPLATE/` was empty. Without it the
+platform was a platform-team tool: a requester had to hand-write YAML with a
+valid ticket, a resolvable environment and catalog-correct app names — exactly
+the knowledge the abstraction exists to remove.
+
+**The parsing is Python, not workflow shell.** An Issue Form arrives as RENDERED
+MARKDOWN, so the round trip is where the bugs are. `fwgitops from-issue` is
+testable and runnable locally; a shell implementation would have been neither,
+which is how an empty directory went unnoticed for three weeks.
+
+**Rejections are written for a requester**, naming the form field they filled in
+and what to write instead — not `spec.service[0].protocol`. A bare IP is refused
+rather than guessed: assuming `/24` would silently widen the rule to 254 hosts
+nobody asked for. All problems are reported at once, so it takes one edit rather
+than three failed PRs.
+
+**The requester is the issue author**, not a typed field — a field someone types
+is one they can type wrongly, and the audit chain hangs off who actually asked.
+The request id is `REQ-<year>-<issue number>`: unique by construction, and it
+traces a rule on the firewall back to the conversation that asked for it.
+
+**It opens a PR and applies nothing.** Same validation, same tiering, same
+tier-routed approval as any other change. A test asserts the workflow runs no
+`terraform`, `push`, `enrich` or `tags`.
+
+Only `AccessRequest`. Zones, interfaces and routes stay platform work — a form
+that let anyone request a default route would be a form that lets anyone
+black-hole the estate (ADR-0008).
+
+Mutation-tested three ways: a bare IP silently becoming a CIDR, a form label
+dropping out of the parser, and the issue body spliced into the shell (it arrives
+via `env:`, because an issue body is attacker-controlled text from anyone who can
+open one).
+
 ### Fixed — a docs edit no longer applies to production
 
 `intent/README.md` gained a paragraph; `intent/**` matched; a full apply ran

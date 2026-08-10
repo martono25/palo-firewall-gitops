@@ -31,7 +31,7 @@ as is safe.
 | Reconcile engine | Terraform (`panos` + `scm` providers) — `plan` is the PR preview + drift detector |
 | Logic layer | Python (`pan-os-python`) — intent compiler, risk classifier, evidence gen |
 | Change model | Risk-tiered: the tier picks the approver (LOW applies with no human; HIGH/CRITICAL hold for a named reviewer) |
-| Intake | Intent abstraction (app-language intent → compiler → PAN-OS); requests are PRs against `intent/`. Issue Forms are designed, **not built** |
+| Intake | Intent abstraction (app-language intent → compiler → PAN-OS); **Issue Form → generated intent → PR**, or a hand-written PR against `intent/` |
 | Risk classifier | Built in-house (Python policy-as-code) — no commercial tool owned |
 | CI / governance | GitHub Actions (OIDC to Palo, environment protection for the approval gate) |
 | Evidence + SSoT | Git — evidence bundles Git-resident, Git is authoritative |
@@ -126,7 +126,7 @@ factor is VM-Series on AWS.
 | `policy/` | Risk classifier (Python) — shares current-policy state model with compiler |
 | `terraform/` | Day-2 reconcile state, split per SCM folder; static module + `for_each` |
 | `evidence/` | Git-resident NIST-mapped evidence bundles (Git = SSoT) |
-| `.github/ISSUE_TEMPLATE/` | *(empty)* — Issue-Forms intake is designed, **not built**; requests are hand-written PRs |
+| `.github/ISSUE_TEMPLATE/` | Broad-requester intake: Issue Form → `fwgitops from-issue` → intent PR |
 | `.github/workflows/` | CI: provision \| compile → classify → plan → gate → apply |
 
 ## Standing up a folder

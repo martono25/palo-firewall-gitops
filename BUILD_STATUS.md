@@ -61,7 +61,7 @@ Ordered by what blocks a launch, not by size. Tracked in [`TODOS.md`](TODOS.md).
 | # | Gap | Status |
 |---|---|---|
 | 1 | ~~No approval path~~ | **DONE 2026-08-10** — the tier picks the approver: LOW → `firewall-apply-auto` (no reviewer, applies straight through), HIGH/CRITICAL → `firewall-apply` (required reviewer). Demonstrated both ways on hardware. NOTE: self-approval, so CM-5 is earned and AC-5 (separation of duties) is not; CRITICAL is not dual-controlled |
-| 2 | **No requester intake.** `.github/ISSUE_TEMPLATE/` does not exist, so an app team must hand-write intent YAML — which contradicts the app-language premise. | next |
+| 2 | ~~No requester intake~~ | **DONE v2.1.0** — Issue Form → `fwgitops from-issue` → intent PR. Parsing is Python and tested; the workflow opens a PR and applies nothing |
 | 3 | ~~ICMP is unrequestable~~ | **DONE v1.40.0** — `protocol: icmp` -> `application-default` + `ping`, measured in `spike/icmp-service-shape`; live in SCM |
 | 4 | ~~Rule ordering unwired~~ | **DONE v1.41.0** — `top`/`bottom` wired; `before`/`after` stay with `enrich` (UUID anchor is a Terraform `Error: Cycle`) |
 | 5 | **NatRequest** | deferred by decision, 2026-08-09 |

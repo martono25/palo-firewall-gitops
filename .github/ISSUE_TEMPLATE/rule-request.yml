@@ -1,0 +1,101 @@
+name: Firewall rule request
+description: Ask for traffic to be allowed or denied. No PAN-OS knowledge needed.
+title: "Firewall rule: "
+labels: ["firewall-rule"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the traffic in your own terms. The platform works out the zones,
+        folders, address objects and rule placement.
+
+        Submitting this opens a **pull request** with the generated request for
+        review — it does not change a firewall by itself.
+
+  - type: input
+    id: ticket
+    attributes:
+      label: Change ticket
+      description: Your ticket id. This is the audit link, so it must be real.
+      placeholder: JIRA-12345
+    validations:
+      required: true
+
+  - type: input
+    id: justification
+    attributes:
+      label: Why do you need this?
+      description: One line. "Web tier needs to reach the payments API" is enough.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: Which estate. See catalog/environments.yaml for the full list.
+      options: ["prod"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: action
+    attributes:
+      label: Allow or deny?
+      options: ["allow", "deny"]
+    validations:
+      required: true
+
+  - type: input
+    id: team
+    attributes:
+      label: Team or app name
+      description: Used only to file the request, e.g. `payments` puts it in intent/prod/payments/.
+      placeholder: payments
+    validations:
+      required: true
+
+  - type: textarea
+    id: source
+    attributes:
+      label: Source
+      description: >-
+        Where the traffic comes FROM. One per line. Use a CIDR
+        (`10.20.1.0/24`), a hostname (`fqdn: payments.internal`), or an app
+        name from the catalog (`app: payments-api`).
+      placeholder: |
+        10.20.1.0/24
+    validations:
+      required: true
+
+  - type: textarea
+    id: destination
+    attributes:
+      label: Destination
+      description: Where it goes TO. Same forms as Source, one per line.
+      placeholder: |
+        10.20.9.10/32
+    validations:
+      required: true
+
+  - type: textarea
+    id: service
+    attributes:
+      label: Service
+      description: >-
+        One per line. `tcp/443`, `udp/53`, a port range `tcp/8000-8100`, a
+        catalog name like `https`, or `icmp` for ping (ICMP has no ports).
+      placeholder: |
+        tcp/443
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before you submit
+      options:
+        - label: The ticket above is real and covers this change
+          required: true
+        - label: I have used the narrowest source and destination that work
+          required: true

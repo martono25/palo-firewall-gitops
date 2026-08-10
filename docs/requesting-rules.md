@@ -62,6 +62,28 @@ intent/<env>/<app>/REQ-....yaml`.
 
 ---
 
+## The quickest way: open an issue
+
+**[New issue → Firewall rule request](../../issues/new?template=rule-request.yml)**
+
+Fill in the form — ticket, why, source, destination, service — and submit. The
+platform generates the intent YAML and opens a pull request with it, then
+comments on your issue with the link.
+
+You never write YAML, and you never need to know what a zone or a folder is.
+
+If something in the form cannot be read, **the issue gets a comment naming the
+field and what to write instead** — edit the issue and it tries again. No need to
+open a new one.
+
+The generated PR is a normal request from there on: same validation, same risk
+tiering, same approval. The form is a way to *write* a request, not a way to skip
+reviewing one.
+
+> Everything below is the manual route — write the file yourself and open the PR.
+> Both land in the same place. Read on if you want to understand the file the
+> form produces, or if you are editing an existing rule.
+
 ## Part 1 — the website walkthrough
 
 ### Step 1. Open the repository
