@@ -1,0 +1,143 @@
+# ─────────────────────────────────────────────────────────────────────────
+# BROAD-REQUESTER INTAKE. A filled Issue Form becomes an intent PR.
+#
+# This is the piece README and DESIGN.md claimed existed from 2026-07-19 until
+# v2.0.1, while `.github/ISSUE_TEMPLATE/` was empty. It is the difference between
+# a platform-team tool and something an app team can use: without it, a requester
+# has to hand-write YAML with a valid `metadata.ticket`, a resolvable
+# `environment` and catalog-correct app names, which is exactly the PAN-OS
+# knowledge the intent abstraction exists to remove.
+#
+# IT OPENS A PR. IT DOES NOT APPLY ANYTHING. The PR then goes through the same
+# gates as any other change: fail-closed validation, risk tiering, and the
+# tier-routed approval. An Issue Form is a way to WRITE a request, not a way to
+# skip reviewing one.
+#
+# THE PARSING IS IN PYTHON (`fwgitops from-issue`), not in this file. An Issue
+# Form arrives as rendered markdown, and doing that here would make it
+# untestable and unrunnable locally — which is how the empty directory went
+# unnoticed for three weeks.
+# ─────────────────────────────────────────────────────────────────────────
+name: intake
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+
+permissions:
+  contents: write        # create the branch holding the generated intent
+  pull-requests: write   # open the PR
+  issues: write          # tell the requester what happened
+
+concurrency:
+  # One run per issue. An edit while a run is in flight should replace it, not
+  # race it into two PRs for the same request.
+  group: intake-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  intake:
+    # Only forms, and only ones nobody has converted yet. `firewall-rule` is set
+    # by the Issue Form template itself.
+    if: contains(github.event.issue.labels.*.name, 'firewall-rule')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+
+      - name: Generate the intent file
+        id: gen
+        env:
+          # VIA env, never spliced into the script. An issue body is
+          # attacker-controlled text from anyone who can open an issue, and
+          # `${{ }}` substitutes before bash parses the line.
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$ISSUE_BODY" > /tmp/issue-body.md
+          set +e
+          path=$(fwgitops from-issue --body-file /tmp/issue-body.md \
+                   --issue-number "$ISSUE_NUMBER" --author "$ISSUE_AUTHOR" 2>/tmp/intake-err.txt)
+          rc=$?
+          set -e
+          {
+            echo "rc=$rc"
+            echo "path=$path"
+          } >> "$GITHUB_OUTPUT"
+          cat /tmp/intake-err.txt || true
+
+      # REJECTIONS GO BACK TO THE REQUESTER, naming the form field they filled
+      # in. A failed run they never see is a request that silently goes nowhere.
+      - name: Tell the requester what to fix
+        if: steps.gen.outputs.rc != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          {
+            echo "I could not turn this into a firewall request yet:"
+            echo
+            sed 's/^/> /' /tmp/intake-err.txt
+            echo
+            echo "Edit the issue and I will try again — no need to open a new one."
+          } > /tmp/comment.md
+          gh issue comment "$NUMBER" --body-file /tmp/comment.md
+          exit 1
+
+      # VALIDATE BEFORE OPENING A PR. A generated file that fails `compile` would
+      # put the platform's own bug in front of the requester as their mistake.
+      - name: Validate the generated intent
+        if: steps.gen.outputs.rc == '0'
+        run: fwgitops compile intent --check
+
+      - name: Open the pull request
+        if: steps.gen.outputs.rc == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          TITLE: ${{ github.event.issue.title }}
+          FILE: ${{ steps.gen.outputs.path }}
+        run: |
+          set -euo pipefail
+          branch="intake/issue-${NUMBER}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch" 2>/dev/null || git checkout "$branch"
+          git add "$FILE"
+          if git diff --cached --quiet; then
+            echo "no change — the issue produced the same file that is already there"
+            exit 0
+          fi
+          git commit -m "intake: firewall request from issue #${NUMBER}" \
+                     -m "Requested by @${AUTHOR}. Generated by \`fwgitops from-issue\`."
+          git push -f origin "$branch"
+
+          # `--fill`-free: the body is written here so the requester can see how
+          # their form became a rule, and so the issue closes on merge.
+          {
+            echo "Generated from #${NUMBER} — **${TITLE}**"
+            echo
+            echo "Requested by @${AUTHOR}."
+            echo
+            echo '```yaml'
+            cat "$FILE"
+            echo '```'
+            echo
+            echo "This is a normal intent file from here on: it goes through the same"
+            echo "validation, risk tiering and tier-routed approval as any other change."
+            echo
+            echo "Closes #${NUMBER}"
+          } > /tmp/pr-body.md
+
+          gh pr create --base main --head "$branch" \
+            --title "intake: ${TITLE}" --body-file /tmp/pr-body.md 2>/dev/null \
+            || gh pr edit "$branch" --body-file /tmp/pr-body.md
+          url=$(gh pr view "$branch" --json url -q .url)
+          gh issue comment "$NUMBER" --body "Opened ${url} with your request. It will be reviewed there."

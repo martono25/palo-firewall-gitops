@@ -623,6 +623,54 @@ def run_where(
     return 0 if records else 4
 
 
+def run_from_issue(
+    body_path: Path,
+    issue_number: int,
+    author: str,
+    *,
+    out_root: Path = Path("."),
+    write: bool = True,
+    out=None,
+    err=None,
+) -> int:
+    """Turn a filled Issue Form into an intent file (broad-requester intake).
+
+    Rejections are written for a REQUESTER, naming the form field they filled in
+    — they cannot act on `spec.service[0].protocol`, and a broken PR they cannot
+    fix is worse than no intake at all.
+
+    Prints the path it wrote (or would write) on stdout so CI can branch on it.
+    Exit codes:  0 ok · 1 IO · 2 the form cannot be turned into a request.
+    """
+    import os
+
+    from fwgitops.intake import IntakeError, build_intent, to_yaml
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    try:
+        body = body_path.read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"error: could not read {body_path}: {e}", file=err)
+        return 1
+    try:
+        intake = build_intent(body, issue_number=issue_number, author=author)
+    except IntakeError as e:
+        print(f"REJECTED — {len(e.problems)} problem(s) with the request form:", file=err)
+        for p in e.problems:
+            print(f"  - {p}", file=err)
+        return 2
+
+    target = out_root / intake.path
+    if write:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            to_yaml(intake, issue_number=issue_number, repo=os.environ.get("GITHUB_REPOSITORY")),
+            encoding="utf-8")
+    print(intake.path, file=out)
+    return 0
+
+
 def run_classify(
     intent_root: Path,
     env_map_path: Path,
@@ -2289,6 +2337,20 @@ def build_parser() -> argparse.ArgumentParser:
     wh.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     wh.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
 
+    fi = sub.add_parser("from-issue",
+                        help="turn a filled Issue Form into an intent file (intake)")
+    fi.add_argument("--body-file", required=True, type=Path,
+                    help="file holding the issue body as GitHub rendered it")
+    fi.add_argument("--issue-number", required=True, type=int,
+                    help="becomes the request id: REQ-<year>-<number>. Unique by "
+                         "construction, and traces the rule back to the conversation.")
+    fi.add_argument("--author", required=True,
+                    help="the issue author — becomes metadata.requester. NOT a form "
+                         "field: one someone types is one they can type wrongly.")
+    fi.add_argument("--out", dest="out_root", default=Path("."), type=Path)
+    fi.add_argument("--check", action="store_true",
+                    help="validate and print the path; write nothing")
+
     cl = sub.add_parser("classify", help="risk-classify intents (Phase 2, policy-as-code)")
     cl.add_argument("intent_root", nargs="?", default="intent", type=Path,
                     help="directory of intent YAML (default: intent)")
@@ -2513,6 +2575,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             evidence_root=args.evidence_root, as_json=args.as_json,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
+    if args.command == "from-issue":
+        return run_from_issue(args.body_file, args.issue_number, args.author,
+                              out_root=args.out_root, write=not args.check)
     if args.command == "classify":
         return run_classify(
             args.intent_root, args.env_map, gate=args.gate,

@@ -45,13 +45,14 @@ catalog does not yet describe what you need. They are supported, not discouraged
 
 ## Intake
 
-**Open a PR against this directory.** `docs/requesting-rules.md` walks through it
-entirely in the GitHub web UI; no local tooling is needed.
+**Open a firewall-rule issue** and the platform generates the YAML and opens the
+PR for you — no local tooling, no YAML by hand. Or write the file yourself and
+open a PR; both land in the same place and go through the same gates.
 
-> An Issue-Forms intake (`.github/ISSUE_TEMPLATE/` → an Action that generates the
-> YAML and opens the PR) is designed but **not built**. This README claimed it
-> existed from 2026-07-19 until v2.0.0, which is the kind of false claim this
-> project exists to remove. Tracked in [`TODOS.md`](../TODOS.md).
+`docs/requesting-rules.md` covers both.
+
+> The Issue-Forms intake was claimed by this README from 2026-07-19 to v2.0.1
+> while `.github/ISSUE_TEMPLATE/` was empty. It is real as of v2.1.0.
 
 Git commit author is the requester identity; `metadata.requester` must match the
 person asking.
