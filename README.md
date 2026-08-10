@@ -20,6 +20,9 @@ as is safe.
 | **Request a firewall rule** (write intent → PR) | [`docs/requesting-rules.md`](docs/requesting-rules.md) | any engineer |
 | **Provision a firewall** (stand up a VM-Series) | [`docs/provisioning.md`](docs/provisioning.md) | platform operator |
 | **Stand up a folder** (the Day-1 chain, end to end) | [`docs/building-a-folder.md`](docs/building-a-folder.md) | platform operator |
+| **Operate it day to day** (a run is held, drift fired, break-glass) | [`docs/operator-runbook.md`](docs/operator-runbook.md) | platform operator |
+| **Look up a command** (all 20, with exit codes) | [`docs/cli-reference.md`](docs/cli-reference.md) | platform operator |
+| **Audit it** (what the evidence proves, and what it does not) | [`docs/assessor-guide.md`](docs/assessor-guide.md) | assessor / incident responder |
 | Wire up CI (OIDC, secrets, environments) | [`docs/GITHUB-SETUP.md`](docs/GITHUB-SETUP.md) | platform operator |
 | What each rule field maps to on the firewall | [`docs/adr/0003-security-rule-component-model.md`](docs/adr/0003-security-rule-component-model.md) | — |
 | Release notes | [`CHANGELOG.md`](CHANGELOG.md) | — |
