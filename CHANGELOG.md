@@ -5,6 +5,37 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — a bot-opened pull request could never merge
+
+`apply.yml` and `intake.yml` both open pull requests, and both used the default
+`GITHUB_TOKEN`. GitHub documents the consequence: a `pull_request` opened by a
+workflow using that token "creates runs in an **approval-required** state". With
+`pytest` and `compile-and-plan` required on `main`, those checks never start and
+the PR can never merge.
+
+Hit four times on 2026-08-10 (#123, #134, #137, #140), each needing a human to
+approve the checks first. For evidence that is an audit record waiting on a
+click — the artifact-with-a-TTL problem in another form. For intake it is a
+requester's change sitting there looking unvalidated.
+
+**No repository setting lifts it.** It is deliberate recursion protection, not a
+policy knob: loosening `fork-pr-contributor-approval` did nothing, and the bot
+never ages out — three of its PRs had merged when the fourth was still held.
+
+Both workflows now use `AUTOMATION_PR_TOKEN` (a fine-grained PAT, contents +
+pull-requests write, this repo only) for the branch push and `gh pr create`, so
+the PR is authored by a user account and its checks run. It bypasses nothing:
+the ruleset still applies, and the `firewall-apply` reviewer is untouched.
+
+**The fallback to `github.token` announces itself.** Without the secret the
+pipeline still works and just needs the click again — which is precisely how
+this defect would return unnoticed when the token expires. A secret that expires
+is a certainty rather than a risk, so the degradation warns in the run that
+suffers it, and a test asserts the warning cannot be tidied away.
+
+Setup and rotation: `docs/automation-token.md`.
+
+
 ### Security — the push record must not carry `SCM_CLIENT_ID`
 
 Caught on the first live run of the change above, before it reached `main`.

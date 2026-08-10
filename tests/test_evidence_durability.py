@@ -604,3 +604,52 @@ def test_a_scope_that_was_not_pushed_writes_no_record():
     skip = step.split("else", 1)[1] if "else" in step else ""
     assert "--record" not in skip, (
         "the nothing-staged branch must not write a push record")
+
+
+AUTOMATION_TOKEN = "secrets.AUTOMATION_PR_TOKEN"
+
+
+def test_workflows_that_open_prs_do_not_author_them_as_the_bot():
+    """GitHub documents that a `pull_request` opened by a workflow using
+    GITHUB_TOKEN "creates runs in an approval-required state". The required
+    checks on `main` therefore never start, and the PR can never merge — no
+    repository setting lifts it, because it is deliberate recursion protection.
+
+    Observed four times on 2026-08-10 (#123, #134, #137, #140), each needing a
+    human to approve the checks first. For evidence that is the
+    artifact-with-a-TTL problem in another form: an audit record waiting on a
+    click. For an intake PR it is a requester's change looking unvalidated.
+
+    Both the CHECKOUT and the `gh pr create` need the token — the first pushes
+    the branch, the second opens the PR, and authorship follows the second while
+    the branch has to exist for it."""
+    for name in ("apply.yml", "intake.yml"):
+        wf = _all_workflows()[name]
+        checkouts = [s for job in wf["jobs"].values() for s in job.get("steps", [])
+                     if str(s.get("uses", "")).startswith("actions/checkout")
+                     and "token" in (s.get("with") or {})]
+        assert checkouts, f"{name}: the checkout that pushes must use the PAT"
+        assert AUTOMATION_TOKEN in str(checkouts[0]["with"]["token"]), name
+
+        pr_steps = [s for job in wf["jobs"].values() for s in job.get("steps", [])
+                    if "gh pr create" in str(s.get("run", ""))]
+        assert pr_steps, f"{name}: expected a step that opens a PR"
+        assert AUTOMATION_TOKEN in str(pr_steps[0].get("env", {}).get("GH_TOKEN", "")), (
+            f"{name}: the PR must not be authored by the bot")
+
+
+def test_a_missing_token_is_announced_not_silently_tolerated():
+    """The fallback to `github.token` is deliberate — without the secret the
+    pipeline still WORKS, it just needs the click again. That is also exactly
+    how this defect would come back unnoticed: an expired PAT degrades to the
+    old broken behaviour and nothing says so.
+
+    A secret that expires is a certainty, not a risk, so the degradation has to
+    announce itself in the run that suffers it."""
+    for name in ("apply.yml", "intake.yml"):
+        wf = _all_workflows()[name]
+        step = [s for job in wf["jobs"].values() for s in job.get("steps", [])
+                if "gh pr create" in str(s.get("run", ""))][0]
+        assert "HAS_PAT" in (step.get("env") or {}), name
+        assert "::warning::" in step["run"] and "AUTOMATION_PR_TOKEN" in step["run"], (
+            f"{name}: an absent or expired token must be visible in the run")

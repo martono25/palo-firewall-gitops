@@ -196,6 +196,21 @@ jobs:
           # removals since v1.30.0 — assessed but unrecorded was a strange place
           # to stop.
           fetch-depth: 0
+          # THE EVIDENCE PR MUST NOT BE AUTHORED BY THE BOT. GitHub documents
+          # that a `pull_request` opened by a workflow using GITHUB_TOKEN
+          # "creates runs in an approval-required state" — so the required
+          # checks on `main` never start, and the PR can never merge. No
+          # repository setting lifts it; it is deliberate recursion protection.
+          #
+          # Observed twice on 2026-08-10 (#134, #140), each needing a human to
+          # approve the checks before the audit record could land. An evidence
+          # bundle that waits on a click is the artifact-with-a-TTL problem in
+          # another form.
+          #
+          # Falls back to the default token so the pipeline still WORKS without
+          # the secret — it just goes back to needing that click, and the step
+          # below says so rather than leaving it to be rediscovered.
+          token: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
 
       - uses: actions/setup-python@v7
         with:
@@ -629,9 +644,13 @@ jobs:
       # recorded here so nobody "fixes" it back into a direct push.
       - name: Open a pull request with the evidence bundles
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
+          HAS_PAT: ${{ secrets.AUTOMATION_PR_TOKEN != '' }}
         run: |
           set -euo pipefail
+          if [ "$HAS_PAT" != "true" ]; then
+            echo "::warning::AUTOMATION_PR_TOKEN is not set — github-actions[bot] opens this PR, GitHub holds its required checks in an approval-required state, and the evidence cannot merge until someone approves them by hand."
+          fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="evidence/run-${GITHUB_RUN_ID}"
