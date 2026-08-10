@@ -880,7 +880,15 @@ def run_classify(
             graded.append((r.req_id, v.tier))
             checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
             label = f"REMOVED {r.req_id}"
-            print(f"  {label:22} {v.tier:9} {checks}", file=out)
+            # `report`, NOT `out` — the same stream the added/modified listing
+            # above uses. Under `--max-tier` that is a buffer nobody reads, so
+            # stdout carries the tier and nothing else. This line said `out`,
+            # and the only changeset that reveals it is one containing a
+            # REMOVAL: the workflow's `tier=$(fwgitops classify ...)` captured
+            # two lines, and `echo "tier=$tier" >> $GITHUB_OUTPUT` died on
+            # `Invalid format 'HIGH'`. Four lines below, the comment already
+            # promised "nothing else on stdout".
+            print(f"  {label:22} {v.tier:9} {checks}", file=report)
             if gate_rank is not None and TIERS.index(v.tier) > gate_rank:
                 exceeded.append(f"{label}={v.tier}")
 
