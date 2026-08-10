@@ -394,3 +394,20 @@ def test_the_PR_still_previews_the_tier():
         (REPO_ROOT / ".github" / "workflows" / "pr-validate.yml").read_text())
     body = " ".join(str(s.get("run", "")) for j in pr["jobs"].values() for s in j["steps"])
     assert "fwgitops classify" in body
+
+
+def test_the_tier_is_computed_from_the_CHANGESET_not_the_whole_tree():
+    """MEASURED 2026-08-10, and it made the routing inert. `--max-tier` without a
+    baseline maximises over every intent that EXISTS, so `REQ-2026-0803` — a
+    default route, permanently HIGH — meant every apply routed to the reviewed
+    environment, including a changeset that was entirely LOW. LOW auto-apply was
+    unreachable on any repo that had ever declared a default route.
+
+    "How risky is this change?" is the question the approver is being asked."""
+    job = _workflow()["jobs"]["classify"]
+    assert job["steps"][0]["with"]["fetch-depth"] == 0, "a baseline needs full history"
+    run = [s["run"] for s in job["steps"] if s.get("id") == "tier"][0]
+    assert "--baseline" in run, "the tier must be computed against a baseline tree"
+    assert "HEAD^" in run, "a dispatch has no github.event.before"
+    assert "over-reports" in run, (
+        "with no baseline it must fail toward review, and say so")

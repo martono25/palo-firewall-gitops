@@ -43,9 +43,22 @@ the same reviewer as HIGH. GitHub environment reviewers are "any one of these
 people approves", so a separate environment would give a different approver LIST,
 not two approvers. Recorded rather than claimed.
 
-Fail-safe direction: anything that is not exactly `LOW` routes to the reviewed
-environment, so a failed classify, an empty output or an unknown tier all land on
-"a human looks at it". Mutation-tested.
+**The tier is computed from the CHANGESET, not the tree** — added, modified and
+removed intents only. The first version maximised over every intent that exists,
+which made the whole feature inert: `REQ-2026-0803` is a default route and
+permanently HIGH, so every apply routed to the reviewed environment including a
+changeset that was entirely LOW. LOW auto-apply was unreachable on any repo that
+had ever declared a default route. Found by running the demonstration, not by
+reading the diff.
+
+"How risky is this change?" is the question the approver is being asked. "Does
+anything risky exist anywhere?" is a different one, and the answer is
+permanently yes.
+
+Fail-safe direction throughout: anything that is not exactly `LOW` routes to the
+reviewed environment, and a run with no resolvable baseline tiers the whole tree
+— which over-reports, and says so. A failed classify, an empty output or an
+unknown tier all land on "a human looks at it". Mutation-tested.
 
 
 ### Added — `docs/building-a-folder.md`, the Day-1 walkthrough

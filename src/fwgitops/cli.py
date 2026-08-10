@@ -24,7 +24,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fwgitops.compiler import (
     CompileError,
@@ -710,6 +710,11 @@ def run_classify(
         return 0
 
     compiled: List[Any] = []
+    #: id(compiled object) -> request id. Needed because ROUTING tiers the
+    #: CHANGE, not the tree, and a compiled object does not always carry its
+    #: request id (a zone is named `dmz`).
+    req_id_of: Dict[int, str] = {}
+    current_ids: Set[str] = set()
     problems: List[str] = []
     for path in intents:
         rel = _display_path(path)
@@ -719,7 +724,10 @@ def run_classify(
             problems.append(f"{rel}: could not parse YAML: {e}")
             continue
         try:
-            c = compile_any(load_intent(doc, env_map=env_map, **cats), env_map)
+            _ar = load_intent(doc, env_map=env_map, **cats)
+            c = compile_any(_ar, env_map)
+            req_id_of[id(c)] = _ar.metadata.id
+            current_ids.add(_ar.metadata.id)
             compiled.append(c)
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -744,6 +752,8 @@ def run_classify(
     zones = of_kind(compiled, "ZoneRequest")
     policy = PolicyContext.from_changes(changes)
     tiers = {"LOW": 0, "HIGH": 0, "CRITICAL": 0}
+    graded: List[Tuple[str, str]] = []      # (req_id, tier), for changeset routing
+    changed_ids: Optional[Set[str]] = None  # None = no baseline, tier the whole tree
     exceeded: List[str] = []
     gate_rank = TIERS.index(gate) if gate else None
 
@@ -758,6 +768,7 @@ def run_classify(
                           key=lambda o, h=handler: (h.scope_of(o).key, h.name_of(o))):
             v = handler.classify(obj, policy=policy, hierarchy=hierarchy, current=current)
             tiers[v.tier] = tiers.get(v.tier, 0) + 1
+            graded.append((req_id_of.get(id(obj), ""), v.tier))
             checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
             label = f"{handler.report_prefix}{handler.name_of(obj)}"
             print(f"  {label:22} {v.tier:9} {checks}", file=report)
@@ -804,9 +815,21 @@ def run_classify(
             return 2
 
         removed_count = len(removals)
+        # THE CHANGESET: what this PR added, modified or removed. Routing tiers
+        # THIS, not the tree — "how risky is this change?" is the question the
+        # approver is being asked. Tiering the tree answers a different one, and
+        # once a firewall has a default route the answer is permanently HIGH, so
+        # nothing would ever auto-apply again.
+        baseline_ids = {str(d.get("metadata", {}).get("id"))
+                        for d in (read_yaml(p) for p in discover_intents(baseline_root))
+                        if isinstance(d, dict)}
+        changed_ids = ((current_ids - baseline_ids)          # added
+                       | {m.req_id for m in mods}            # modified
+                       | {r.req_id for r in removals})       # removed
         for r in removals:
             v = classify_removal(r)
             tiers[v.tier] = tiers.get(v.tier, 0) + 1
+            graded.append((r.req_id, v.tier))
             checks = ", ".join(f["check"] for f in v.checks_fired) or "-"
             label = f"REMOVED {r.req_id}"
             print(f"  {label:22} {v.tier:9} {checks}", file=out)
@@ -820,7 +843,11 @@ def run_classify(
     # a README. Empty changeset -> LOW: nothing to apply cannot need an
     # approver, and the alternative (defaulting high) would gate every no-op.
     if max_tier:
-        highest = next((t for t in reversed(TIERS) if tiers.get(t)), "LOW")
+        pool = [t for rid, t in graded
+                if changed_ids is None or rid in changed_ids]
+        # Empty changeset -> LOW. A no-op needs no approver, and defaulting high
+        # would gate every run that changed nothing.
+        highest = next((t for t in reversed(TIERS) if t in pool), "LOW")
         print(highest, file=out)
         return 0
 

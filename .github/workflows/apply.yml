@@ -97,6 +97,12 @@ jobs:
       tier: ${{ steps.tier.outputs.tier }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The BASELINE tree is what makes this tier the CHANGE rather than the
+          # tree. Without it the answer is the maximum over every intent that
+          # exists, which is permanently HIGH once a firewall has a default
+          # route — so nothing would ever auto-apply. Measured 2026-08-10.
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
@@ -105,7 +111,23 @@ jobs:
       # cannot be classified. Same ordering reason as the apply job.
       - run: fwgitops folder-interfaces
       - id: tier
-        run: echo "tier=$(fwgitops classify intent --max-tier)" >> "$GITHUB_OUTPUT"
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$BEFORE"
+          [ -z "$base" ] && base=$(git rev-parse --verify --quiet HEAD^ || true)
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            mkdir -p /tmp/base-intent
+            git archive "$base" intent | tar -x -C /tmp/base-intent
+            tier=$(fwgitops classify intent --max-tier --baseline /tmp/base-intent/intent)
+          else
+            # No baseline resolvable (a root commit). Tier the whole tree: it
+            # over-reports, which routes to a human. Fail toward review.
+            echo "::warning::no base commit — tiering the whole tree, which over-reports"
+            tier=$(fwgitops classify intent --max-tier)
+          fi
+          echo "tier=$tier" >> "$GITHUB_OUTPUT"
       - run: |
           echo "Highest tier in this changeset is ${{ steps.tier.outputs.tier }}"
           echo "Routing to $([ '${{ steps.tier.outputs.tier }}' = 'LOW' ] \
