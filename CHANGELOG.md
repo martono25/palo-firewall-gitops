@@ -32,6 +32,29 @@ not own them, and `catalog/interfaces.yaml` only mirrors them. Building this
 layout against the old defaults gives you zones bound to ports with no ENI
 behind them.
 
+### Fixed — the guides now form a path a new operator can walk
+
+Four guides existed and none of them handed off. Someone starting from nothing
+had to already know that `provisioning.md` stands a firewall up and configures
+*nothing*, and that `building-a-folder.md` is where the interfaces, zones and
+routes come from. That is knowledge you only have if you already did it.
+
+`provisioning.md` also opened by describing Day-1 GitOps as a **v2.0 target**.
+It has been built and proven on hardware since v2.0.0 — the banner told a new
+reader the opposite of the truth, which is the failure mode this project keeps
+removing from its own code.
+
+Now: README shows the chain, each guide names the next, and a rebuild is diverted
+up front to the procedure that sequences it rather than starting at step 1 and
+discovering the ordering the hard way.
+
+**Sizing moved into the prerequisites, where it can still be acted on.** The
+licence tier follows the INSTANCE and is fixed at first registration, so a
+deployment profile sized for 4 vCPU still licenses at `VM-SERIES-16` against a
+16-vCPU instance — silently, and billing that way from boot. The guide now states
+it before `terraform apply` and reads the tier back in the verification step,
+which is the last moment it is cheap to catch.
+
 ### Added — how to replace a firewall
 
 A new serial is threaded through the catalog, the Day-1 intents, a Terraform

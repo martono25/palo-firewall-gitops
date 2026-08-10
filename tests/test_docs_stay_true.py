@@ -199,3 +199,40 @@ def test_the_sizing_rationale_survives_the_downsize():
     assert "VM-SERIES-16" in var and "UNVERIFIED" in var, (
         "the licence-tier behaviour, and the half of it that was never observed, "
         "must stay recorded next to the size that causes it")
+
+
+def test_the_guides_form_a_path_a_new_operator_can_walk():
+    """FOUR GUIDES, ONE ORDER. Each was written for its own reader and they were
+    never chained, so someone starting from nothing had to already know that
+    provisioning does not configure anything and that `building-a-folder.md`
+    exists.
+
+    Asserted as a chain rather than as four files: the failure mode is a guide
+    that stops without saying where you go next, which reads as "you are done"
+    when you are not."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "building-a-folder.md" in prov, (
+        "provisioning must hand off — it stands a firewall up and configures "
+        "nothing")
+    assert "Replacing a firewall" in prov, (
+        "and must divert a rebuild to the procedure that sequences it")
+
+    readme = _flat(REPO_ROOT / "README.md")
+    for nxt in ("provisioning.md", "building-a-folder.md", "requesting-rules.md",
+                "operator-runbook.md"):
+        assert nxt in readme, f"the entry point must name {nxt}"
+
+
+def test_provisioning_states_the_sizing_decision_before_it_is_irreversible():
+    """The licence tier follows the INSTANCE and is set at first registration.
+    A profile sized for 4 vCPU still licenses at VM-SERIES-16 against a 16-vCPU
+    instance, silently, and bills that way from boot.
+
+    So the guide has to say it in the PREREQUISITES, where it can still be acted
+    on, and check it in the verification, where it can still be caught."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "deployment profile" in prov.lower(), "the CSP side must be named"
+    assert "BEFORE the firewall registers" in prov, (
+        "sizing after registration is too late to be free")
+    assert "vm-license" in prov, (
+        "and the verification step must actually read the tier back")

@@ -5,11 +5,28 @@
 and needs no cloud/licensing access). Provisioning stands up the VM-Series itself
 so that rule requests have somewhere to land.
 
-> **Status: manual pilot flow (Day-1 is v2.0).** Today provisioning is a single
-> `terraform apply` you run with the right inputs. Making it fully GitOps-driven —
-> interfaces, IP, zones, virtual router, all from Git — is the v2.0 target
-> ([`docs/adr/0002-day1-provisioning-thin-bootstrap.md`](adr/0002-day1-provisioning-thin-bootstrap.md)).
-> The steps below are what actually works now.
+> **This page gets a firewall to exist and reach SCM. It does not configure it.**
+> Interfaces, zones and routes come from Git afterwards — that chain is built and
+> proven on hardware, and it is
+> [`building-a-folder.md`](building-a-folder.md)
+> ([ADR-0002](adr/0002-day1-provisioning-thin-bootstrap.md)). The split is
+> deliberate: bootstrap is a `terraform apply` with licensing secrets, everything
+> after it is a reviewed pull request.
+
+**Read these in order.** Each hands off to the next, and a new operator should not
+need anything outside them:
+
+| Step | Guide |
+|---|---|
+| 1. Stand up the firewall | this page |
+| 2. Configure it — interfaces, zones, routes | [`building-a-folder.md`](building-a-folder.md) |
+| 3. Add a rule | [`requesting-rules.md`](requesting-rules.md) |
+| 4. Run it day to day | [`operator-runbook.md`](operator-runbook.md) |
+
+**Replacing a firewall that already exists?** Do not start here. The serial is
+threaded through the catalog, the intents and a Terraform root, and the ordering
+matters — [`operator-runbook.md` § Replacing a firewall](operator-runbook.md#replacing-a-firewall-new-serial)
+sequences it and sends you back here at the right moment.
 
 ---
 
@@ -81,6 +98,28 @@ error.
 | **Registration PIN** (id + value) | CSP → Products → Device Certificates → Generate Registration PIN (time-limited) |
 | An existing **EC2 SSH key pair** in the region | your AWS |
 | A **serial-number onboarding rule** in SCM | SCM UI, once — matches the device serial prefix → target folder |
+| A **deployment profile sized to the vCPU count you intend** | Palo Alto CSP → flexible VM-Series licensing |
+
+**Size the deployment profile BEFORE the firewall registers.** Under flexible
+licensing the profile sets the vCPU allocation, and PAN-OS licenses itself to
+match the instance on first boot — it does not stay capped at a smaller tier.
+Registering a 16-vCPU instance against a profile you meant to be 4 vCPU consumes
+roughly 4x the credits from that moment, and the credits cost more than the EC2
+hours.
+
+`instance_type` is the other half of the same decision and it has a hard floor:
+
+| | |
+|---|---|
+| `m5.xlarge` | 4 vCPU, **4 ENIs** → mgmt + `ethernet1/1..1/3` |
+| `m5.4xlarge` | 16 vCPU, 8 ENIs → `ethernet1/4` reachable |
+
+A VM-Series interface exists only when an ENI sits at the matching device index,
+and **every** 4-vCPU instance type in `ap-southeast-1` caps at 4 ENIs. So three
+dataplane interfaces is the ceiling at 4 vCPU — which is what this deployment
+uses. Needing a fourth means 16 vCPU and roughly 4x the licence credits, so it is
+a decision to make deliberately rather than discover. See the note on
+`instance_type` in `provisioning/aws-vmseries-pilot/variables.tf`.
 
 All secret inputs go in `terraform.tfvars` (**gitignored — never committed**).
 
@@ -143,6 +182,13 @@ printf 'set cli pager off\nshow system info\nshow cloud-management-status\n' \
 #   device-certificate-status: Valid
 #   Cloud Management: Connected: yes
 
+# CHECK THE LICENCE TIER, not just that it licensed. It follows the INSTANCE,
+# so a profile you meant to be 4 vCPU still licenses at VM-SERIES-16 if the
+# instance is 16 vCPU — silently, and it bills that way from first boot.
+printf 'set cli pager off\nshow system info\n' \
+  | ssh -T -i <ec2-key>.pem admin@<mgmt_public_ip> | grep -E 'vm-license|vm-cap-tier'
+#   vm-license: VM-SERIES-4    <- matches the deployment profile you sized
+
 # In SCM (via the API), the device appears as {name:<serial>, parent:<folder>}:
 fwgitops onboard <serial> --folder <scm_folder> --name fw-<folder>-<suffix>
 #   verifies placement + sets a friendly display name
@@ -169,6 +215,23 @@ Two **manual CSP follow-ups** (there is no API for these):
    delete the device in CSP. If you cycle VMs often and skip this, new VMs
    eventually fail to license (`serial: unknown`, *"device not found"*). Clean up
    stale CSP devices to reclaim seats.
+
+### If you are rebuilding rather than retiring
+
+Two more CSP steps, both **before** the new firewall boots:
+
+3. **Resize the deployment profile** if the vCPU count is changing. Doing it
+   after the firewall registers means it has already licensed at the old tier and
+   started consuming at that rate.
+4. **Generate a fresh registration PIN.** They are time-limited, so generate it
+   immediately before `terraform apply`, not at the start of teardown. An expired
+   PIN fails at device-certificate fetch, and the symptom is a firewall that
+   boots, licenses, and never appears in SCM.
+
+Then come back to [Steps (per firewall)](#steps-per-firewall) — and afterwards go
+to [`operator-runbook.md` § Replacing a firewall](operator-runbook.md#replacing-a-firewall-new-serial)
+for the repo side, because the new serial has to reach the catalog, the intents
+and a Terraform root before anything will compile against it.
 
 ---
 
