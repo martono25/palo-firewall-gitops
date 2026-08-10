@@ -411,3 +411,24 @@ def test_the_tier_is_computed_from_the_CHANGESET_not_the_whole_tree():
     assert "HEAD^" in run, "a dispatch has no github.event.before"
     assert "over-reports" in run, (
         "with no baseline it must fail toward review, and say so")
+
+
+def test_prose_alone_cannot_trigger_an_apply():
+    """OBSERVED 2026-08-10, in production. A one-paragraph edit to
+    `intent/README.md` matched `intent/**` and ran a full apply against the live
+    tenant. The apply itself was harmless — `0 added, 0 changed, 0 destroyed`,
+    push correctly skipped — but it held the S3 state lock for 80 seconds and
+    failed the `terraform plan` of an unrelated PR running at the time.
+
+    A markdown file cannot change compiled Terraform; nothing in the compiler
+    reads one. So every run a `.md` starts is either a no-op or a collision, and
+    the collision is the one that costs: it makes a green PR go red for a reason
+    that has nothing to do with the PR.
+
+    ORDER MATTERS in a `paths:` filter — a negation subtracts from the includes
+    ABOVE it, so `!**/*.md` first would exclude nothing."""
+    paths = _workflow()[True]["push"]["paths"]   # `on:` parses as the bool True
+    assert "!**/*.md" in paths, "a docs edit must not start an apply"
+    assert paths.index("!**/*.md") > max(
+        i for i, p in enumerate(paths) if not p.startswith("!")), (
+        "the negation must come after the includes it subtracts from")
