@@ -525,3 +525,42 @@ def test_the_required_checks_run_on_every_pull_request():
         assert "paths" not in pr, (
             f"{f} gates '{job}' behind a paths filter; as a REQUIRED check that "
             f"is a PR which can never merge")
+
+
+def test_the_tier_step_can_read_a_removal_s_authorising_trailer():
+    """OBSERVED 2026-08-10 on REQ-2026-121, the first removal applied since tier
+    routing landed. A removal authorises itself with a `Removes:` trailer in the
+    commit message — there is nowhere else to put it, because the change IS the
+    deletion of the file. `classify` rejects a removal it cannot see authorised,
+    and the tier step was calling it without the message.
+
+    So `classify` exited 2, the job failed, `apply` was skipped, and NO REMOVAL
+    COULD EVER BE APPLIED. The evidence step three hundred lines below had always
+    passed `--change-message`; this job simply never inherited it.
+
+    A regression a full test suite could not see, because nothing had removed a
+    rule since the routing was written. That is the shape of it: the tier step
+    and the evidence step must agree about where authorisation comes from."""
+    job = _workflow()["jobs"]["classify"]
+    step = [s for s in job["steps"] if s.get("id") == "tier"][0]
+    assert "HEAD_MESSAGE" in step.get("env", {}), (
+        "the tier step needs the commit message a removal is authorised in")
+    assert "--change-message" in step["run"], (
+        "and must pass it to classify, or every removal fails to tier")
+
+
+def test_tiering_and_evidence_read_the_message_the_same_way():
+    """Two places derive the authorising text, and they must not drift: a
+    removal that tiers under one message and is evidenced under another would
+    put a different ticket in the audit record than the one the gate saw."""
+    # The steps that WRITE the file, not the ones that merely pass it on.
+    builders = [b for job in _workflow()["jobs"].values()
+                for s in job.get("steps", [])
+                for b in [str(s.get("run", ""))]
+                if "> /tmp/change-message.txt" in b]
+    assert len(builders) == 2, (
+        f"expected the tier step and the apply job to each derive it; found "
+        f"{len(builders)}")
+    for body in builders:
+        assert "HEAD_MESSAGE" in body and 'git log -1 --format=%B' in body, (
+            "a dispatch has no head_commit; both must fall back to the tip")

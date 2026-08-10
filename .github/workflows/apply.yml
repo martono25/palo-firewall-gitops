@@ -130,14 +130,32 @@ jobs:
       - id: tier
         env:
           BEFORE: ${{ github.event.before }}
+          # A REMOVAL AUTHORISES ITSELF IN THE COMMIT MESSAGE, so tiering a
+          # changeset that contains one requires that message. Without it
+          # `classify` rejects (exit 2), this job fails, `apply` is skipped, and
+          # NO REMOVAL CAN EVER BE APPLIED — observed on REQ-2026-121, the first
+          # removal since tier routing landed.
+          #
+          # On a dispatch there is no `head_commit`, so the tip's own message is
+          # used; for a squash-merged PR that is the title and body that
+          # `pr-validate` already checked. Same construction as the evidence
+          # step below, which has always passed it — this job never inherited it.
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
+          if [ -n "$HEAD_MESSAGE" ]; then
+            printf '%s\n' "$HEAD_MESSAGE" > /tmp/change-message.txt
+          else
+            git log -1 --format=%B > /tmp/change-message.txt
+          fi
           base="$BEFORE"
           [ -z "$base" ] && base=$(git rev-parse --verify --quiet HEAD^ || true)
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
             mkdir -p /tmp/base-intent
             git archive "$base" intent | tar -x -C /tmp/base-intent
-            tier=$(fwgitops classify intent --max-tier --baseline /tmp/base-intent/intent)
+            tier=$(fwgitops classify intent --max-tier \
+                     --baseline /tmp/base-intent/intent \
+                     --change-message /tmp/change-message.txt)
           else
             # No baseline resolvable (a root commit). Tier the whole tree: it
             # over-reports, which routes to a human. Fail toward review.
