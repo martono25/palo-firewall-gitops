@@ -864,3 +864,108 @@ def test_max_tier_prints_only_the_tier_even_when_the_changeset_has_a_removal(
         f"--max-tier must emit ONE line; a workflow assigns it directly to a "
         f"GitHub output. Got:\n{stdout}")
     assert stdout.strip() in ("LOW", "HIGH", "CRITICAL")
+
+
+# ── THE BUNDLE MUST SAY WHETHER THE CHANGE REACHED SCM ────────────────────
+PUSH_RECORD = """\
+{"scope_dir": "prod-edge", "folder": "prod-edge", "status": "success",
+ "job_id": "190", "admins": ["svc-fwgitops"]}
+"""
+
+
+def _evidence_with(tmp_path, records, **kw):
+    from fwgitops.cli import run_evidence
+    intent_root, env_map, _ = _setup(tmp_path)
+    out_root = tmp_path / "evidence"
+    rc = run_evidence(intent_root, env_map, out_root,
+                      push_records=records, tfvars_root=tmp_path / "tf", **kw)
+    return rc, out_root
+
+
+def test_a_bundle_records_the_push_that_delivered_it(tmp_path):
+    """EVERY BUNDLE EVER WRITTEN SAID `"push": null`. The field, the `PushResult`
+    and its `to_evidence()` all existed; nothing ever passed one.
+
+    That made the record prove the change was applied to Terraform state and say
+    NOTHING about whether it reached SCM — the step that can silently not happen.
+    `devicesync` documents applied-but-unpushed as a real state, and on
+    2026-08-09 a run left the ICMP rule uncommitted at config version 77 while
+    its bundle read `applied`. An audit record that cannot distinguish "live on
+    the firewall" from "staged and abandoned" is not evidence of the change."""
+    rec = tmp_path / "push-prod-edge.json"
+    rec.write_text(PUSH_RECORD)
+    rc, out_root = _evidence_with(tmp_path, [rec])
+    assert rc == 0
+    bundle = json.loads((out_root / "prod-edge" / "REQ-2026-0417.json").read_text())
+    assert bundle["push"] == {
+        "folder": "prod-edge", "status": "success",
+        "job_id": "190", "admins": ["svc-fwgitops"],
+    }
+
+
+#: A DEVICE-scoped change: its Terraform root is `device-<serial>` while its SCM
+#: address is the bare serial. That divergence is the whole point of the test
+#: below, so the fixture has to be device-scoped to have any force.
+DEVICE_INTENT = """\
+apiVersion: fw-intent/v1
+kind: InterfaceRequest
+metadata:
+  id: REQ-2026-0801
+  requester: jane.doe@corp
+  ticket: JIRA-901
+  justification: "Address the internal interface"
+  requested: 2026-08-04
+spec:
+  device: "007955000894453"
+  interface: local
+  ip:
+    - 10.100.3.125/24
+"""
+
+
+def test_a_push_record_is_matched_by_SCOPE_not_by_scm_address(tmp_path):
+    """The trap this keying exists to avoid, asserted in the direction that can
+    actually fail.
+
+    `PushResult.folder` is the SCM ADDRESS — a bare serial for a device — while
+    evidence groups by Terraform root DIRECTORY (`device-<serial>`). Keying on
+    the address would attach nothing to any device-scoped change, silently, and
+    those bundles would keep reading `push: null` exactly as before.
+
+    A folder-scoped fixture cannot catch that: there, address and directory are
+    the same string, so both keyings pass. It takes a device."""
+    from fwgitops.cli import run_evidence
+    intent_root, env_map, _ = _setup(tmp_path)
+    (intent_root / "prod" / "IF.yaml").write_text(DEVICE_INTENT)
+
+    rec = tmp_path / "push-device.json"
+    rec.write_text(json.dumps({
+        "scope_dir": "device-007955000894453",   # the Terraform root
+        "folder": "007955000894453",             # the SCM address
+        "status": "success", "job_id": "191", "admins": ["svc-fwgitops"],
+    }))
+    out_root = tmp_path / "evidence"
+    assert run_evidence(intent_root, env_map, out_root, push_records=[rec],
+                        tfvars_root=tmp_path / "tf") == 0
+
+    device = json.loads(
+        (out_root / "device-007955000894453" / "REQ-2026-0801.json").read_text())
+    assert device["push"] is not None and device["push"]["job_id"] == "191", (
+        "a device-scoped bundle must receive the record for its Terraform root")
+
+    # And the record must not bleed into a scope it does not belong to.
+    folder = json.loads((out_root / "prod-edge" / "REQ-2026-0417.json").read_text())
+    assert folder["push"] is None
+
+
+def test_an_unreadable_push_record_fails_rather_than_recording_no_push(tmp_path):
+    """FAIL CLOSED. "Nothing was pushed" and "the record could not be read"
+    produce the identical `"push": null`, and that is the one distinction this
+    field exists to make. A silent fallback would let a malformed file quietly
+    restore the defect being fixed — while the run stayed green."""
+    rec = tmp_path / "push-broken.json"
+    rec.write_text("{not json")
+    rc, out_root = _evidence_with(tmp_path, [rec])
+    assert rc == 1
+    assert not (out_root / "prod-edge").exists(), (
+        "no bundle may be written from a push record that could not be read")
