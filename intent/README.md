@@ -30,7 +30,7 @@ it (ADR-0008).
 ## How a request reaches a firewall
 
 ```
-intent/*.yaml → compile → risk gate → terraform plan → apply → enrich → push → SCM → device
+intent/*.yaml → compile → classify (tier picks the approver) → plan → apply → enrich → push → SCM → device
 ```
 
 Every merged change also writes an evidence bundle to
@@ -51,7 +51,7 @@ open a PR; both land in the same place and go through the same gates.
 
 `docs/requesting-rules.md` covers both.
 
-> The Issue-Forms intake was claimed by this README from 2026-07-19 to v2.0.1
+> The Issue-Forms intake was claimed by this README from 2026-07-19 to v2.1.0
 > while `.github/ISSUE_TEMPLATE/` was empty. It is real as of v2.1.0.
 
 Git commit author is the requester identity; `metadata.requester` must match the

@@ -28,7 +28,7 @@ ticket archaeology, no SCM UI.
 | `approval` | gate, approvers (`login` + `via`), PR, merge commit |
 | `controls_not_evidenced` | controls this record deliberately does NOT claim, and why |
 | `apply` | plan sha256, CI run URL |
-| `push` | folder-scoped push result + job id |
+| `push` | the SCM commit that delivered it: folder, status, job id, and whether the push was admin-scoped or break-glass |
 | `controls` | NIST control coverage for this record |
 
 ## Properties
@@ -61,7 +61,20 @@ ticket archaeology, no SCM UI.
   `rules.auto.tfvars.json`; every route for a VRF aggregates into one router),
   so the file hash moves when a neighbour changes and says nothing about this
   request.
-- **No secrets** — asserted by test.
+- **No secrets, and no identities either** — asserted by test, in both places
+  that could leak one. A push is scoped to `SCM_CLIENT_ID`, so `push` records
+  `admin_count` and `all_admins` rather than who: the audit question is whether
+  the commit was scoped to our own staged changes or was break-glass over the
+  whole candidate, and that answer needs no name. The bundle is committed to a
+  **public** repository, so this is not hypothetical — the first live run of the
+  `push` field put the service-account identity in a bundle on a public branch.
+  Hashing the identity was considered and rejected: an account name in a known
+  format is low-entropy enough to confirm by guessing.
+- **The bundles arrive as their own pull request.** `main` accepts no direct
+  push from anyone, including the pipeline, because a push to `main` is what
+  triggers an apply. Each run opens `evidence: bundles for <sha>` from a branch
+  of its own. Merge it — the apply already happened, and the PR is what puts the
+  record in the source of truth.
 - **Paperwork and behaviour are separated** — `request` carries the change
   record; anything describing what the firewall will do lives under `compiled`,
   derived from the spec so it cannot silently disagree with it. Mixing the two

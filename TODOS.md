@@ -20,48 +20,30 @@ a cross-model challenge invalidated two of its load-bearing assumptions.
    ZoneRequest loop" without interfaces does not produce a working zone.
 
 
-## No human-approval gate exists — the tier gate is the only control
-
-**Found 2026-08-09 while preparing the first apply.** `apply.yml` claimed, in its
-header and beside `environment: firewall-apply`, that Phase 1 had *"human
-approval on EVERY change via the environment's required reviewers"*.
-
-    $ gh api repos/<repo>/environments/firewall-apply --jq .protection_rules
-    []
-
-**The control was never enabled, and could not have been.** Environment
-protection rules require Pro/Team/Enterprise on a PRIVATE repository; this repo
-is private on a personal account. So the claim was not "aspirational" — it named
-a feature the plan does not include, and nothing anywhere said so.
-
-Same shape as `expires` and as the bundle's unconditional CM-5: a control that
-reads as operating and is not. It is also the CAUSE of that CM-5 gap — evidence
-bundles record no approver because nothing requires an approval.
-
-**What is actually enforced today:** the fail-closed risk gate. It works, on any
-plan, and it has been holding since 2026-08-05 — `REQ-2026-0803` classifies HIGH
-(`default_route`), so every push-triggered apply stops there. But it BLOCKS
-rather than ROUTES: there is no way for a human to approve a HIGH change, only to
-re-dispatch at a higher tier, which is an override rather than an approval and is
-recorded as neither.
-
-**Options, none chosen:**
-
-* **Make the repo public** — environment protection is free on public repos.
-  Cheapest fix; the constraint is whether this content can be public.
-* **Upgrade the plan** — Pro enables environment protection on private repos.
-* **Move the gate to branch protection / CODEOWNERS** — approval happens on the
-  PR instead of the deployment. Works on any plan, but approves the *merge*, not
-  the *apply*, and the two are not the same act (see `Approver.via`).
-* **Accept it and stop claiming it** — done as of v1.39.0. The docs now describe
-  the tier gate as the only control, and bundles name CM-5 in
-  `controls_not_evidenced`.
-
-**Effort:** S (option 1 or 2) · **Priority:** P1 — not because the pipeline is
-unsafe, but because it was DESCRIBED as having a control it lacks, and that is
-the failure mode this project exists to remove.
-
 ## Completed
+
+### Human-approval gate — DONE v2.1.0
+
+The repo was made public (option 1), which is what made environment protection
+enforceable at all, and the blocking risk gate was replaced by **tier routing**:
+`classify --max-tier` grades the changeset and the workflow picks the
+environment from it. LOW goes to `firewall-apply-auto` and applies unattended;
+HIGH and CRITICAL go to `firewall-apply`, which has a required reviewer.
+
+Verified live 2026-08-10, both directions: an intake-created rule tiered LOW and
+auto-applied with no human, and two removals tiered HIGH and held for the
+reviewer. The evidence bundles for those removals name the approver with
+`via: deployment_gate` and claim `CM-5` with an empty `controls_not_evidenced`.
+
+Two things that had to be fixed before it worked, neither visible to the tests:
+the routing shipped **inert** (it maximised over the whole tree, and the pilot's
+permanently-HIGH default route made LOW unreachable), and the human-entered
+`max_auto_tier` input was removed — it asked a person to restate what the
+classifier had computed, which is two sources of truth for one fact.
+
+**Still not earned: `AC-5`.** CRITICAL routes to the same reviewed environment as
+HIGH, and one person authors, approves and releases. That needs a second
+collaborator, not more code.
 
 ### A1 / A2 / A3 — ZoneRequest end to end — DONE v1.2.0
 

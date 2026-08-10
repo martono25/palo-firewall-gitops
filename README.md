@@ -4,8 +4,9 @@ GitOps-driven firewall automation for Palo Alto (Strata Cloud Manager / Panorama
 covering **Day-1 provisioning + onboarding** through **Day-2 rule changes**, automated as far
 as is safe.
 
-> **Status: v2.0.0.** The Day-2 loop (`intent → tags ensure → compile → classify →
-> risk-gate → terraform apply → enrich → push → tags sweep`) and the **Day-1 chain**
+> **Status: v2.1.0.** The Day-2 loop (`intent → tags ensure → compile → classify
+> (the tier picks the approver) → terraform apply → enrich → push → tags sweep`)
+> and the **Day-1 chain**
 > (`InterfaceRequest → ZoneRequest → RouteRequest`) are both implemented, tested, and
 > **proven end-to-end on live VM-Series hardware**. Four intent kinds, evidence bundles
 > for every one, and drift detection across two engines. See
@@ -64,7 +65,7 @@ evidence bundle.
 > and a HIGH one held for a reviewer.
 
 ```
-Intent (YAML) → Python compiler → risk classifier → Terraform plan → tier gate → apply → SCM/PAN-OS
+Intent (YAML) → Python compiler → risk classifier → Terraform plan → the tier picks the approver → apply → SCM/PAN-OS
 ```
 
 ## Quickstart (Phase-1 compiler)
@@ -77,7 +78,7 @@ pip install -e '.[dev]'
 fwgitops compile intent --env-map catalog/environments.yaml --out terraform
 fwgitops compile intent --check      # validate only, write nothing
 
-pytest -q                            # 571 tests
+pytest -q                            # 811 tests
 ```
 
 Fail-closed and all-or-nothing: if any intent is invalid, the compiler prints an
@@ -108,7 +109,7 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   pilot on 2026-08-05 (zone `dmz` bound to `ethernet1/2`, confirmed in the device's pushed
   config with its protection and log-forwarding profiles intact). Zone DELETION is tested end to end and fails closed: SCM refuses to delete a zone a
   rule still references (409 `NON_ZERO_REFS`), so the delete never reaches the firewall.
-  `NatRequest` is deferred to v2.0. See [`TODOS.md`](TODOS.md).
+  `NatRequest` remains deferred. See [`TODOS.md`](TODOS.md).
 
 The three questions this project opened with are answered: no commercial firewall-analysis
 tool is owned (classifier built in-house), the pilot is a greenfield SCM folder, and the form
@@ -127,7 +128,7 @@ factor is VM-Series on AWS.
 | `terraform/` | Day-2 reconcile state, split per SCM folder; static module + `for_each` |
 | `evidence/` | Git-resident NIST-mapped evidence bundles (Git = SSoT) |
 | `.github/ISSUE_TEMPLATE/` | Broad-requester intake: Issue Form → `fwgitops from-issue` → intent PR |
-| `.github/workflows/` | CI: provision \| compile → classify → plan → gate → apply |
+| `.github/workflows/` | CI: provision \| compile → classify → plan → route by tier → apply |
 
 ## Standing up a folder
 
@@ -149,6 +150,28 @@ first time.
 
 `ensure` runs before apply and `sweep` after push; the pipeline does both, so you
 only reach for them by hand when investigating.
+
+### Flags the pipeline drives, and what breaks without them
+
+Three flags exist for CI rather than for you. They are documented because each
+has a failure mode that is silent, and all three have produced one.
+
+| Flag | Why it exists |
+|---|---|
+| `classify --max-tier` | prints **one line** — the highest tier in the changeset — so the workflow can route on it. Everything else goes to a buffer; a stray second line made `$GITHUB_OUTPUT` reject `Invalid format 'HIGH'`, and only a changeset containing a removal ever produced one |
+| `classify --change-message` | a removal authorises itself with a `Removes:` trailer in the commit message, because the change **is** the deletion of the file. Without this the tier step cannot see the authorisation and no removal can be applied at all |
+| `push --record` → `evidence --push-record` | carries the SCM commit job into the evidence bundle. Without it a bundle proves Terraform applied the change and says nothing about whether it reached SCM — and applied-but-unpushed is a state this platform has actually been in |
+
+```sh
+fwgitops push --scope-dir prod-edge --record push-prod-edge.json
+fwgitops evidence intent --push-record push-prod-edge.json --baseline /tmp/base/intent
+```
+
+The record carries `admin_count` and `all_admins`, never an identity: pushes are
+scoped to `SCM_CLIENT_ID`, and the bundle is committed to a public repository.
+Run `evidence` without `--push-record` or `--baseline` and it says so — a run
+that cannot see removals, or cannot show delivery, should not look like one that
+found nothing.
 
 ## Incident response: `fwgitops where`
 
@@ -197,4 +220,5 @@ risk classifier is built in-house.
 The open ones now are scoping questions, tracked with their reasoning in
 [`TODOS.md`](TODOS.md): how much of the device model belongs in Git-tracked YAML, whether
 zones can ever join the tag-based drift model (`scm_zone` has no `tag` attribute), and what
-v2.0 covers now that the Day-1 chain is closed (`NatRequest` is deferred there).
+comes after the Day-1 chain (`NatRequest`, a second firewall, a non-prod environment — all
+deferred there).

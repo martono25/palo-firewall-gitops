@@ -14,11 +14,17 @@ Local state; not touched by CI (the plan/apply loops skip `bootstrap-*`).
 ## Run once
 
 ```bash
-# SCM auth in the env (secret via read -rs; id/scope are not secret):
+# SCM auth in the env. ALL THREE are treated as secrets — `.github/scripts/
+# redact.py` strips SCM_CLIENT_ID and SCM_SCOPE alongside the secret, and they
+# are GitHub secrets, so they do not belong in a file in a public repository.
+# This block used to print the real service-account identity and tenant id as
+# example values; they had been committed here since 2026-07-23.
 read -rs "SCM_CLIENT_SECRET?SCM client secret: "; echo
 export SCM_CLIENT_SECRET
-export SCM_CLIENT_ID='GitOps@1198884949.iam.panserviceaccount.com'  # your service account
-export SCM_SCOPE='tsg_id:1198884949'
+read -r  "SCM_CLIENT_ID?SCM client id (svc@<tenant>.iam.panserviceaccount.com): "
+export SCM_CLIENT_ID
+read -r  "SCM_SCOPE?SCM scope (tsg_id:<tenant>): "
+export SCM_SCOPE
 
 terraform -chdir=terraform/bootstrap-scm-folder init
 terraform -chdir=terraform/bootstrap-scm-folder apply

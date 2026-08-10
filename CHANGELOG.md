@@ -3,7 +3,49 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.1.0] — 2026-08-10
+
+The release that made the approval model real, gave app teams a way in, and
+found seven defects by running things that had only ever been tested.
+
+**Highlights**
+
+- **A requester can open an issue instead of writing YAML.** Fill in a form, get
+  a pull request — validated, tiered, reviewed like anything else.
+- **`main` takes no direct push, from anyone, including the pipeline.** A push to
+  `main` is what triggers an apply, so this is the difference between a reviewed
+  change and a claimed one.
+- **The evidence bundle finally says whether the change reached SCM.** Every
+  bundle ever written recorded `"push": null`.
+- **The risk tier picks the approver.** LOW applies unattended; HIGH and
+  CRITICAL wait for a human. Verified in both directions on a live firewall.
+
+### Upgrading
+
+Three things need doing once, and the pipeline degrades quietly without them.
+
+1. **Create the ruleset on `main`** — required checks `pytest` and
+   `compile-and-plan`, no bypass actors. `docs/GITHUB-SETUP.md` has the payload
+   and the way to test it in the direction that should fail.
+2. **Create `AUTOMATION_PR_TOKEN`** — a fine-grained PAT, contents +
+   pull-requests write, this repo only. **Not `Issues`.** Without it, PRs the
+   pipeline opens have their checks held for manual approval and evidence stops
+   landing on its own; the run warns, nothing pages you. See
+   `docs/automation-token.md`.
+3. **`max_auto_tier` is gone.** `gh workflow run apply.yml -f max_auto_tier=…`
+   now fails with "Unexpected inputs provided" — drop the flag. The tier is
+   computed from the changeset; the input asked a human to restate it, which is
+   two sources of truth for one fact.
+
+> **On the version number.** Point 3 removes an input that existed in the v2.0.0
+> tag, and a strict reading of this project's semver rule makes that MAJOR. It is
+> released as MINOR under a scope decision made here: **semver covers the
+> `fwgitops` CLI, the `fw-intent/v1` and `fw-evidence/v2` schemas, the Terraform
+> module interface and the catalog formats — not the internals of
+> `.github/workflows/**`.** Under that scope this release only adds CLI flags and
+> changes no schema. The exception is written down rather than taken quietly,
+> because taking it quietly is the defect this project exists to remove.
+
 
 ### Fixed — the PAT authors the pull request; it does not comment
 
@@ -340,9 +382,11 @@ against a production firewall.
 
 Discoverable from `README.md`, `intent/README.md` and `requesting-rules.md`.
 
-## [2.0.1] — 2026-08-10
-
 ### Correction: v2.0.0 claimed low-risk auto-apply it did not have
+
+> Drafted as `2.0.1` and never tagged. A release is a tag; a heading is not one,
+> and leaving a version in this file that does not exist in `git tag` is the same
+> claimed-versus-actual defect the entry below is about. It ships here.
 
 **v2.0.0 shipped documentation that was false at the moment it was tagged.**
 README, `docs/DESIGN.md` and the v2.0.0 release notes all described low-risk
@@ -360,7 +404,7 @@ supposed to correct them.
 **The v2.0.0 entry above is left as published.** Editing it would hide that the
 release made a false claim, which is worse than the claim.
 
-**Fixed in this release** by tier routing (see `[Unreleased]`): `classify`
+**Fixed in this release** by tier routing (below): `classify`
 computes the tier from the changeset and the apply job picks its environment from
 it, so the approval policy is a property of the pipeline rather than a sentence
 in a document. Demonstrated both ways on hardware before any doc was written —
@@ -371,8 +415,8 @@ Docs corrected: README, `docs/requesting-rules.md`, `docs/DESIGN.md` and
 Issue-Forms intake as built — `.github/ISSUE_TEMPLATE/` is empty, and it said
 otherwise from 2026-07-19.
 
-No code change in 2.0.1 beyond what `[Unreleased]` describes; this entry exists
-so the false claim is on the record rather than quietly removed.
+This entry exists so the false claim is on the record rather than quietly
+removed.
 
 ## [2.0.0] — 2026-08-10
 

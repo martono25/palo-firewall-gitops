@@ -277,10 +277,20 @@ drives the loop, so the device root applies before the folder root. It fails
 (exit 2) when kinds are interleaved across roots such that no whole-root order
 works, rather than picking one and hoping.
 
-A push to `main` applies at **LOW** only. The pilot's chain contains a HIGH
-default route, so the whole apply stops at the risk gate until someone dispatches
-it deliberately at a higher tier — and the `firewall-apply` environment then
-waits for a reviewer.
+**The tier picks the approver.** `classify --max-tier` grades the CHANGESET — not
+the tree — and the workflow routes on the answer: LOW goes to
+`firewall-apply-auto` and applies unattended, HIGH and CRITICAL go to
+`firewall-apply` and wait for its required reviewer.
+
+Grading the tree instead is not a theoretical difference. The pilot declares a
+default route, which is permanently HIGH, so a whole-tree maximum meant every
+apply routed to a human and LOW auto-apply was unreachable on any repo that had
+ever declared one. The routing shipped inert that way and a live run found it,
+not the tests.
+
+There is no input to raise or lower the tier. One existed and was removed: it
+asked a human to restate what the classifier had already computed, which is two
+sources of truth for one fact.
 
 Afterwards, each change has a record:
 
