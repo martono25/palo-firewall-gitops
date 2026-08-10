@@ -118,6 +118,15 @@ factor is VM-Series on AWS.
 | `.github/ISSUE_TEMPLATE/` | Broad-requester intake: Issue Forms → Action → intent PR |
 | `.github/workflows/` | CI: provision \| compile → classify → plan → gate → apply |
 
+## Standing up a folder
+
+[`docs/building-a-folder.md`](docs/building-a-folder.md) walks the Day-1 chain —
+`InterfaceRequest` → `ZoneRequest` → `RouteRequest` → `AccessRequest` — from how
+`prod-edge` and the pilot firewall were actually brought up, including the
+prerequisites that are not in any intent file (the Terraform root, the folder
+interface variables, the catalog entry) and the two things that went wrong the
+first time.
+
 ## Incident response: `fwgitops where`
 
 A firewall log gives an IP. The question is *which request permitted this, who

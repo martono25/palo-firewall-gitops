@@ -447,6 +447,10 @@ written by the platform team, and they are documented here because **you will se
 them in this directory and their failure modes are worse than a rule's**
 (ADR-0008 measured each one on hardware).
 
+> Standing up a whole folder rather than reading one of these? See
+> [`building-a-folder.md`](building-a-folder.md) — the Day-1 chain end to end,
+> reconstructed from how `prod-edge` was actually built.
+
 ### `ZoneRequest` — declare a zone, bind interfaces to it
 
 ```yaml

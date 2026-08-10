@@ -3,6 +3,36 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added — `docs/building-a-folder.md`, the Day-1 walkthrough
+
+The platform-team counterpart to `requesting-rules.md`. `ZoneRequest`,
+`InterfaceRequest` and `RouteRequest` had reference documentation as of 2.0.0,
+but nothing showed the **chain**: what order they go in, why, and the
+prerequisites that appear in no intent file — the Terraform root, the folder
+interface variables, the catalog entry.
+
+**Written as a reconstruction of a real build**, not an imagined one: how
+`prod-edge` and the pilot firewall were actually brought up. A tutorial is the
+format most prone to describing a system instead of reading it, which is the
+defect this project has removed from `expires`, from `apply.yml`, from
+`BUILD_STATUS.md` and from `intent/README.md` — so it is pinned rather than
+trusted.
+
+**A test asserts each `spec:` still matches the intent file it cites**, and that
+all three Day-1 kinds appear. Metadata is abbreviated for reading and the guide
+says so; behaviour is verbatim. Every `fwgitops` command and every relative link
+was checked against the CLI and the filesystem.
+
+It also records the two things that went wrong the first time — three spikes that
+wrongly concluded device scope was unsupported (the control was the one resource
+still working on a broken registration), and the re-onboard that silently wiped
+every device-scope override. Those are the parts you would otherwise rediscover
+against a production firewall.
+
+Discoverable from `README.md`, `intent/README.md` and `requesting-rules.md`.
+
 ## [2.0.0] — 2026-08-10
 
 First release since **v1.25.0**. The version number is the point of this release:

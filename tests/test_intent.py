@@ -815,3 +815,57 @@ def test_the_requester_guide_does_not_document_removed_fields():
     text = (Path(__file__).resolve().parents[1] / "docs" / "requesting-rules.md").read_text()
     table = text[text.index("### `metadata`"):text.index("### `spec`")]
     assert "| `expires` |" not in table, "removed fields must not be in the field reference"
+
+
+def test_every_example_in_the_folder_guide_LOADS_and_matches_the_real_intents():
+    """`docs/building-a-folder.md` is a reconstruction of how prod-edge was
+    actually built, and it says so. That is only honest if the YAML it shows
+    still validates AND still matches the files it cites — otherwise it becomes
+    the same kind of confident fiction as the `expires` field, which the
+    requester guide documented for three weeks after the schema began rejecting
+    it."""
+    import re
+    from pathlib import Path
+
+    import yaml as _yaml
+
+    from fwgitops.catalog import (
+        FolderHierarchy, InterfaceCatalog, RouterCatalog, ServiceCatalog,
+    )
+    from fwgitops.resolve import EnvMap
+    root = Path(__file__).resolve().parents[1]
+
+    def _cat(cls, name):
+        f = root / "catalog" / name
+        return cls.from_dict(_yaml.safe_load(f.read_text())) if f.is_file() else None
+
+    kw = dict(
+        env_map=EnvMap.from_dict(
+            _yaml.safe_load((root / "catalog" / "environments.yaml").read_text())),
+        folder_hierarchy=_cat(FolderHierarchy, "folders.yaml"),
+        interface_catalog=_cat(InterfaceCatalog, "interfaces.yaml"),
+        router_catalog=_cat(RouterCatalog, "routers.yaml"),
+        service_catalog=_cat(ServiceCatalog, "services.yaml"),
+    )
+    text = (root / "docs" / "building-a-folder.md").read_text()
+    blocks = [b for b in re.findall(r"```yaml\n(.*?)```", text, re.S) if "kind: " in b]
+    assert len(blocks) >= 3, f"expected the three Day-1 kinds, found {len(blocks)}"
+
+    seen = set()
+    for b in blocks:
+        doc = _yaml.safe_load(b)
+        load_intent(doc, **kw)
+        seen.add(doc["kind"])
+
+        # And it must still describe the REAL file it cites. A guide that drifts
+        # from the intent it claims to reconstruct is worse than one that
+        # invented an example, because it reads as evidence.
+        rid = doc["metadata"]["id"]
+        real = list((root / "intent").rglob(f"{rid}.yaml"))
+        assert real, f"{rid} is cited but no longer exists in intent/"
+        actual = _yaml.safe_load(real[0].read_text())
+        assert doc["spec"] == actual["spec"], (
+            f"{rid}: the guide's spec no longer matches {real[0]}")
+
+    assert seen == {"InterfaceRequest", "ZoneRequest", "RouteRequest"}, (
+        f"the folder guide must walk the whole Day-1 chain; it shows {sorted(seen)}")
