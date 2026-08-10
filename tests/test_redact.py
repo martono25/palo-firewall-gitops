@@ -56,9 +56,9 @@ def test_unrelated_content_survives():
 
 
 def test_multiple_secrets_are_all_removed():
-    text = "id=svc@1198884949.iam.panserviceaccount.com secret=abcdefgh12345678"
+    text = "id=svc@example.iam.panserviceaccount.com secret=abcdefgh12345678"
     out, hits = redact_mod.redact(
-        text, ["svc@1198884949.iam.panserviceaccount.com", "abcdefgh12345678"])
+        text, ["svc@example.iam.panserviceaccount.com", "abcdefgh12345678"])
     assert hits == 2 and "panserviceaccount" not in out and "abcdefgh" not in out
 
 
@@ -109,3 +109,47 @@ def test_end_to_end_scrubs_a_file_in_place(tmp_path, monkeypatch):
 def test_a_missing_file_is_not_an_error(tmp_path):
     """The workflow globs plan-*.txt; a folder that produced none is normal."""
     assert redact_mod.main([str(tmp_path / "nope.txt")]) == 0
+
+
+# ── FIXTURES MUST LOOK FAKE ────────────────────────────────────────────────
+def test_no_test_fixture_uses_a_real_looking_service_account():
+    """Test fixtures are committed to a PUBLIC repository, so they should not
+    carry one deployment's own account identifiers.
+
+    Until 2026-08-10 six test files hard-coded this deployment's service account
+    and tenant id. Not a credential — authentication needs the secret — but it
+    made the fixtures true for exactly one tenant, and the repo asserted both
+    positions at once: `redact.py` stripped values the docs and tests printed.
+
+    ASSERTED POSITIVELY, on purpose. Blacklisting the old value would require
+    writing it back into the repository to check for it, which is the thing being
+    removed. So instead: any service-account identity in a fixture must use the
+    reserved `example.` domain, and any tenant id must be all zeros. Both are
+    unmistakably placeholders, and neither can be confused for a live tenant.
+
+    The tenant rule is "not plausible as a real id", not "matches one exact
+    placeholder": short ids like `tsg_id:1` are already unmistakable, and a rule
+    strict enough to churn those is a rule someone eventually deletes.
+    """
+    import re
+    from pathlib import Path
+
+    tests_dir = Path(__file__).resolve().parent
+    offenders = []
+    for path in sorted(tests_dir.glob("*.py")):
+        text = path.read_text()
+        for account in re.findall(r"[A-Za-z0-9._-]+@([A-Za-z0-9.-]+)\.iam\.panserviceaccount\.com",
+                                  text):
+            if account != "example":
+                offenders.append(f"{path.name}: @{account}.iam.panserviceaccount.com")
+        for tsg in re.findall(r"tsg_id:(\d+)", text):
+            # A real TSG id is a long digit string. `tsg_id:1` cannot be
+            # mistaken for one, so the rule is "not plausible" rather than "all
+            # zeros" — a stricter rule would churn fixtures that were never a
+            # problem, and a test nobody can satisfy gets deleted.
+            if len(tsg) >= 6 and set(tsg) != {"0"}:
+                offenders.append(f"{path.name}: tsg_id:{tsg}")
+    assert not offenders, (
+        "test fixtures must use an obviously-fake tenant "
+        "(`svc@example.iam.panserviceaccount.com`, `tsg_id:000000000000`); "
+        f"found: {offenders}")

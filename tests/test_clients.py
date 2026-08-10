@@ -19,9 +19,9 @@ from fwgitops.push import PushStatus
 from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
 
 GOOD = ScmCredentials(
-    client_id="GitOps@1198884949.iam.panserviceaccount.com",
+    client_id="svc@example.iam.panserviceaccount.com",
     client_secret="s3cret",
-    scope="tsg_id:1198884949",
+    scope="tsg_id:000000000000",
 )
 
 
@@ -65,10 +65,10 @@ def test_push_admin_scope_in_body():
         return 200, json.dumps(payload).encode()
 
     ScmPushClient(ScmSession(GOOD, transport=transport)).push(
-        "prod-edge", admins=["GitOps@1198884949.iam.panserviceaccount.com"]
+        "prod-edge", admins=["svc@example.iam.panserviceaccount.com"]
     )
     sent = json.loads(bodies[-1])
-    assert sent["admin"] == ["GitOps@1198884949.iam.panserviceaccount.com"]
+    assert sent["admin"] == ["svc@example.iam.panserviceaccount.com"]
 
 
 def test_push_without_admins_omits_scope():

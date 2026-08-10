@@ -3,6 +3,36 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Correction — the client id was not a credential, and v2.1.0 over-called it
+
+v2.1.0 shipped a commit and a PR describing the service-account identity in the
+docs as a **security finding**. It was not. Authentication needs
+`SCM_CLIENT_SECRET`, which was never exposed; the identity and the tenant id are
+account identifiers.
+
+**The v2.1.0 entry below is left as published.** Editing it would hide that the
+release over-called something, which is the same mistake in the other direction
+and exactly what was done for v2.0.0's false auto-apply claim.
+
+There were two real problems underneath the wrong label, and both are fixed:
+
+- **The repo asserted both positions at once.** `redact.py` stripped values that
+  the docs and six test files printed. It now states one position: the id and
+  tenant are identifiers, not secrets. `redact.py` keeps stripping them from
+  published CI artifacts as defence in depth, which costs nothing.
+- **The examples worked for exactly one tenant**, which makes a runbook useless
+  to anyone else. Docs use placeholders and prompts; fixtures use
+  `svc@example.iam.panserviceaccount.com` and an all-zero tenant.
+
+A test keeps fixtures fake, asserted **positively** — blacklisting the old value
+would mean writing it back into the repository to check for it. Any
+service-account identity in a fixture must use the reserved `example.` domain,
+and any tenant id must not be plausible as a real one.
+
+**No rotation is needed** and none was performed.
+
 ## [2.1.0] — 2026-08-10
 
 The release that made the approval model real, gave app teams a way in, and

@@ -188,7 +188,7 @@ module uses Palo's current **`PaloAltoNetworks/swfw-modules/aws`** (renamed from
 Live pilot proved end-to-end onboarding works (VM-Series booted, bootstrapped,
 BYOL-licensed, got a device cert, connected to SCM). BUT the device auto-associated
 to the CSP account's DEFAULT TSG (1959848920), not the target SCM tenant TSG
-(1198884949). The init-cfg `dgname` controls the FOLDER; it does NOT control the
+(the TSG id). The init-cfg `dgname` controls the FOLDER; it does NOT control the
 TENANT/TSG. TSG association is a Common Services step (hub → Common Services →
 Device Associations, or SCM → Settings → Device Associations).
 
@@ -213,7 +213,7 @@ Full Day-1 → Day-2 flow proven on live infrastructure:
   + dgname=GitOps) → BYOL license → device certificate → **connected to SCM (SG region)**.
 - Auth code determines the TSG (finding #16): first code landed the device in the wrong
   TSG (1959848920); a correct-TSG auth code (D4161614) put it in the intended tenant
-  (1198884949), GitOps folder.
+  (the TSG id), GitOps folder.
 - With the device bound, the folder push (`candidate:push`, body `{"folders":["GitOps"]}`)
   returns a JOB ID instead of `push-to invalid` → **finding #12 CLOSED**.
 

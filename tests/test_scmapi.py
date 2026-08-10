@@ -20,9 +20,9 @@ from fwgitops.scmapi import (
 )
 
 GOOD = dict(
-    client_id="GitOps@1198884949.iam.panserviceaccount.com",
+    client_id="svc@example.iam.panserviceaccount.com",
     client_secret="s3cret",
-    scope="tsg_id:1198884949",
+    scope="tsg_id:000000000000",
 )
 
 
@@ -50,7 +50,7 @@ def test_valid_credentials_pass():
 
 def test_scope_without_tsg_prefix_rejected():
     with pytest.raises(ScmConfigError, match="tsg_id:"):
-        ScmCredentials(**{**GOOD, "scope": "1198884949"}).validate()
+        ScmCredentials(**{**GOOD, "scope": "000000000000"}).validate()
 
 
 def test_client_id_short_form_rejected():
@@ -69,7 +69,7 @@ def test_from_env_reads_and_validates():
         "SCM_CLIENT_SECRET": GOOD["client_secret"],
         "SCM_SCOPE": GOOD["scope"],
     })
-    assert creds.scope == "tsg_id:1198884949"
+    assert creds.scope == "tsg_id:000000000000"
 
 
 def test_from_env_rejects_bad_scope():
@@ -77,7 +77,7 @@ def test_from_env_rejects_bad_scope():
         ScmCredentials.from_env({
             "SCM_CLIENT_ID": GOOD["client_id"],
             "SCM_CLIENT_SECRET": "x",
-            "SCM_SCOPE": "1198884949",   # the exact mistake from the spike
+            "SCM_SCOPE": "000000000000",   # the exact mistake from the spike
         })
 
 

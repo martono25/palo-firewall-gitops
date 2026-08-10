@@ -348,8 +348,8 @@ def test_drift_missing_snapshot_exit_1(tmp_path, capsys):
 from fwgitops.cli import run_push  # noqa: E402
 from fwgitops.scmapi import ScmCredentials, ScmSession  # noqa: E402
 
-SA = "GitOps@1198884949.iam.panserviceaccount.com"
-CREDS = ScmCredentials(client_id=SA, client_secret="s3cret", scope="tsg_id:1198884949")
+SA = "svc@example.iam.panserviceaccount.com"
+CREDS = ScmCredentials(client_id=SA, client_secret="s3cret", scope="tsg_id:000000000000")
 
 
 def _scm_transport(nothing_to_push=False, sink=None):
@@ -981,7 +981,7 @@ def test_no_bundle_can_carry_a_push_identity(tmp_path):
     rec = tmp_path / "push-leaky.json"
     rec.write_text(json.dumps({
         "scope_dir": "prod-edge", "folder": "prod-edge", "status": "success",
-        "job_id": "190", "admins": ["GitOps@1198884949.iam.panserviceaccount.com"],
+        "job_id": "190", "admins": ["svc@example.iam.panserviceaccount.com"],
     }))
     intent_root, env_map, _ = _setup(tmp_path)
     out_root = tmp_path / "evidence"

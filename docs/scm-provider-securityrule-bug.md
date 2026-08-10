@@ -27,9 +27,9 @@ This is **not** an SCM API limitation — the same values succeed via the SCM RE
 
 - Provider: `paloaltonetworks/scm` **v1.0.11** (latest stable) — **also reproduced on `v1.0.12-beta.3`**
 - Terraform: v1.15.8 (darwin_arm64)
-- SCM tenant (TSG): 1198884949
+- SCM tenant (TSG): redacted
 - Managed firewall: VM-Series `PA-VM`, PAN-OS **11.2.12**, folder-managed (folder `prod-edge`)
-- Auth: service-account `client_credentials` (OAuth2), scope `tsg_id:1198884949`
+- Auth: service-account `client_credentials` (OAuth2), scope `tsg_id:<tenant>`
 
 The `scm_security_rule` schema in the installed provider **does** expose all four attributes (`application`, `profile_setting`, `log_setting`, `position`/`relative_position`), so this is a runtime write defect, not a missing schema.
 
