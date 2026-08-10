@@ -869,7 +869,7 @@ def test_max_tier_prints_only_the_tier_even_when_the_changeset_has_a_removal(
 # ── THE BUNDLE MUST SAY WHETHER THE CHANGE REACHED SCM ────────────────────
 PUSH_RECORD = """\
 {"scope_dir": "prod-edge", "folder": "prod-edge", "status": "success",
- "job_id": "190", "admins": ["svc-fwgitops"]}
+ "job_id": "190", "admin_count": 1, "all_admins": false}
 """
 
 
@@ -899,7 +899,7 @@ def test_a_bundle_records_the_push_that_delivered_it(tmp_path):
     bundle = json.loads((out_root / "prod-edge" / "REQ-2026-0417.json").read_text())
     assert bundle["push"] == {
         "folder": "prod-edge", "status": "success",
-        "job_id": "190", "admins": ["svc-fwgitops"],
+        "job_id": "190", "admin_count": 1, "all_admins": False,
     }
 
 
@@ -942,7 +942,7 @@ def test_a_push_record_is_matched_by_SCOPE_not_by_scm_address(tmp_path):
     rec.write_text(json.dumps({
         "scope_dir": "device-007955000894453",   # the Terraform root
         "folder": "007955000894453",             # the SCM address
-        "status": "success", "job_id": "191", "admins": ["svc-fwgitops"],
+        "status": "success", "job_id": "191", "admin_count": 1, "all_admins": False,
     }))
     out_root = tmp_path / "evidence"
     assert run_evidence(intent_root, env_map, out_root, push_records=[rec],
@@ -969,3 +969,24 @@ def test_an_unreadable_push_record_fails_rather_than_recording_no_push(tmp_path)
     assert rc == 1
     assert not (out_root / "prod-edge").exists(), (
         "no bundle may be written from a push record that could not be read")
+
+
+def test_no_bundle_can_carry_a_push_identity(tmp_path):
+    """THE RECORD IS COMMITTED TO A PUBLIC REPOSITORY. `fwgitops push` scopes to
+    `SCM_CLIENT_ID` by default — a GitHub secret — so anything the record
+    carries through into a bundle is published. This asserts the whole path,
+    not just `PushResult.to_evidence()`: a record file that happened to contain
+    an identity must not be replayed into the bundle either."""
+    from fwgitops.cli import run_evidence
+    rec = tmp_path / "push-leaky.json"
+    rec.write_text(json.dumps({
+        "scope_dir": "prod-edge", "folder": "prod-edge", "status": "success",
+        "job_id": "190", "admins": ["GitOps@1198884949.iam.panserviceaccount.com"],
+    }))
+    intent_root, env_map, _ = _setup(tmp_path)
+    out_root = tmp_path / "evidence"
+    assert run_evidence(intent_root, env_map, out_root, push_records=[rec],
+                        tfvars_root=tmp_path / "tf") == 0
+    blob = (out_root / "prod-edge" / "REQ-2026-0417.json").read_text()
+    assert "panserviceaccount" not in blob and "iam." not in blob, (
+        "an identity from a push record reached the committed bundle")

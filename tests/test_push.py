@@ -8,6 +8,8 @@ which could never signal current pending drift — removed.)
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from fwgitops._poll import PollConfig
@@ -68,8 +70,34 @@ def test_waits_for_job_to_finish():
 
 def test_result_is_evidence_shaped():
     ev = run(FakeClient()).to_evidence()
-    assert set(ev) == {"folder", "status", "job_id", "admins"}
+    assert set(ev) == {"folder", "status", "job_id", "admin_count", "all_admins"}
     assert ev["folder"] == "GitOps" and ev["status"] == "success"
+
+
+def test_the_evidence_shape_carries_NO_identity():
+    """`admins` defaults to `SCM_CLIENT_ID`, a GitHub secret that
+    `.github/scripts/redact.py` exists to keep out of published artifacts. This
+    shape emitted it verbatim, which was harmless only while nothing consumed
+    the result — and the moment the evidence bundle started carrying the push,
+    it was committed in plaintext to a public repository. Caught on the first
+    live run; the branch was deleted unmerged.
+
+    What the audit needs is whether the commit was SCOPED to our own staged
+    changes or was break-glass over the whole candidate. `all_admins` says that
+    and discloses nothing."""
+    ev = run(FakeClient(), admins=["someone@secret.iam.example.com"]).to_evidence()
+    blob = json.dumps(ev)
+    assert "secret" not in blob and "@" not in blob, (
+        f"an identity reached the evidence shape: {blob}")
+    assert ev["admin_count"] == 1 and ev["all_admins"] is False
+
+
+def test_break_glass_is_visible_in_the_evidence():
+    """Redaction must not cost the distinction that matters. A push over the
+    WHOLE candidate is the break-glass path, and a record that cannot show it
+    happened would be redaction that removed the signal instead of the secret."""
+    ev = run(FakeClient(), all_admins=True).to_evidence()
+    assert ev["all_admins"] is True and ev["admin_count"] == 0
 
 
 # ── Safe by construction: admin scoping ───────────────────────────────────
