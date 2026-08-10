@@ -3,6 +3,28 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.42.1] — 2026-08-10
+
+### The nightly drift run is gated on the firewall being up
+
+The pilot is now suspended in AWS between test sessions to stop the EC2 draw.
+With it stopped, every nightly `drift-detect` fails on `device-sync` and the SCM
+reads — and a red run each morning for a known-absent firewall is exactly how a
+real alert gets ignored. **This job's failure IS the alert**, so protecting that
+signal is worth more than keeping the cadence.
+
+```yaml
+if: github.event_name == 'workflow_dispatch' || vars.FIREWALL_ONLINE == 'true'
+```
+
+A manual dispatch still runs unconditionally: you only dispatch when you mean to,
+and needing to flip a variable first would put friction in front of the check at
+the moment someone wants it. The cron stays; only the job is gated, so a skipped
+run is visibly skipped rather than silently absent.
+
+`FIREWALL_ONLINE` is set to `false` to match reality. Set it `true` when the
+pilot comes back up.
+
 ## [1.42.0] — 2026-08-10
 
 ### Terraform creates tag objects; it no longer destroys them (ADR-0009)

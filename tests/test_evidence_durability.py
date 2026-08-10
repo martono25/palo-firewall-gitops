@@ -317,3 +317,21 @@ def test_the_sweep_cannot_fail_the_apply():
     i = run.index("fwgitops tags sweep")
     tail = run[i:i + 300]
     assert "||" in tail and "::warning::" in tail
+
+
+# ── the drift schedule is gated on the firewall being up ──────────────────
+def test_the_drift_SCHEDULE_is_gated_but_a_dispatch_is_not():
+    """The pilot is suspended in AWS between test sessions. With it stopped every
+    nightly run fails on device-sync and the SCM reads — and a red run each
+    morning for a known-absent firewall is how a real alert gets ignored. This
+    job's FAILURE IS THE ALERT, so its signal is worth more than its cadence.
+
+    A manual dispatch must still run unconditionally: needing to flip a variable
+    first would put friction in front of the check exactly when someone wants
+    it."""
+    import yaml
+    wf = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text())
+    cond = wf["jobs"]["drift"]["if"]
+    assert "workflow_dispatch" in cond, "a deliberate dispatch must always run"
+    assert "FIREWALL_ONLINE" in cond, "the schedule must be gated on the firewall being up"
+    assert "schedule" in wf[True], "the cron itself stays — only the job is gated"
