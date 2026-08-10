@@ -5,6 +5,24 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — `--max-tier` printed two lines when the changeset had a removal
+
+`--max-tier` exists so a workflow can do `tier=$(fwgitops classify ...)` and
+route on the answer. Every per-change line goes to a buffer nobody reads —
+**except the `REMOVED` line, which went to stdout**. So a changeset containing a
+removal returned two lines, and `echo "tier=$tier" >> $GITHUB_OUTPUT` failed with
+`Invalid format 'HIGH'`.
+
+The comment four lines below the bug already promised "the highest tier in the
+changeset, and nothing else on stdout". The code had said otherwise for exactly
+one operation since the flag was written.
+
+Only a removal reveals it, which is why three earlier applies were fine: the
+machine-readable contract was broken for the one operation nobody had run yet.
+The test asserts the **parse** — one line, and that line is a tier — because
+`"HIGH" in output` would have passed the entire time.
+
+
 ### Fixed — no removal could be applied at all
 
 `REQ-2026-121` was the first rule removed since tier routing landed, and it did

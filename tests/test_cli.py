@@ -832,3 +832,35 @@ def test_no_warning_for_a_folder_that_has_a_firewall(tmp_path, capsys, monkeypat
     rc, cap = _compile_into(tmp_path, "prod-edge", capsys, monkeypatch)
     assert rc == 0
     assert "NO FIREWALL" not in cap.err
+
+
+def test_max_tier_prints_only_the_tier_even_when_the_changeset_has_a_removal(
+        tmp_path, capsys):
+    """OBSERVED IN CI 2026-08-10, on the second attempt to remove REQ-2026-121.
+
+    `--max-tier` exists so a workflow can do `tier=$(fwgitops classify ...)` and
+    route on the answer. Every per-change line goes to a buffer nobody reads —
+    except the REMOVED line, which went to stdout. So a changeset containing a
+    removal returned two lines, and `echo "tier=$tier" >> $GITHUB_OUTPUT` failed
+    with `Invalid format 'HIGH'`.
+
+    Only a removal reveals it, which is why three earlier applies were fine: the
+    machine-readable contract was broken for exactly the operation nobody had
+    run yet. Stdout must parse as one tier, and this asserts the parse, not the
+    substring — `"HIGH" in output` would have passed the whole time."""
+    baseline_root, env_map, _ = _setup(tmp_path / "before")
+    current_root = tmp_path / "after" / "intent"
+    (current_root / "prod").mkdir(parents=True)
+
+    msg = tmp_path / "msg.txt"
+    msg.write_text("chore: drop it\n\nRemoves: REQ-2026-0417 (JIRA-99999)\n")
+
+    rc = run_classify(current_root, env_map, max_tier=True,
+                      baseline_root=baseline_root,
+                      change_message_path=msg)
+    assert rc == 0
+    stdout = capsys.readouterr().out
+    assert stdout.strip().splitlines() == [stdout.strip()], (
+        f"--max-tier must emit ONE line; a workflow assigns it directly to a "
+        f"GitHub output. Got:\n{stdout}")
+    assert stdout.strip() in ("LOW", "HIGH", "CRITICAL")
