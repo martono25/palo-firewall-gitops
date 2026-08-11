@@ -326,6 +326,8 @@ Update `ticket`, `requested`, and `justification` if the reason differs.
 
 ### 2. Open a pull request
 
+**Starting on `main` with uncommitted changes:**
+
 ```sh
 git checkout -b day1/<what-this-does>
 git add intent/ catalog/ terraform/          # by name, not -A
@@ -335,6 +337,22 @@ git push -u origin HEAD
 gh pr create --fill
 gh pr checks --watch
 ```
+
+**Already on a branch** — which you are if you came from
+[`operator-runbook.md` § Replacing a firewall](operator-runbook.md#replacing-a-firewall-new-serial),
+since the catalog and Terraform edits are committed there. Do not branch again;
+you would fork the branch you are on. Add only what is still uncommitted:
+
+```sh
+git status --short                           # what is actually outstanding
+git add intent/                              # or whatever `status` lists
+git commit
+git push
+gh pr create --fill
+gh pr checks --watch
+```
+
+Check `git branch --show-current` if you are unsure which case you are in.
 
 `pytest` and `compile-and-plan` must pass — they are required, and `main` takes
 no direct push.

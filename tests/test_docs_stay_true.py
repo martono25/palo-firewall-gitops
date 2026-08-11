@@ -533,3 +533,25 @@ def test_the_runbook_warns_the_first_push_may_be_refused():
         "say the blast radius and give the recovery")
     assert "Do not pre-emptively run this" in runbook, (
         "an empty push mints a version for no change")
+
+
+def test_the_apply_sequence_says_which_starting_state_it_assumes():
+    """ASKED BY THE OPERATOR, 2026-08-10: "which one is correct? your
+    instruction or guide?"
+
+    Both were. The guide assumed starting on `main` with uncommitted changes;
+    the operator was on a feature branch with most of the work already committed,
+    having arrived from the replacement runbook. `git checkout -b` there forks
+    the branch you are already on, and `git add catalog/ terraform/` stages
+    nothing.
+
+    Same root cause as every other stall today: a procedure correct for one
+    starting state, silent about which state it assumes. A command sequence has
+    a precondition and it has to be written down."""
+    guide = _flat(DOCS / "building-a-folder.md")
+    assert "Starting on main with uncommitted changes" in guide, (
+        "name the state the branch-and-commit sequence assumes")
+    assert "Already on a branch" in guide, (
+        "and cover the state an operator arriving from the runbook is in")
+    assert "you would fork the branch you are on" in guide, (
+        "say what goes wrong, not just what to do instead")
