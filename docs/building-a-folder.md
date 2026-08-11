@@ -56,8 +56,9 @@ fwgitops verify-catalog          # catalog vs SCM's real hierarchy
 
 If those serials are not the firewall you have, stop and do
 [`operator-runbook.md` § Replacing a firewall, steps 4-8](operator-runbook.md#replacing-a-firewall-new-serial)
-first. Nothing here will fail loudly otherwise — an intent naming a stale serial
-compiles clean and dies at apply.
+first. `compile` will reject an intent naming a firewall the catalog does not
+declare, so you cannot get far with the serial alone wrong — but the interface
+PORT map is not checked against SCM, and that one is silent.
 
 ## Part 0 — before any intent will compile
 
@@ -146,7 +147,7 @@ creates itself.
 
 ## Part 1 — InterfaceRequest: address the ports
 
-Real file: [`intent/prod/edge-fw-4453/REQ-2026-0801.yaml`](../intent/prod/edge-fw-4453/REQ-2026-0801.yaml)
+Real file: [`intent/prod/edge-fw-1881/REQ-2026-0801.yaml`](../intent/prod/edge-fw-1881/REQ-2026-0801.yaml)
 
 ```yaml
 apiVersion: fw-intent/v1
@@ -189,7 +190,7 @@ The pilot took three: `local`, `internet` (REQ-2026-0802) and `dmz`
 
 ## Part 2 — ZoneRequest: declare the zone, bind the interface
 
-Real file: [`intent/prod/edge-fw-4453/REQ-2026-0806.yaml`](../intent/prod/edge-fw-4453/REQ-2026-0806.yaml)
+Real file: [`intent/prod/edge-fw-1881/REQ-2026-0806.yaml`](../intent/prod/edge-fw-1881/REQ-2026-0806.yaml)
 
 ```yaml
 apiVersion: fw-intent/v1
@@ -231,7 +232,7 @@ approvable.
 
 ## Part 3 — RouteRequest: the most dangerous link
 
-Real file: [`intent/prod/edge-fw-4453/REQ-2026-0803.yaml`](../intent/prod/edge-fw-4453/REQ-2026-0803.yaml)
+Real file: [`intent/prod/edge-fw-1881/REQ-2026-0803.yaml`](../intent/prod/edge-fw-1881/REQ-2026-0803.yaml)
 
 ```yaml
 apiVersion: fw-intent/v1

@@ -1,4 +1,4 @@
-# Remote state — ONE state per folder (design Arch-2: S3 + native locking,
+# Remote state — ONE state per scope (design Arch-2: S3 + native locking,
 # encrypted, never in Git). PARTIAL config: the concrete bucket/region/key live
 # in backend.hcl (filled from the bootstrap output), passed at init:
 #

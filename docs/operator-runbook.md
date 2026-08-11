@@ -210,8 +210,17 @@ that does not exist. So the order is: provision → point the repo at the serial
 Day-1 chain → rules.
 
 The serial is threaded through the repository, so a rebuild is not just a
-`terraform apply`. Nothing in CI catches a half-done change: the catalog is a
-hand-maintained mirror, and an intent naming a stale serial **compiles clean**.
+`terraform apply`.
+
+**What IS caught:** an intent naming a firewall the catalog does not declare is
+rejected by `compile`, with the file, the field and the fix. Doing step 4 and
+forgetting step 5 fails loudly and safely — verified 2026-08-10.
+
+**What is NOT caught:** the catalog's interface **port map** against SCM. Nothing
+compares `catalog/interfaces.yaml` to the real `default_value` of `$eth-*`, so a
+port that disagrees writes the wrong interface with no error at any stage. That
+is why step 4's two halves — the per-serial map and `create_in` — have to move
+together and be read twice.
 
 Do it in this order. Steps 1-3 are the rebuild itself and only apply if you are
 replacing an existing firewall; steps 4-8 apply either way.
@@ -235,15 +244,51 @@ replacing an existing firewall; steps 4-8 apply either way.
    Capture the new serial from `show system info`.
 <a id="step-4"></a>
 
-4. **Update the catalog** — `catalog/folders.yaml` (the `devices:` block under
-   the target folder) and `catalog/interfaces.yaml` (the per-serial port map for
-   every role, plus `create_in` for any role this platform creates).
-5. **Update the Day-1 intents** that name the device. `InterfaceRequest` is
-   device-scoped, so each one carries `spec.device: "<serial>"`:
+4. **Update the catalog** — two files, four things. Changing the serial key and
+   stopping is the easy miss:
+
+   `catalog/folders.yaml`, under the target folder's `devices:`
+   - the **serial key** itself
+   - **`display_name`** — `fwgitops onboard` sets this in SCM, so a catalog left
+     on the old name shows up as a `verify-catalog` note. That note is worded for
+     the dangerous reading (a device reset to `PA-VM` means a re-onboard wiped
+     device-scope config); a stale catalog is the benign one. The check cannot
+     tell which side moved, which is why it makes you look
+
+   `catalog/interfaces.yaml`
+   - the **per-serial port map** for every role
+   - **`create_in`** for any role this platform creates
+
+   The last two must move together — they are the pair that puts two zones on one
+   physical port if they disagree, and nothing compares either to SCM.
 
    ```sh
-   grep -rln '<old-serial>' intent/
+   fwgitops verify-catalog     # expect OK; read every NOTE before believing it
    ```
+5. **Update the Day-1 intents that name the device.** Only `InterfaceRequest`
+   does. An interface address belongs to ONE firewall — two cannot share an IP —
+   so it is device-scoped and carries a serial:
+
+   ```yaml
+   spec:
+     device: "<old-serial>"   ->   device: "<new-serial>"
+   ```
+
+   ```sh
+   grep -rn '^  device:' intent/          # every line that needs changing
+   ```
+
+   **`ZoneRequest` and `RouteRequest` do not change.** They are folder-scoped
+   policy, shared by every firewall in the folder, and never mention a serial —
+   a new firewall inherits them. If you find yourself editing one, stop: the
+   compiler refuses `device:` on those kinds (ADR-0006).
+
+   Update the trailing comments too (`# fw-prod-edge-4453, PA-VM, connected`),
+   or the file describes a machine that no longer exists.
+
+   The **directory name** (`intent/prod/edge-fw-<last4>/`) is cosmetic — nothing
+   reads it, the compiler only reads file contents. Rename it to match the new
+   serial or leave it; there is no functional difference, only whether it lies.
 
 6. **Replace the Terraform device root.** The old one is named for the old
    serial and its state describes a machine that is gone:

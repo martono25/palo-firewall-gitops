@@ -154,6 +154,29 @@ destroyed, and `building-a-folder.md` opens by checking the serial — because a
 reader arrives from either direction, and skipping it fails silently: an intent
 naming a stale serial compiles clean and dies at apply.
 
+### Fixed — three corrections found by an operator walking the rebuild
+
+**The serial IS validated, and the runbook said it was not.** `compile` rejects
+an intent naming a firewall the catalog does not declare, with the file, the
+field and the fix — demonstrated 2026-08-10 by doing step 4 and pausing before
+step 5. The docs claimed a stale serial "compiles clean". Overstating a gap
+teaches a reader to distrust checks that work, so the claim is now narrowed to
+what is genuinely unchecked: the interface **port map** against SCM's real
+`default_value`.
+
+**Step 4 named the `devices:` block but not `display_name`.** The obvious edit is
+the serial key, which leaves the name pointing at the old firewall.
+`verify-catalog` catches it, but reports it in the language of the *dangerous*
+reading — a mismatched name usually means a re-onboard silently wiped
+device-scope config. The check cannot tell which side moved, and the runbook now
+says so, or an operator meets an alarming note for a benign cause and learns to
+wave the check away.
+
+**Step 5 did not say which kinds carry a serial.** Only `InterfaceRequest` does:
+an interface address belongs to one firewall, while zones and routes are folder
+policy every firewall inherits. Three of the five files in that directory change
+and two must not.
+
 ### Added — how to replace a firewall
 
 A new serial is threaded through the catalog, the Day-1 intents, a Terraform

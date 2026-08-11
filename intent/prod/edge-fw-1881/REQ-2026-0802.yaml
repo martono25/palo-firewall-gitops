@@ -30,7 +30,7 @@ metadata:
   requested: "2026-08-03"
 
 spec:
-  device: "007955000894453"     # fw-prod-edge-4453, PA-VM, connected
+  device: "007955000901881"     # fw-prod-edge-1881, PA-VM, connected
   interface: internet           # role — $eth-internet / ethernet1/3
   ip:
     - 10.100.2.142/24

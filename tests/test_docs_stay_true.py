@@ -372,5 +372,45 @@ def test_the_repo_repoint_is_findable_from_both_directions():
     folder = _flat(DOCS / "building-a-folder.md")
     assert "does the repo know your firewall" in folder, (
         "the Day-1 guide must check the serial before its first step")
-    assert "compiles clean and dies at apply" in folder, (
-        "and say why skipping it fails silently rather than loudly")
+    assert "the interface PORT map is not checked against SCM" in folder, (
+        "be precise about what is unchecked: the SERIAL is validated by "
+        "compile, the port map is not, and overstating the gap teaches the "
+        "reader to distrust checks that work")
+
+
+def test_the_serial_update_says_which_kinds_carry_one():
+    """ASKED BY THE OPERATOR, 2026-08-10, at step 5: "what does this mean?"
+
+    "Update the Day-1 intents that name the device" assumes the reader knows
+    which kinds do. Three of the five files in that directory carry a serial and
+    two do not, and the difference is not arbitrary: an interface address
+    belongs to one firewall, while zones and routes are folder policy every
+    firewall inherits.
+
+    Getting it wrong in the safe direction wastes time; in the unsafe direction
+    the compiler refuses, so the cost is confusion rather than damage — which is
+    exactly the kind of thing a runbook should remove."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "Only InterfaceRequest does" in runbook, (
+        "name the kind that carries a serial, do not imply all of them do")
+    assert "ZoneRequest and RouteRequest do not change" in runbook, (
+        "and say explicitly which ones to leave alone")
+    assert "two cannot share an IP" in runbook, (
+        "the reason, so the reader can generalise to a kind added later")
+
+
+def test_the_catalog_step_lists_display_name_too():
+    """FOUND BY THE OPERATOR AT STEP 4, 2026-08-10. The step said "the `devices:`
+    block", and the obvious edit is the serial key — leaving `display_name`
+    pointing at the old firewall.
+
+    `verify-catalog` catches it, but reports it in the language of the DANGEROUS
+    reading: a display name that disagrees usually means the device was
+    re-onboarded and device-scope config was silently wiped. The check cannot
+    tell which side moved. So the runbook has to name the field, or the operator
+    meets a scary note for a benign reason and learns to wave the check away."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "display_name" in runbook, (
+        "name the field — 'the devices: block' reads as just the serial")
+    assert "cannot tell which side moved" in runbook, (
+        "explain why the note sounds alarming for a harmless cause")
