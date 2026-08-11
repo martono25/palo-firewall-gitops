@@ -52,16 +52,30 @@ onboarding rule. After that, Day-2 rule requests flow to it.
 | **AWS CLI** v2 | `brew install awscli` | <https://aws.amazon.com/cli/> |
 | **Python** ≥ 3.11 | `brew install python@3.11` | <https://www.python.org/downloads/> |
 
-Then clone the repo and install the `fwgitops` CLI:
+Then clone the repo and install the `fwgitops` CLI. **Every command below runs
+from the REPOSITORY ROOT** — `pip install -e .` reads `pyproject.toml` from the
+current directory, and there is exactly one, at the top:
 
 ```bash
 git clone https://github.com/martono25/palo-firewall-gitops.git
-cd palo-firewall-gitops
+cd palo-firewall-gitops                      # the repo ROOT, not a subdirectory
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .            # installs the `fwgitops` command
-fwgitops --help             # verify
-terraform version           # verify
+pip install -e .                             # the trailing `.` IS the argument
+fwgitops --help                              # verify
+terraform version                            # verify
 ```
+
+**Already set up?** Do not repeat this. Reactivate the venv you have:
+
+```bash
+cd <repo root> && source .venv/bin/activate
+```
+
+The venv survives `cd`, so activate it once at the root and then move into
+`provisioning/aws-vmseries-pilot` for the Terraform steps. Creating a second venv
+inside that directory is the easy mistake — it is a valid venv, `pip install -e .`
+then fails because there is no `pyproject.toml` beside it, and the error talks
+about arguments rather than about where you are.
 
 ### 2. Configure credentials
 
@@ -240,6 +254,8 @@ and a Terraform root before anything will compile against it.
 | Symptom | Likely cause / fix |
 |---|---|
 | `zsh: command not found: fwgitops` (venv is active) | The package isn't installed in the venv. Run `pip install -e .` (from the repo root, venv active), then `rehash` (zsh) or open a new shell. |
+| `pip install -e` → `-e option requires 1 argument` | The trailing `.` is the argument and it is missing. `pip install -e .` |
+| `pip install -e .` → *"neither 'setup.py' nor 'pyproject.toml' found"* | You are not at the repo root. `pip` reads the project from the **current directory**; `provisioning/aws-vmseries-pilot/` has no `pyproject.toml`. `cd` to the repo root and rerun. If you created a venv there too, delete it (`rm -rf .venv`) and activate the root one instead — the venv survives `cd`, so you only ever need the one. |
 | `fwgitops onboard/push/enrich` → config/credentials error | SCM env vars not loaded in this shell — run `set -a; source ~/.fwgitops/scm.env; set +a` first (see *Configure credentials*). |
 | Device never appears in SCM; SSH shows `serial: unknown`, `device-certificate-status: None` | Registration/licensing failed — registration PIN expired/used up, or **no free license seats** (delete stale devices in CSP). |
 | Device onboards but rules don't reach it for 20-30 min | Normal — a fresh VM finishes content bootstrap before its first config push. Verify on-device with `show running security-policy`, not just the SCM `is_first_push_done` flag (it lags). |

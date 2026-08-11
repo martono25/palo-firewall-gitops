@@ -74,6 +74,21 @@ stuck resource, and the `/32`s in that group may be the only place an operator I
 is written down. One of them was — the address previously logged as a stale
 allow-list entry turned out to be part of Xpanse's remediation.
 
+### Fixed — the install step never said where to run it
+
+Found by following the guide. `pip install -e .` was correct read top-to-bottom
+and wrong the moment the reader was anywhere else — and `provisioning.md` sends
+you into `provisioning/aws-vmseries-pilot/` for the Terraform steps.
+
+A venv created there is a perfectly valid venv. `pip install -e .` then fails
+because no `pyproject.toml` sits beside it, and **the error talks about arguments
+rather than about location**, so there is no path from the message to the cause.
+
+The install block now states that it runs from the repository root, says the
+trailing `.` is the argument, and tells a reader who is already set up to
+reactivate rather than reinstall — the venv survives `cd`, so one is all anyone
+needs. Two troubleshooting rows added for the exact errors.
+
 ### Added — how to replace a firewall
 
 A new serial is threaded through the catalog, the Day-1 intents, a Terraform

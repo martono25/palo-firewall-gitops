@@ -260,3 +260,26 @@ def test_provisioning_troubleshoots_the_teardown_that_actually_failed():
         "group is a mystery, a named one is a finding")
     assert "non-default security group blocks" in prov, (
         "the mechanism, so the next person diagnoses rather than guesses")
+
+
+def test_provisioning_says_where_to_run_the_install():
+    """FOUND BY FOLLOWING THE GUIDE, 2026-08-10. The install block was correct
+    read top-to-bottom and wrong the moment the reader was anywhere else — the
+    Steps section sends you into `provisioning/aws-vmseries-pilot/`, and a venv
+    created there is a perfectly valid venv whose `pip install -e .` fails
+    because no `pyproject.toml` sits beside it.
+
+    The error talks about arguments, not about location, so the reader has no
+    way to get from the message to the cause. The guide has to supply that."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "REPOSITORY ROOT" in prov, (
+        "the install step must say WHERE it runs, not just what to type")
+    assert "the trailing `.` IS the argument".replace("`", "") in prov, (
+        "the missing-dot error is the first thing a new operator hits")
+    # Anchored on text UNIQUE TO THE TROUBLESHOOTING ROW. "no pyproject.toml"
+    # also appears in the install block, so an `or` over both phrasings stayed
+    # satisfied when the row was gutted — the fourth time today an assertion
+    # matched prose I had written somewhere else instead of the thing it guards.
+    assert "You are not at the repo root" in prov, (
+        "the wrong-directory failure needs its own troubleshooting row: the pip "
+        "error names an argument, never a location")
