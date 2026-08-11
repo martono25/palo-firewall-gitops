@@ -215,6 +215,28 @@ hierarchy and does not compare the interface port map against SCM. Nothing else
 does either, so a catalog disagreeing with the real `default_value` writes the
 wrong port with no error at any stage.
 
+## [Unreleased]
+
+### Fixed — `is_first_push_done` was documented as blocking a push. It does not.
+
+`devicesync.py` claimed SCM refuses an ADMIN-SCOPED push while the flag is
+false, and the runbook told operators their first apply on a new firewall "may be
+refused" and to reach for `--all-admins`.
+
+**Measured 2026-08-11 and it is wrong.** A freshly provisioned firewall
+(`007955000901881`) reporting `is_first_push_done: false` took the pipeline's
+normal admin-scoped push first time — device-scope job 202, three interfaces
+committed and verified on the device. Earlier admin-scoped pushes on this tenant
+had also succeeded with the flag false.
+
+The claim was never measured; it was an inference sitting in a comment, and it
+propagated into a runbook entry and a test docstring. A warning for a failure
+that never arrives trains an operator to skip warnings — and this one pointed at
+`--all-admins`, which commits everything staged in a scope.
+
+The flag is still reported, because SCM exposes it and an operator will see it.
+The authoritative signal remains the version comparison beside it.
+
 ## [2.1.1] — 2026-08-10
 
 ### Correction — the client id was not a credential, and v2.1.0 over-called it

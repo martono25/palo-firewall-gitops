@@ -511,28 +511,26 @@ def test_each_guide_hands_off_at_the_point_the_work_ends():
     assert "NEXT: prove it end to end, then hand it over" in folder
 
 
-def test_the_runbook_warns_the_first_push_may_be_refused():
-    """ASKED BY THE OPERATOR, 2026-08-10: "do I need to run fwgitops device-sync
-    as in your guide?"
+def test_the_runbook_does_not_warn_about_a_failure_that_does_not_happen():
+    """CORRECTED 2026-08-11 by measurement.
 
-    They did not, but its NOTE predicted a failure they were about to hit: the
-    pipeline pushes admin-scoped, and SCM is documented to refuse that while
-    `is_first_push_done` is false. "Your first apply on a new firewall may fail
-    at the push" should not have to be inferred from a note on an optional
-    read-only command.
+    This first said the first push to a fresh firewall "may be refused", on the
+    strength of a comment in `devicesync.py` claiming SCM rejects an
+    admin-scoped push while `is_first_push_done` is false. The rebuild disproved
+    it: the pipeline's normal admin-scoped push to a brand-new firewall
+    reporting `false` succeeded first time (job 202), as had every earlier push
+    on this tenant.
 
-    The mixed evidence is part of the entry on purpose. `devicesync.py` recorded
-    the flag staying false across two SUCCESSFUL pushes, so the honest guidance
-    is "this may happen, failing is safe, here is the recovery" rather than a
-    confident prediction either way."""
+    So the guidance is now "ignore it", and the reversal is left visible rather
+    than quietly deleted. A warning for a failure that never arrives trains an
+    operator to skip warnings — and this one pointed at `--all-admins`, which
+    commits everything staged in a scope."""
     runbook = _flat(DOCS / "operator-runbook.md")
-    assert "The first push to a fresh firewall may be refused" in runbook
-    assert "evidence is mixed" in runbook, (
-        "do not state a confident cause the record does not support")
-    assert "Failing is safe" in runbook and "--all-admins" in runbook, (
-        "say the blast radius and give the recovery")
-    assert "Do not pre-emptively run this" in runbook, (
-        "an empty push mints a version for no change")
+    assert "first-push-pending on a new firewall is not a problem" in runbook
+    assert "The flag predicts nothing on this tenant" in runbook, (
+        "state the measurement, not a hedge")
+    assert "how a real one gets ignored" in runbook, (
+        "and keep why the old warning was harmful, so it is not re-added")
 
 
 def test_the_apply_sequence_says_which_starting_state_it_assumes():
