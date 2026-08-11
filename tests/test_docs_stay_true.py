@@ -436,3 +436,26 @@ def test_the_replacement_covers_everywhere_the_serial_is_written():
         "red build")
     assert "docs/adr/ — leave alone" in runbook, (
         "and say what must NOT be rewritten, or someone tidies the history")
+
+
+def test_the_runbook_warns_that_a_new_firewall_fails_to_commit_first():
+    """FOUND BY THE OPERATOR, 2026-08-10, between the repo re-point and Day-1:
+    `device-sync` showed an SCM commit failing with "can't find interface in
+    'default' for next hop 10.100.2.1".
+
+    Nothing was wrong. Zones, routers and rules are FOLDER-scoped and survived
+    the rebuild, so the new firewall inherited them the moment it joined —
+    including a default route. Interface addressing is DEVICE-scoped and died
+    with the old firewall, so SCM validated a route against a device with no
+    interface in that subnet.
+
+    This is ADR-0002's ordered chain seen from the other end, and it reads as
+    breakage to anyone who has not internalised the scope split. An operator who
+    stops here to debug a working system has lost the afternoon."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "inherits the folder's policy the instant it joins" in runbook, (
+        "explain WHY a fresh firewall has policy it cannot satisfy")
+    assert "Nothing is wrong" in runbook, (
+        "say so plainly — the error looks like a misconfiguration")
+    assert "the rebuild changed the topology" in runbook, (
+        "and give the test that separates the benign case from the real one")

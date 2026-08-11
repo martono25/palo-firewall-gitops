@@ -341,7 +341,30 @@ replacing an existing firewall; steps 4-8 apply either way.
    existed. Deleting them to tidy up destroys history; they are supposed to
    outlive the device.
 
-9. **Verify before trusting it:**
+9. **Expect SCM commit errors until Day-1 runs.** A new firewall inherits the
+   folder's policy the instant it joins — zones, the logical router, rules, all
+   folder-scoped and untouched by the rebuild. Interface addressing is
+   device-scoped and died with the old firewall, so SCM validates an inherited
+   route against a device that has no interface in the nexthop's subnet:
+
+   ```
+   can't find interface in 'default' for next hop 10.100.2.1
+   ```
+
+   **Nothing is wrong.** That is ADR-0002's chain — interfaces before routes —
+   seen from the other end: after a replacement the routes already exist and the
+   interfaces are what is missing. Confirm the shape rather than assume it:
+
+   ```sh
+   ssh admin@<mgmt-ip> 'show interface all'    # "configured hardware interfaces: 0"
+   grep -A3 '^  ip:' intent/<folder>/*/REQ-*.yaml   # the address that will fix it
+   ```
+
+   If the nexthop is inside a subnet one of those intents assigns, applying Day-1
+   clears it. If it is not, the route and the addressing genuinely disagree and
+   the rebuild changed the topology.
+
+10. **Verify before trusting it:**
 
    ```sh
    fwgitops verify-catalog          # catalog vs SCM's real hierarchy
