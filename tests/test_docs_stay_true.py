@@ -509,3 +509,27 @@ def test_each_guide_hands_off_at_the_point_the_work_ends():
 
     folder = _flat(DOCS / "building-a-folder.md")
     assert "NEXT: prove it end to end, then hand it over" in folder
+
+
+def test_the_runbook_warns_the_first_push_may_be_refused():
+    """ASKED BY THE OPERATOR, 2026-08-10: "do I need to run fwgitops device-sync
+    as in your guide?"
+
+    They did not, but its NOTE predicted a failure they were about to hit: the
+    pipeline pushes admin-scoped, and SCM is documented to refuse that while
+    `is_first_push_done` is false. "Your first apply on a new firewall may fail
+    at the push" should not have to be inferred from a note on an optional
+    read-only command.
+
+    The mixed evidence is part of the entry on purpose. `devicesync.py` recorded
+    the flag staying false across two SUCCESSFUL pushes, so the honest guidance
+    is "this may happen, failing is safe, here is the recovery" rather than a
+    confident prediction either way."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "The first push to a fresh firewall may be refused" in runbook
+    assert "evidence is mixed" in runbook, (
+        "do not state a confident cause the record does not support")
+    assert "Failing is safe" in runbook and "--all-admins" in runbook, (
+        "say the blast radius and give the recovery")
+    assert "Do not pre-emptively run this" in runbook, (
+        "an empty push mints a version for no change")

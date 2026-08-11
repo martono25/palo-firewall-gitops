@@ -378,6 +378,42 @@ replacing an existing firewall; steps 4-8 apply either way.
 > writes the wrong port with no error at any stage. Until that check exists,
 > step 2 and step 4 have to be done together and read twice.
 
+### The first push to a fresh firewall may be refused
+
+`device-sync` on a new device reports:
+
+```
+first-push-pending  running=v85  committed=v85  folder=prod-edge
+NOTE  … SCM still reports is_first_push_done=false. SCM refuses an ADMIN-SCOPED
+      push in this state …
+```
+
+The pipeline pushes admin-scoped by default — that is what makes a push safe on a
+shared folder — so the Day-1 apply may fail at the push step.
+
+**The evidence is mixed and worth stating rather than smoothing over.**
+`devicesync.py` records the flag staying `false` across two *successful* pushes,
+and admin-scoped pushes to the previous firewall worked while it was false. So
+"SCM refuses" and "pushes succeed anyway" are both in the record. Treat the first
+apply as the experiment.
+
+**Failing is safe.** A refused push exits 3, fail-closed: nothing reaches the
+device and nothing is half-committed. If it happens:
+
+```sh
+fwgitops push --scope-dir device-<serial> --all-admins --record push-dev.json
+```
+
+That is the legitimate first-push case rather than break-glass abuse — on a fresh
+device the only thing staged is your own Day-1 config. Re-run the apply
+afterwards so the evidence bundle records a normal push.
+
+Do **not** pre-emptively run this before the apply. Nothing is staged yet, and an
+empty push mints a config version for no change — which is what the
+nothing-staged skip in `apply.yml` exists to avoid.
+
+---
+
 ### → NEXT: configure the firewall from Git
 
 The repository now names your firewall, and `compile --check` passes. The device
