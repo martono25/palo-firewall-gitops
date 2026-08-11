@@ -236,3 +236,23 @@ def test_provisioning_states_the_sizing_decision_before_it_is_irreversible():
         "sizing after registration is too late to be free")
     assert "vm-license" in prov, (
         "and the verification step must actually read the tier back")
+
+
+def test_provisioning_troubleshoots_the_teardown_that_actually_failed():
+    """FOUND BY FOLLOWING THE GUIDE, 2026-08-10. `terraform destroy` failed with
+    DependencyViolation on the VPC, and the guide had nothing for it.
+
+    The cause is worth keeping by name: Cortex Xpanse Active Response creates its
+    OWN security group as remediation — a narrowed copy of the mgmt group —
+    which Terraform never sees, so destroy removes its own and leaves the copy to
+    block the VPC.
+
+    Recognising it matters more than clearing it. A security tool making live
+    changes to the VPC is a fact about the environment, not a stuck resource."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "DependencyViolation" in prov, "the teardown failure must be documented"
+    assert "Xpanse Active Response" in prov, (
+        "name the tool — an unexplained security group is a mystery, a named one "
+        "is a finding")
+    assert "non-default security group blocks" in prov, (
+        "the mechanism, so the next person diagnoses rather than guesses")

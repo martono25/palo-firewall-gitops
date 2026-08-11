@@ -246,6 +246,50 @@ and a Terraform root before anything will compile against it.
 | `mgmt` unreachable | `mgmt_allowed_cidr` doesn't include your IP; or the device is still booting. |
 | Device lands in "Available Devices", not the folder | The serial-number onboarding rule didn't match — check the rule's serial regex vs the device serial in SCM. |
 
+### `terraform destroy` fails: `DependencyViolation` deleting the VPC
+
+Something is in the VPC that Terraform did not create, so `destroy` removed
+everything it owned and then could not remove the VPC around it. Find it before
+deleting anything:
+
+```bash
+V=<vpc-id>; R=ap-southeast-1
+aws ec2 describe-network-interfaces --region $R --filters Name=vpc-id,Values=$V \
+  --query 'NetworkInterfaces[].{Id:NetworkInterfaceId,Desc:Description}' --output table
+aws ec2 describe-security-groups --region $R --filters Name=vpc-id,Values=$V \
+  --query 'SecurityGroups[].{Id:GroupId,Name:GroupName,Desc:Description}' --output table
+aws ec2 describe-vpc-endpoints --region $R --filters Name=vpc-id,Values=$V --output text
+aws ec2 describe-nat-gateways   --region $R --filter  Name=vpc-id,Values=$V --output text
+```
+
+A **non-default security group blocks `DeleteVpc`**, and that is the case seen
+here — twice now, both times from the same cause.
+
+**Cortex Xpanse Active Response creates its own security groups.** Observed
+2026-08-10 tearing down the pilot: a group named
+`fwgitops-pilot-mgmt-<suffix>_xpanse_ar_990`, described as *"copied from rule
+… by Xpanse Active Response module"*. Xpanse detected the exposed management
+plane, remediated by creating a **narrowed copy** of the mgmt group, and that
+copy is invisible to Terraform — so `destroy` deleted its own group and left the
+remediation behind to block the VPC.
+
+This is worth recognising rather than just clearing, because it means **a
+security tool is making live changes to this VPC** that Git does not describe.
+Read the group's rules before deleting it; they record what Xpanse considered
+the safe state, and the `/32`s in it may be the only place an operator IP is
+written down.
+
+```bash
+aws ec2 describe-security-groups --region $R --group-ids <sg-id> \
+  --query 'SecurityGroups[0].{Desc:Description,Ingress:IpPermissions}'
+aws ec2 delete-security-group --region $R --group-id <sg-id>   # then re-run destroy
+```
+
+Check nothing still uses it first — `describe-network-interfaces
+--filters Name=group-id,Values=<sg-id>` should return zero. If Xpanse is still
+watching the account it may recreate the group; the VPC is going away either
+way, but expect it to reappear if the teardown stalls partway.
+
 ---
 
 ## Provisioning vs requesting — who does what

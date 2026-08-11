@@ -55,6 +55,25 @@ deployment profile sized for 4 vCPU still licenses at `VM-SERIES-16` against a
 it before `terraform apply` and reads the tier back in the verification step,
 which is the last moment it is cheap to catch.
 
+### Fixed — `terraform destroy` had no troubleshooting for the way it actually fails
+
+Found by following the guide, not by reading it. `terraform destroy` failed with
+`DependencyViolation` deleting the VPC, and `provisioning.md` had nothing for it.
+
+The cause is worth knowing by name: **Cortex Xpanse Active Response creates its
+own security group** — a narrowed copy of the mgmt group, described as *"copied
+from rule … by Xpanse Active Response module"*. It remediated the exposed
+management plane by making that copy, which Terraform never sees. So `destroy`
+deleted its own group, left the copy behind, and a non-default security group
+blocks `DeleteVpc`.
+
+The guide now has the enumeration commands for every VPC dependency, the
+mechanism, and the reason to read the group before deleting it: a security tool
+making live changes to this VPC is a fact about the environment rather than a
+stuck resource, and the `/32`s in that group may be the only place an operator IP
+is written down. One of them was — the address previously logged as a stale
+allow-list entry turned out to be part of Xpanse's remediation.
+
 ### Added — how to replace a firewall
 
 A new serial is threaded through the catalog, the Day-1 intents, a Terraform
