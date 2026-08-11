@@ -633,7 +633,7 @@ def test_snapshot_requires_exactly_one_scope(capsys):
     would read the wrong scope or none."""
     from fwgitops.cli import main
     assert main(["snapshot", "InterfaceRequest", "prod-edge",
-                 "--device", "007955000894453", "--out", "/tmp/x.json"]) == 1
+                 "--device", "007955000901881", "--out", "/tmp/x.json"]) == 1
     assert "exactly one" in capsys.readouterr().err
     assert main(["snapshot", "InterfaceRequest", "--out", "/tmp/x.json"]) == 1
     assert "exactly one" in capsys.readouterr().err
@@ -786,7 +786,7 @@ folders:
     children: []
     targetable: true
     devices:
-      "007955000894453": {display_name: fw-a, model: PA-VM, targetable: true}
+      "007955000901881": {display_name: fw-a, model: PA-VM, targetable: true}
   GitOps:
     children: []
     targetable: true
@@ -916,7 +916,7 @@ metadata:
   justification: "Address the internal interface"
   requested: 2026-08-04
 spec:
-  device: "007955000894453"
+  device: "007955000901881"
   interface: local
   ip:
     - 10.100.3.125/24
@@ -940,8 +940,8 @@ def test_a_push_record_is_matched_by_SCOPE_not_by_scm_address(tmp_path):
 
     rec = tmp_path / "push-device.json"
     rec.write_text(json.dumps({
-        "scope_dir": "device-007955000894453",   # the Terraform root
-        "folder": "007955000894453",             # the SCM address
+        "scope_dir": "device-007955000901881",   # the Terraform root
+        "folder": "007955000901881",             # the SCM address
         "status": "success", "job_id": "191", "admin_count": 1, "all_admins": False,
     }))
     out_root = tmp_path / "evidence"
@@ -949,7 +949,7 @@ def test_a_push_record_is_matched_by_SCOPE_not_by_scm_address(tmp_path):
                         tfvars_root=tmp_path / "tf") == 0
 
     device = json.loads(
-        (out_root / "device-007955000894453" / "REQ-2026-0801.json").read_text())
+        (out_root / "device-007955000901881" / "REQ-2026-0801.json").read_text())
     assert device["push"] is not None and device["push"]["job_id"] == "191", (
         "a device-scoped bundle must receive the record for its Terraform root")
 
@@ -990,3 +990,65 @@ def test_no_bundle_can_carry_a_push_identity(tmp_path):
     blob = (out_root / "prod-edge" / "REQ-2026-0417.json").read_text()
     assert "panserviceaccount" not in blob and "iam." not in blob, (
         "an identity from a push record reached the committed bundle")
+
+
+# ── A BASELINE IS A PAST STATE ─────────────────────────────────────────────
+def _catalog_pair(tmp_path):
+    """Two catalog dirs: one declaring a firewall, one that no longer does.
+
+    Copied from the repo's real catalogs so every OTHER lookup keeps working —
+    the difference between the two is exactly the device, which is the thing
+    under test.
+    """
+    import re, shutil
+    real = Path(__file__).resolve().parents[1] / "catalog"
+    before, after = tmp_path / "cat-before", tmp_path / "cat-after"
+    shutil.copytree(real, before)
+    shutil.copytree(real, after)
+    # The serial comes FROM the fixture, not a literal: a repo-wide rename of the
+    # live serial once left this pointing at a device that was already absent,
+    # so the "should fail" case passed for the wrong reason.
+    serial = re.search(r'device:\s*"(\d+)"', DEVICE_INTENT).group(1)
+    # `after` forgets that firewall — the state of the world once it is replaced.
+    for name in ("folders.yaml", "interfaces.yaml"):
+        text = (after / name).read_text()
+        assert serial in text, f"{name} must declare {serial} for this test to mean anything"
+        (after / name).write_text(text.replace(serial, "007955000999999"))
+    return before, after
+
+
+def test_a_baseline_is_read_with_the_catalog_that_shipped_with_it(tmp_path):
+    """MEASURED 2026-08-10: THE PIPELINE COULD NOT APPLY A FIREWALL REPLACEMENT.
+
+    Both trees were parsed with TODAY's catalog. Replace a firewall and `main`'s
+    intents name a serial the new catalog no longer declares, so the baseline is
+    "invalid", `classify` fails closed, the CI job dies and `apply` is skipped.
+    A legitimate operation was unrepresentable.
+
+    A baseline is a PAST STATE. It was valid under the catalog it shipped with,
+    and judging it by today's is the same category error as an evidence bundle
+    citing the ticket that authorised the previous version of a rule.
+
+    Both directions are asserted, because the fix is only real if the two paths
+    DIFFER — a test that passes either way is what nearly shipped here."""
+    from fwgitops.cli import run_classify
+
+    before, after = _catalog_pair(tmp_path)
+    base_intent, env_map, _ = _setup(tmp_path / "before")
+    (base_intent / "prod" / "IF.yaml").write_text(DEVICE_INTENT)   # names …894453
+    cur_intent, _, _ = _setup(tmp_path / "after")                   # the device is gone
+
+    msg = tmp_path / "msg.txt"
+    msg.write_text("chore: replace it\n\nRemoves: REQ-2026-0801 (JIRA-9)\n")
+    kw = dict(baseline_root=base_intent, change_message_path=msg, max_tier=True,
+              service_catalog_path=after / "services.yaml",
+              app_catalog_path=after / "apps.yaml")
+
+    # WITHOUT the baseline catalog: the old behaviour, and the blockage.
+    assert run_classify(cur_intent, env_map, **kw) != 0, (
+        "today's catalog cannot parse a baseline that predates it — if this "
+        "passes, the fixture is no longer reproducing the real failure")
+
+    # WITH it: the baseline is judged by its own catalog and the run proceeds.
+    assert run_classify(cur_intent, env_map, baseline_catalog_dir=before, **kw) == 0, (
+        "a baseline read with its own catalog must classify cleanly")

@@ -28,12 +28,12 @@ kind: RouteRequest
 metadata:
   id: REQ-2026-0803
   requester: martono@corp
-  ticket: JIRA-904
+  ticket: JIRA-912
   justification: >-
     Day-1 build for edge firewall fw-prod-edge-4453: default route out the
     untrust interface so the firewall can forward unmatched traffic. Completes
     the ADR-0002 Day-1 chain (Interface -> Zone -> Route) on hardware.
-  requested: "2026-08-04"
+  requested: "2026-08-13"
 
 spec:
   folder: prod-edge

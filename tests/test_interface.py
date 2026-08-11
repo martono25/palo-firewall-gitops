@@ -29,8 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: both. catalog/interfaces.yaml resolves it per scope.
 def _ifcat():
     return InterfaceCatalog.from_dict({"interfaces": {
-        "local": {"folder": "$eth-local", "devices": {"007955000894453": "ethernet1/4"}},
-        "internet": {"folder": "$eth-internet", "devices": {"007955000894453": "ethernet1/3"}},
+        "local": {"folder": "$eth-local", "devices": {"007955000901881": "ethernet1/4"}},
+        "internet": {"folder": "$eth-internet", "devices": {"007955000901881": "ethernet1/3"}},
     }})
 
 
@@ -198,7 +198,7 @@ def test_the_same_role_resolves_differently_per_scope():
     — an intent hardcoding either is wrong the moment its target changes."""
     cat = _ifcat()
     assert cat.resolve("local", device=None) == "$eth-local"
-    assert cat.resolve("local", device="007955000894453") == "ethernet1/4"
+    assert cat.resolve("local", device="007955000901881") == "ethernet1/4"
 
 
 def test_a_role_is_resolved_against_the_intents_actual_target():
@@ -208,7 +208,7 @@ def test_a_role_is_resolved_against_the_intents_actual_target():
 
     at_folder = load_intent(_doc(environment=None, folder="prod-edge"),
                             interface_catalog=_ifcat(), folder_hierarchy=h)
-    at_device = load_intent(_doc(environment=None, device="007955000894453"),
+    at_device = load_intent(_doc(environment=None, device="007955000901881"),
                             interface_catalog=_ifcat(), folder_hierarchy=h)
     assert at_folder.spec.interface == "$eth-local"
     assert at_device.spec.interface == "ethernet1/4"

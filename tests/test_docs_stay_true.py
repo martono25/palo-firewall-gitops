@@ -162,3 +162,396 @@ def test_no_doc_links_to_a_file_that_does_not_exist():
             if not (md.parent / target).exists():
                 broken.append(f"{md.name} → {target}")
     assert not broken, f"broken relative links: {broken}"
+
+
+def test_the_runbook_covers_replacing_a_firewall():
+    """A new serial is threaded through catalog, intents, Terraform roots and
+    evidence, and NOTHING IN CI CATCHES A HALF-DONE REPLACEMENT — an intent
+    naming a stale serial compiles clean.
+
+    The procedure is only useful if it keeps naming the two steps that are
+    outside this repository (deactivate the licence, re-point the inherited SCM
+    defaults) and the one gap that makes ordering matter."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "Replacing a firewall" in runbook
+    for topic, why in (
+        ("Deactivate the old licence", "the entitlement stays bound otherwise"),
+        ("ngfw-shared", "the interface defaults are inherited, not ours"),
+        ("Leave the old evidence bundles alone",
+         "they outlive the device on purpose"),
+        ("does not compare the interface port map against SCM",
+         "the gap that forces steps 2 and 4 to be done together"),
+    ):
+        assert topic in runbook, f"the replacement procedure must still say: {why}"
+
+
+def test_the_sizing_rationale_survives_the_downsize():
+    """The instance type is cheap to change and the REASON is not. Two facts
+    have to stay attached to it: 4 vCPU caps at 4 ENIs on every family (so the
+    ceiling is mgmt + 3 dataplane), and the licence tier auto-scaled with the
+    instance — which is the larger recurring cost and was only ever observed
+    moving UP.
+
+    Dropping either turns a measured decision back into a preference."""
+    var = (REPO_ROOT / "provisioning" / "aws-vmseries-pilot" / "variables.tf").read_text()
+    assert 'default     = "m5.xlarge"' in var, "4 vCPU is the default"
+    assert "cap at 4 ENIs" in var or "caps at 4 ENIs" in var
+    assert "VM-SERIES-16" in var and "UNVERIFIED" in var, (
+        "the licence-tier behaviour, and the half of it that was never observed, "
+        "must stay recorded next to the size that causes it")
+
+
+def test_the_guides_form_a_path_a_new_operator_can_walk():
+    """FOUR GUIDES, ONE ORDER. Each was written for its own reader and they were
+    never chained, so someone starting from nothing had to already know that
+    provisioning does not configure anything and that `building-a-folder.md`
+    exists.
+
+    Asserted as a chain rather than as four files: the failure mode is a guide
+    that stops without saying where you go next, which reads as "you are done"
+    when you are not."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "building-a-folder.md" in prov, (
+        "provisioning must hand off — it stands a firewall up and configures "
+        "nothing")
+    assert "Replacing a firewall" in prov, (
+        "and must divert a rebuild to the procedure that sequences it")
+
+    readme = _flat(REPO_ROOT / "README.md")
+    for nxt in ("provisioning.md", "building-a-folder.md", "requesting-rules.md",
+                "operator-runbook.md"):
+        assert nxt in readme, f"the entry point must name {nxt}"
+
+
+def test_provisioning_states_the_sizing_decision_before_it_is_irreversible():
+    """The licence tier follows the INSTANCE and is set at first registration.
+    A profile sized for 4 vCPU still licenses at VM-SERIES-16 against a 16-vCPU
+    instance, silently, and bills that way from boot.
+
+    So the guide has to say it in the PREREQUISITES, where it can still be acted
+    on, and check it in the verification, where it can still be caught."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "deployment profile" in prov.lower(), "the CSP side must be named"
+    assert "BEFORE the firewall registers" in prov, (
+        "sizing after registration is too late to be free")
+    assert "vm-license" in prov, (
+        "and the verification step must actually read the tier back")
+
+
+def test_provisioning_troubleshoots_the_teardown_that_actually_failed():
+    """FOUND BY FOLLOWING THE GUIDE, 2026-08-10. `terraform destroy` failed with
+    DependencyViolation on the VPC, and the guide had nothing for it.
+
+    The cause is worth keeping by name: Cortex Xpanse Active Response creates its
+    OWN security group as remediation — a narrowed copy of the mgmt group —
+    which Terraform never sees, so destroy removes its own and leaves the copy to
+    block the VPC.
+
+    Recognising it matters more than clearing it. A security tool making live
+    changes to the VPC is a fact about the environment, not a stuck resource."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "DependencyViolation" in prov, "the teardown failure must be documented"
+    # The EXPLANATORY sentence, not the tool name anywhere on the page. The
+    # quoted AWS description also contains "Xpanse Active Response", so a looser
+    # assertion survives the explanation being de-named to "some other tool" —
+    # which a mutation run duly demonstrated.
+    assert "Cortex Xpanse Active Response creates its own security groups" in prov, (
+        "name the tool where the cause is explained — an unexplained security "
+        "group is a mystery, a named one is a finding")
+    assert "non-default security group blocks" in prov, (
+        "the mechanism, so the next person diagnoses rather than guesses")
+
+
+def test_provisioning_says_where_to_run_the_install():
+    """FOUND BY FOLLOWING THE GUIDE, 2026-08-10. The install block was correct
+    read top-to-bottom and wrong the moment the reader was anywhere else — the
+    Steps section sends you into `provisioning/aws-vmseries-pilot/`, and a venv
+    created there is a perfectly valid venv whose `pip install -e .` fails
+    because no `pyproject.toml` sits beside it.
+
+    The error talks about arguments, not about location, so the reader has no
+    way to get from the message to the cause. The guide has to supply that."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "REPOSITORY ROOT" in prov, (
+        "the install step must say WHERE it runs, not just what to type")
+    assert "the trailing `.` IS the argument".replace("`", "") in prov, (
+        "the missing-dot error is the first thing a new operator hits")
+    # Anchored on text UNIQUE TO THE TROUBLESHOOTING ROW. "no pyproject.toml"
+    # also appears in the install block, so an `or` over both phrasings stayed
+    # satisfied when the row was gutted — the fourth time today an assertion
+    # matched prose I had written somewhere else instead of the thing it guards.
+    assert "You are not at the repo root" in prov, (
+        "the wrong-directory failure needs its own troubleshooting row: the pip "
+        "error names an argument, never a location")
+
+
+def test_provisioning_handles_the_second_pass_not_just_the_first():
+    """FOUND BY FOLLOWING THE GUIDE, 2026-08-10. Step 1 says
+    `cp terraform.tfvars.example terraform.tfvars`, which is first-time setup.
+    On a rebuild that file already holds your values, so the instruction either
+    erases them or gets skipped — and nothing then tells the reader which fields
+    do not survive a rebuild.
+
+    The registration PIN is the one that bites: time-limited, single-use, read
+    once at first boot. Expire it and the firewall licenses correctly and never
+    appears in SCM, with nothing failing loudly.
+
+    Same shape as the install-location bug: correct read linearly the first
+    time, silent on the second pass. That is the failure mode of a guide written
+    by someone who has only ever done it once."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "FIRST TIME ONLY" in prov, (
+        "the copy step overwrites a populated tfvars on a rebuild")
+    assert "Rebuilding? Do not re-copy the example" in prov, (
+        "a rebuild needs its own branch, not a re-read of first-time setup")
+    assert "immediately before" in prov and "expires while you work" in prov, (
+        "PIN timing is the trap: generating it at the start of teardown burns "
+        "the window")
+
+
+def test_provisioning_separates_refused_from_timed_out():
+    """FOUND BY FOLLOWING THE GUIDE, 2026-08-10. One row said "`mgmt`
+    unreachable | wrong CIDR, or still booting" — two opposite causes under one
+    symptom, which sends the reader to check a security group that is fine.
+
+    The distinction is free and decisive. TIMEOUT means the packet never
+    arrived: network path, allow-list, wrong address. REFUSED means it arrived
+    and nothing is listening: the path is correct and PAN-OS is still coming up.
+
+    And the guide should say how to CONFIRM rather than wait — console output
+    shows the FIPS-CC integrity stage a first boot sits in."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "Connection refused" in prov and "times out" in prov, (
+        "the two symptoms have opposite causes and need separate rows")
+    assert "TCP reached the host" in prov, (
+        "say what refused MEANS, or the reader still checks the firewall")
+    assert "get-console-output" in prov, (
+        "give a way to see boot progress instead of waiting blind")
+
+
+def test_provisioning_explains_what_onboard_actually_does():
+    """ASKED BY THE OPERATOR FOLLOWING THE GUIDE, 2026-08-10. The command was
+    printed with a bare "verifies placement + sets a friendly display name",
+    which does not say it is a GATE, what exit 3 means, or why a display name
+    would matter.
+
+    Both halves have to stay explained. The placement poll is the gate — without
+    it a mismatched onboarding-rule regex surfaces much later as a confusing
+    Day-1 failure. The display name is the re-onboard signal: a re-registration
+    resets it to PA-VM and silently wipes device-scope config, which is how the
+    2026-08-05 incident was caught."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "onboard does not onboard the firewall" in prov, (
+        "the name misleads — say what the device does for itself")
+    assert "Exit 3 means placement never confirmed" in prov, (
+        "it is a gate; the failure has to be actionable")
+    assert "resets it to PA-VM" in prov, (
+        "the display name exists so a re-onboard is detectable")
+
+
+def test_the_repo_repoint_is_findable_from_both_directions():
+    """RAISED BY THE OPERATOR MID-REBUILD, 2026-08-10: "I don't understand why
+    you want to replace firewall now. I haven't even done the additional day 1
+    provisioning."
+
+    Fair. The repo-side steps — update the serial in four places — lived only
+    under a heading called "Replacing a firewall", which reads as a destructive
+    restart to someone who has just BUILT one. They are not a replacement; they
+    are the bridge between provisioning and Day-1.
+
+    And the ordering is not arbitrary: an InterfaceRequest names its firewall by
+    serial, so the Day-1 chain targets a device that does not exist until the
+    repo is pointed at the real one. Both pages have to say so, because a reader
+    arrives from either side."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "also what you do after building a firewall for the first time" in runbook, (
+        "the section title says replacement; the content is not only that")
+    assert "nothing is destroyed, nothing is undone" in runbook, (
+        "say it plainly — the heading alarms someone who just provisioned")
+
+    folder = _flat(DOCS / "building-a-folder.md")
+    assert "does the repo know your firewall" in folder, (
+        "the Day-1 guide must check the serial before its first step")
+    assert "the interface PORT map is not checked against SCM" in folder, (
+        "be precise about what is unchecked: the SERIAL is validated by "
+        "compile, the port map is not, and overstating the gap teaches the "
+        "reader to distrust checks that work")
+
+
+def test_the_serial_update_says_which_kinds_carry_one():
+    """ASKED BY THE OPERATOR, 2026-08-10, at step 5: "what does this mean?"
+
+    "Update the Day-1 intents that name the device" assumes the reader knows
+    which kinds do. Three of the five files in that directory carry a serial and
+    two do not, and the difference is not arbitrary: an interface address
+    belongs to one firewall, while zones and routes are folder policy every
+    firewall inherits.
+
+    Getting it wrong in the safe direction wastes time; in the unsafe direction
+    the compiler refuses, so the cost is confusion rather than damage — which is
+    exactly the kind of thing a runbook should remove."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "Only InterfaceRequest does" in runbook, (
+        "name the kind that carries a serial, do not imply all of them do")
+    assert "ZoneRequest and RouteRequest do not change" in runbook, (
+        "and say explicitly which ones to leave alone")
+    assert "two cannot share an IP" in runbook, (
+        "the reason, so the reader can generalise to a kind added later")
+
+
+def test_the_catalog_step_lists_display_name_too():
+    """FOUND BY THE OPERATOR AT STEP 4, 2026-08-10. The step said "the `devices:`
+    block", and the obvious edit is the serial key — leaving `display_name`
+    pointing at the old firewall.
+
+    `verify-catalog` catches it, but reports it in the language of the DANGEROUS
+    reading: a display name that disagrees usually means the device was
+    re-onboarded and device-scope config was silently wiped. The check cannot
+    tell which side moved. So the runbook has to name the field, or the operator
+    meets a scary note for a benign reason and learns to wave the check away."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "display_name" in runbook, (
+        "name the field — 'the devices: block' reads as just the serial")
+    assert "cannot tell which side moved" in runbook, (
+        "explain why the note sounds alarming for a harmless cause")
+
+
+def test_the_replacement_covers_everywhere_the_serial_is_written():
+    """FOUND BY THE OPERATOR, 2026-08-10, after finishing steps 4-6: eight tests
+    red. The serial is not only in the catalog, the intents and a Terraform
+    root — around a dozen test files carry it, and so do the live guides, one of
+    which is pinned by a test asserting its examples match the real intents.
+
+    `git rm` is also only half the cleanup: it removes TRACKED files, leaving
+    `.terraform/`, `backend.hcl` and stray plans behind, so the old root
+    survives on disk.
+
+    ADRs stay as written — an ADR records a decision made at a time, and
+    rewriting it is revisionism."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "git rm only removes TRACKED files" in runbook, (
+        "the old root survives on disk otherwise")
+    assert "will not pass CI until they follow" in runbook, (
+        "tests carry the serial; say so before the operator finds out from a "
+        "red build")
+    assert "docs/adr/ — leave alone" in runbook, (
+        "and say what must NOT be rewritten, or someone tidies the history")
+
+
+def test_the_runbook_warns_that_a_new_firewall_fails_to_commit_first():
+    """FOUND BY THE OPERATOR, 2026-08-10, between the repo re-point and Day-1:
+    `device-sync` showed an SCM commit failing with "can't find interface in
+    'default' for next hop 10.100.2.1".
+
+    Nothing was wrong. Zones, routers and rules are FOLDER-scoped and survived
+    the rebuild, so the new firewall inherited them the moment it joined —
+    including a default route. Interface addressing is DEVICE-scoped and died
+    with the old firewall, so SCM validated a route against a device with no
+    interface in that subnet.
+
+    This is ADR-0002's ordered chain seen from the other end, and it reads as
+    breakage to anyone who has not internalised the scope split. An operator who
+    stops here to debug a working system has lost the afternoon."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "inherits the folder's policy the instant it joins" in runbook, (
+        "explain WHY a fresh firewall has policy it cannot satisfy")
+    assert "Nothing is wrong" in runbook, (
+        "say so plainly — the error looks like a misconfiguration")
+    assert "the rebuild changed the topology" in runbook, (
+        "and give the test that separates the benign case from the real one")
+
+
+def test_the_day1_guide_says_how_to_actually_apply():
+    """RAISED BY THE OPERATOR, 2026-08-10: "this command is not clear and it is
+    not in your guide."
+
+    Fair. "Applying the chain" explained tiering, apply-order and evidence, and
+    never said what to TYPE. A reader finished it knowing the concepts and not
+    the actions — and the key fact was missing entirely: you do not run the
+    apply, merging to `main` runs it.
+
+    The stale-ticket gate belongs here too. Editing an existing intent rather
+    than adding one is the normal case during a rebuild, and it is rejected
+    until the ticket changes."""
+    guide = _flat(DOCS / "building-a-folder.md")
+    assert "You do not run the apply. Merging to main runs it." in guide, (
+        "the central fact — the trigger is the merge, not a command")
+    assert "gh pr create" in guide and "gh pr merge" in guide, (
+        "give the actual commands, not a description of the workflow")
+    assert "give it a new ticket" in guide, (
+        "editing an existing intent is the normal rebuild case and it is gated")
+
+
+def test_each_guide_hands_off_at_the_point_the_work_ends():
+    """RAISED BY THE OPERATOR, 2026-08-10, after three separate stalls:
+    "from provisioning.md there is no instruction to go to operator-runbook.md
+    with exact step. From there, there is no instruction to go to
+    building-a-folder.md. You keep making mistake that user has done this
+    multiple times."
+
+    Correct, and it was the same root cause each time. A "read these in order"
+    table at the TOP of a document is not a handoff. The reader needs it at the
+    moment the work ends, naming the destination SECTION and STEP — anything
+    vaguer assumes they already know the shape of the system, which is exactly
+    what a first-timer does not have.
+
+    So each phase ends with an explicit NEXT: provisioning -> the repo re-point
+    (steps 4-10, listed) -> Day-1 -> requesting a rule."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "NEXT: the repository does not know this firewall yet" in prov
+    assert "steps 4 to 10" in prov, (
+        "name the steps — 'see the runbook' is what stalled the operator")
+
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "NEXT: configure the firewall from Git" in runbook
+    assert "Applying the chain" in runbook, (
+        "and point at the section that actually ships it")
+
+    folder = _flat(DOCS / "building-a-folder.md")
+    assert "NEXT: prove it end to end, then hand it over" in folder
+
+
+def test_the_runbook_warns_the_first_push_may_be_refused():
+    """ASKED BY THE OPERATOR, 2026-08-10: "do I need to run fwgitops device-sync
+    as in your guide?"
+
+    They did not, but its NOTE predicted a failure they were about to hit: the
+    pipeline pushes admin-scoped, and SCM is documented to refuse that while
+    `is_first_push_done` is false. "Your first apply on a new firewall may fail
+    at the push" should not have to be inferred from a note on an optional
+    read-only command.
+
+    The mixed evidence is part of the entry on purpose. `devicesync.py` recorded
+    the flag staying false across two SUCCESSFUL pushes, so the honest guidance
+    is "this may happen, failing is safe, here is the recovery" rather than a
+    confident prediction either way."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "The first push to a fresh firewall may be refused" in runbook
+    assert "evidence is mixed" in runbook, (
+        "do not state a confident cause the record does not support")
+    assert "Failing is safe" in runbook and "--all-admins" in runbook, (
+        "say the blast radius and give the recovery")
+    assert "Do not pre-emptively run this" in runbook, (
+        "an empty push mints a version for no change")
+
+
+def test_the_apply_sequence_says_which_starting_state_it_assumes():
+    """ASKED BY THE OPERATOR, 2026-08-10: "which one is correct? your
+    instruction or guide?"
+
+    Both were. The guide assumed starting on `main` with uncommitted changes;
+    the operator was on a feature branch with most of the work already committed,
+    having arrived from the replacement runbook. `git checkout -b` there forks
+    the branch you are already on, and `git add catalog/ terraform/` stages
+    nothing.
+
+    Same root cause as every other stall today: a procedure correct for one
+    starting state, silent about which state it assumes. A command sequence has
+    a precondition and it has to be written down."""
+    guide = _flat(DOCS / "building-a-folder.md")
+    assert "Starting on main with uncommitted changes" in guide, (
+        "name the state the branch-and-commit sequence assumes")
+    assert "Already on a branch" in guide, (
+        "and cover the state an operator arriving from the runbook is in")
+    assert "you would fork the branch you are on" in guide, (
+        "say what goes wrong, not just what to do instead")

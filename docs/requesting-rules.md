@@ -507,7 +507,7 @@ metadata:
   justification: "Address the DMZ interface on the edge firewall"
   requested: 2026-08-10
 spec:
-  device: "007955000894453"   # a firewall SERIAL — addressing is per-device
+  device: "007955000901881"   # a firewall SERIAL — addressing is per-device
   interface: dmz              # a ROLE from catalog/interfaces.yaml, not a port
   ip:
     - 10.100.3.1/24

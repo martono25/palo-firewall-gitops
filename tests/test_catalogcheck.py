@@ -35,7 +35,7 @@ folders:
     children: []
     targetable: true
     devices:
-      "007955000894453":
+      "007955000901881":
         display_name: fw-a
         model: PA-VM
         targetable: true
@@ -45,8 +45,8 @@ LIVE_OK = [
     {"name": "All", "type": "container", "parent": ""},
     {"name": "ngfw-shared", "type": "container", "parent": "All"},
     {"name": "prod-edge", "type": "container", "parent": "ngfw-shared"},
-    {"name": "007955000894453", "type": "on-prem", "parent": "prod-edge",
-     "serial_number": "007955000894453", "model": "PA-VM"},
+    {"name": "007955000901881", "type": "on-prem", "parent": "prod-edge",
+     "serial_number": "007955000901881", "model": "PA-VM"},
 ]
 
 
@@ -108,9 +108,9 @@ def test_a_device_declared_as_a_FOLDER_is_caught():
     cat = """
 folders:
   ngfw-shared:
-    children: ["007955000894453"]
+    children: ["007955000901881"]
     targetable: false
-  "007955000894453":
+  "007955000901881":
     children: []
     targetable: true
 """
@@ -139,7 +139,7 @@ def test_a_firewall_under_a_different_folder_is_caught():
     v2.0 re-parenting case, arriving by surprise."""
     rows = [dict(r) for r in LIVE_OK]
     for r in rows:
-        if r["name"] == "007955000894453":
+        if r["name"] == "007955000901881":
             r["parent"] = "GitOps"
     findings = compare(_h(), _live(rows))
     assert len(findings) == 1
@@ -160,7 +160,7 @@ interfaces:
   local:
     folder: $eth-local
     devices:
-      "007955000894453": ethernet1/4
+      "007955000901881": ethernet1/4
       "007955000893662": ethernet1/4
 """))
     findings = compare_interfaces(ifcat, _h(), _live())
@@ -251,7 +251,7 @@ def test_a_reset_display_name_is_NOTED():
         '        display_name: fw-a\n', '        display_name: fw-a\n')
     rows = [dict(r) for r in LIVE_OK]
     for r in rows:
-        if r["name"] == "007955000894453":
+        if r["name"] == "007955000901881":
             r["display_name"] = "PA-VM"          # what a re-onboard leaves behind
     findings = compare(_h(cat), _live(rows))
     hits = [f for f in findings if "display_name" in f.message]
@@ -266,7 +266,7 @@ def test_a_matching_display_name_is_silent():
         '        display_name: fw-a\n', '        display_name: fw-a\n')
     rows = [dict(r) for r in LIVE_OK]
     for r in rows:
-        if r["name"] == "007955000894453":
+        if r["name"] == "007955000901881":
             r["display_name"] = "fw-a"
     assert not [f for f in compare(_h(cat), _live(rows)) if "display_name" in f.message]
 
@@ -278,6 +278,6 @@ def test_a_device_with_no_declared_display_name_is_not_reported():
     bare = CATALOG.replace("        display_name: fw-a\n", "")
     rows = [dict(r) for r in LIVE_OK]
     for r in rows:
-        if r["name"] == "007955000894453":
+        if r["name"] == "007955000901881":
             r["display_name"] = "anything-at-all"
     assert not [f for f in compare(_h(bare), _live(rows)) if "display_name" in f.message]

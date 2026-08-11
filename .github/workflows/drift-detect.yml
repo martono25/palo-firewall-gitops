@@ -29,7 +29,7 @@ jobs:
     # THE SCHEDULE ONLY RUNS WHILE THE FIREWALL IS UP.
     #
     # The pilot is suspended in AWS between test sessions to stop the EC2 draw
-    # (m5.4xlarge — sized for ENIs, not CPU; see
+    # (m5.xlarge — sized for ENIs, not CPU; see
     # provisioning/aws-vmseries-pilot/variables.tf). With it stopped, every
     # nightly run fails on `device-sync` and the SCM reads — and a red run every
     # morning for a known-absent firewall is exactly how a real alert gets

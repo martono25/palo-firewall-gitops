@@ -33,12 +33,12 @@ kind: ZoneRequest
 metadata:
   id: REQ-2026-0806
   requester: martono@corp
-  ticket: JIRA-906
+  ticket: JIRA-913
   justification: >-
     Declare the dmz zone on the edge firewall folder and bind it to the DMZ
     interface addressed by REQ-2026-0805. Proves kind #2 end to end on real
     hardware — the last Day-1 kind never verified on a device.
-  requested: "2026-08-05"
+  requested: "2026-08-13"
 
 spec:
   folder: prod-edge

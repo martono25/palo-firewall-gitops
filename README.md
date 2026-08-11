@@ -15,6 +15,20 @@ as is safe.
 
 ## Guides
 
+**Starting from nothing?** The four guides hand off to each other in this order,
+and each one ends by pointing at the next:
+
+```
+provisioning.md  ->  building-a-folder.md  ->  requesting-rules.md  ->  operator-runbook.md
+ stand up a           configure it from        add a rule              run it day to day
+ firewall             Git (interfaces,
+                      zones, routes)
+```
+
+**Replacing a firewall that already exists** starts somewhere else — the serial
+is threaded through the catalog, the intents and a Terraform root, and the order
+matters: [`operator-runbook.md` § Replacing a firewall](docs/operator-runbook.md#replacing-a-firewall-new-serial).
+
 | I want to… | Guide | Who |
 |---|---|---|
 | **Request a firewall rule** (write intent → PR) | [`docs/requesting-rules.md`](docs/requesting-rules.md) | any engineer |

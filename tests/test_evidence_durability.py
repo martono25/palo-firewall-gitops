@@ -141,8 +141,8 @@ def test_a_device_scoped_bundle_lands_under_its_own_directory():
 
     p = bundle_path("evidence", {"req_id": "REQ-2026-0801",
                                  "compiled": {"scope": {"kind": "device",
-                                                        "value": "007955000894453"}}})
-    assert p == Path("evidence/device-007955000894453/REQ-2026-0801.json")
+                                                        "value": "007955000901881"}}})
+    assert p == Path("evidence/device-007955000901881/REQ-2026-0801.json")
 
 
 # ── the approval evidence must actually be COLLECTED ──────────────────────
@@ -200,7 +200,7 @@ def _apply_loop() -> str:
 def test_a_scope_with_no_RULES_is_still_applied():
     """MEASURED on the first successful apply (2026-08-09, run 31304463821): the
     loop guarded on `rules.auto.tfvars.json`, printed "no rules in
-    device-007955000894453 — skip", and Terraform never ran against a root
+    device-007955000901881 — skip", and Terraform never ran against a root
     holding three InterfaceRequests. The job reported success.
 
     Nothing broke that day only because those interfaces had already been applied
@@ -653,3 +653,59 @@ def test_a_missing_token_is_announced_not_silently_tolerated():
         assert "HAS_PAT" in (step.get("env") or {}), name
         assert "::warning::" in step["run"] and "AUTOMATION_PR_TOKEN" in step["run"], (
             f"{name}: an absent or expired token must be visible in the run")
+
+
+def test_EVERY_workflow_that_materialises_a_baseline_brings_its_catalog():
+    """The version of the test below that I should have written first.
+
+    That one asserted `apply.yml` and passed while `pr-validate.yml` — which has
+    its own `git archive` and its own `classify --baseline` — still failed on a
+    correct pull request. Fixing one producer and leaving another is the same
+    defect three times over today: tier routing shipping inert, `push --record`
+    with nothing supplying it, and this.
+
+    So this looks for the PATTERN across every workflow rather than naming the
+    file I happened to be editing. Any `git archive` of a baseline must bring
+    `catalog`, and any `--baseline` must be accompanied by `--baseline-catalog`.
+    """
+    for name, wf in _all_workflows().items():
+        for body in _run_bodies(wf):
+            if "git archive" in body and "intent" in body:
+                assert "intent catalog" in body, (
+                    f"{name}: archives a baseline without its catalog — the "
+                    f"baseline will be judged by today's catalog")
+            # Strip the compound flag first, so what remains is only the bare
+            # `--baseline` this is actually asking about.
+            bare = body.replace("--baseline-catalog", "")
+            if "--baseline" in bare:
+                assert "--baseline-catalog" in body, (
+                    f"{name}: passes --baseline without --baseline-catalog, so "
+                    f"a changed catalog makes a correct changeset unparseable")
+
+
+def test_the_workflow_archives_the_catalog_with_the_baseline():
+    """MEASURED 2026-08-10: the pipeline could not apply a firewall replacement.
+
+    `git archive "$base" intent` brought the baseline's INTENTS and left its
+    catalog behind, so both trees were parsed with today's. Replace a firewall
+    and `main`'s intents name a serial the new catalog no longer declares — the
+    baseline reads as invalid, classify fails closed, and apply is skipped.
+
+    The CLI fix (`--baseline-catalog`) is inert unless the workflow archives the
+    catalog and passes it. Both halves are asserted, in both jobs, because the
+    flag existing while nothing supplies it is the same shape as the defect."""
+    steps = _steps() + _workflow()["jobs"]["classify"]["steps"]
+    archives = [s["run"] for s in steps if "git archive" in str(s.get("run", ""))]
+    assert archives, "the baseline is materialised with git archive"
+    for body in archives:
+        assert 'git archive "$base" intent catalog' in body, (
+            "the baseline's own catalog must come with it")
+
+    tier = [s for s in _workflow()["jobs"]["classify"]["steps"]
+            if s.get("id") == "tier"][0]["run"]
+    assert "--baseline-catalog" in tier, (
+        "classify must judge the baseline by the catalog it shipped with")
+
+    ev = [s["run"] for s in _steps() if "fwgitops evidence" in str(s.get("run", ""))][0]
+    assert "--baseline-catalog" in ev, (
+        "and so must evidence — a removal is only visible if the baseline parses")

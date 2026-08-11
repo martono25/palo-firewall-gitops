@@ -185,4 +185,4 @@ def test_the_old_hostname_key_is_REJECTED():
     with pytest.raises(CatalogError, match="renamed to `display_name`"):
         FolderHierarchy.from_dict({"folders": {"prod-edge": {
             "children": [], "targetable": True,
-            "devices": {"007955000894453": {"hostname": "fw-a", "targetable": True}}}}})
+            "devices": {"007955000901881": {"hostname": "fw-a", "targetable": True}}}}})

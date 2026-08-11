@@ -41,10 +41,16 @@ resource "aws_subnet" "dataplane" {
 # present in config but had NO hardware behind them — placeholder MACs
 # (ba:db:ad:ba:db:03/04), link down, unable to pass traffic.
 #
-# index 2 is created only to keep the device indexes CONTIGUOUS. PAN-OS is
-# documented to map by index, so a gap ought to be fine, but "ought to be" is
-# what has cost this project time twice; one spare ENI is cheaper than finding
-# out. It is deliberately unconfigured on the firewall.
+# The indexes are CONTIGUOUS from 1, and that is why the spare ENI is gone. It
+# existed only to bridge a gap up to indexes 3 and 4, which is where
+# $eth-internet and $eth-local used to resolve. With those SCM defaults
+# re-pointed to ethernet1/2 and ethernet1/1, the three dataplane roles sit at
+# 1, 2 and 3 with nothing wasted — and the whole firewall fits 4 ENIs, which is
+# the ceiling for a 4-vCPU instance on every family in this region.
+#
+# The contiguity itself is still deliberate. PAN-OS is documented to map by
+# index, so a gap ought to be fine, but "ought to be" is what has cost this
+# project time twice.
 resource "aws_subnet" "untrust" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = var.untrust_subnet_cidr

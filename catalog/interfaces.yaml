@@ -80,14 +80,14 @@ interfaces:
     # Name at DEVICE scope, per firewall. A firewall absent here cannot be
     # targeted for this role: fail closed rather than guess a port.
     devices:
-      "007955000894453": ethernet1/4
+      "007955000901881": ethernet1/1
 
   internet:
     description: Outside / untrust segment.
     folder: $eth-internet
     # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
     devices:
-      "007955000894453": ethernet1/3
+      "007955000901881": ethernet1/2
 
   dmz:
     description: >-
@@ -103,7 +103,7 @@ interfaces:
     # The port must agree with every mapped firewall in that folder; a
     # disagreement is a rejection, not a coin flip (see catalog.py).
     create_in:
-      prod-edge: ethernet1/2
+      prod-edge: ethernet1/3
     # NOT universal. `local` and `internet` are expected on every firewall here,
     # so one missing them is a catalog gap and the coverage test says so. A DMZ
     # port is a property of one site's wiring — 4453 has an ENI at device index
@@ -124,4 +124,4 @@ interfaces:
       # ethernet1/2 = ENI device index 2, 10.100.1.110/24. A firewall absent
       # from this map cannot be targeted for this role — fail closed rather than
       # guess a port that may have no ENI behind it.
-      "007955000894453": ethernet1/2
+      "007955000901881": ethernet1/3

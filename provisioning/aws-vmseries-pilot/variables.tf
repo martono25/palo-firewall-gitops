@@ -23,37 +23,47 @@ variable "vmseries_ami_id" {
 }
 
 variable "instance_type" {
-  description = "VM-Series supported instance type (min m5.xlarge = 4 vCPU)."
+  description = "VM-Series supported instance type (m5.xlarge = 4 vCPU, 4 ENIs)."
   type        = string
   default     = "m5.xlarge"
 
   # SIZED FOR ENIs, NOT FOR CPU. On AWS a VM-Series interface exists only if an
   # ENI sits at the matching device index, and the ENI limit scales with
-  # instance size, not with vCPU:
+  # instance size rather than with vCPU. Checked against
+  # `aws ec2 describe-instance-types` in ap-southeast-1 rather than recalled:
   #
-  #   m5.xlarge   4 vCPU   4 ENIs   -> ethernet1/1 .. 1/3 at most
+  #   EVERY 4-vCPU type in this region caps at 4 ENIs — m5, c5, r8i, x2iedn,
+  #   t3, z1d, all of them. There is no 4-vCPU escape hatch.
+  #
+  #   m5.xlarge   4 vCPU   4 ENIs   -> mgmt + ethernet1/1 .. 1/3
   #   m5.2xlarge  8 vCPU   4 ENIs   -> no gain at all
   #   m5.4xlarge 16 vCPU   8 ENIs   -> ethernet1/4 reachable
   #
-  # No 4-vCPU type in ap-southeast-1 offers more than 4 ENIs, so backing
-  # ethernet1/4 costs a 16-vCPU instance.
+  # So the ceiling is mgmt + THREE dataplane interfaces, and that is what this
+  # deployment uses: `local`, `internet`, `dmz`. Palo Alto lists m5.xlarge
+  # (4 vCPU, 16 GB, 4 ENIs) as a recommended VM-Series type on the Nitro/ENA
+  # path, VM-300 class.
   #
-  # THE LICENCE FOLLOWS THE INSTANCE. On resize, PAN-OS did NOT stay capped at
-  # the old tier — it auto-scaled `vm-license: VM-SERIES-4 -> VM-SERIES-16`
-  # (vm-cap-tier T3-64GB), verified live 2026-08-03. Under flexible VM-Series
-  # licensing the tier drives CREDIT CONSUMPTION, so this instance now draws
-  # roughly 4x the credits. That recurring cost is larger than the EC2 delta and
-  # is the real price of `ethernet1/4`.
+  # WHAT MADE THIS EXPENSIVE was never the CPU — it was the interface NAMING.
+  # $eth-internet and $eth-local are SCM defaults inherited from `ngfw-shared`,
+  # and they resolved to ethernet1/3 and ethernet1/4. Index 4 forces a 5th ENI,
+  # which forces 16 vCPU. Re-pointing those defaults to ethernet1/2 and
+  # ethernet1/1 removes the requirement entirely.
   #
-  # THIS SIZE IS DEV/TEST ONLY. A production firewall here is 1 mgmt + 2
-  # dataplane interfaces = 3 ENIs, which m5.xlarge (4 ENIs, 4 vCPU) covers with
-  # room to spare. The ONLY reason this pilot needs 16 vCPU is that the SCM
-  # folder variables name ethernet1/3 and ethernet1/4 — device indexes 3 and 4,
-  # forcing a 5th ENI. Point them at ethernet1/1 and ethernet1/2 and the whole
-  # requirement disappears.
+  # THE LICENCE FOLLOWS THE INSTANCE. On the resize UP, PAN-OS did not stay
+  # capped at the old tier — it auto-scaled `vm-license: VM-SERIES-4 ->
+  # VM-SERIES-16` (vm-cap-tier T3-64GB), verified live 2026-08-03. Under
+  # flexible licensing the tier drives CREDIT CONSUMPTION, so the 16-vCPU
+  # instance drew roughly 4x the credits, which is a larger recurring cost than
+  # the EC2 delta.
   #
-  # So: do not carry this instance_type into a production build. Carry the
-  # interface NAMING decision instead — that is what sets the floor.
+  # WHETHER IT SCALES BACK DOWN IS UNVERIFIED. Only the upward move was
+  # observed. After a downsize, check it rather than assuming:
+  #
+  #   ssh admin@<mgmt-ip> 'show system info' | grep -E "vm-license|vm-cap-tier"
+  #
+  # If the tier stays at VM-SERIES-16 the credits keep burning and the saving is
+  # only the EC2 half, which changes the arithmetic — so this is worth a minute.
 }
 
 variable "ssh_key_name" {

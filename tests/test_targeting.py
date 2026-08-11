@@ -32,7 +32,7 @@ from fwgitops.resolve import EnvMap  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SANDBOX = "GitOps"          # a real container folder, targetable
-DEVICE = "007955000894453"  # an `on-prem` DEVICE entry — NOT a folder
+DEVICE = "007955000901881"  # an `on-prem` DEVICE entry — NOT a folder
 
 
 def _hierarchy():
@@ -356,7 +356,7 @@ def test_scope_round_trips_through_its_directory_name():
 
     The scheduled drift job iterates `terraform/*/` and passed each directory to
     `snapshot` as a FOLDER. For the device root that is `device-<serial>`, which
-    SCM rejects — "Folder device-007955000894453 doesn't exist" — the
+    SCM rejects — "Folder device-007955000901881 doesn't exist" — the
     folder-vs-device confusion this project keeps meeting, arriving through a
     workflow instead of an intent. Broke drift-detect on 2026-08-08.
     """

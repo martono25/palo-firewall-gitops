@@ -3,6 +3,218 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed — the pilot drops to 4 vCPU, and the reason is the interface naming
+
+`m5.xlarge`, 4 vCPU, 4 ENIs. The 16-vCPU instance was never about CPU: an ENI
+must sit at the matching device index for a VM-Series interface to exist, and
+`$eth-internet` / `$eth-local` resolved to `ethernet1/3` and `ethernet1/4` —
+index 4 forces a fifth ENI, and a fifth ENI forces 16 vCPU.
+
+Checked rather than recalled: **every** 4-vCPU instance type in
+`ap-southeast-1` caps at 4 ENIs — m5, c5, r8i, x2iedn, t3, z1d. There is no
+4-vCPU escape hatch, so the ceiling is mgmt plus three dataplane interfaces.
+That is exactly what this deployment uses.
+
+The saving is paid twice over: the EC2 delta, and a licence tier that auto-scaled
+`VM-SERIES-4 → VM-SERIES-16` with the instance (verified 2026-08-03) and drew
+roughly 4x the credits. **Whether it scales back down is unverified** — only the
+upward move was observed — so the rationale now carries the command to check it
+after a downsize rather than an assumption.
+
+`firewall.tf` drops the spare ENI that existed only to bridge the gap up to
+indexes 3 and 4; the three roles now sit contiguously at 1, 2 and 3.
+
+**This cannot be applied before the SCM change it depends on.** `$eth-local` and
+`$eth-internet` are defaults inherited from `ngfw-shared` — this platform does
+not own them, and `catalog/interfaces.yaml` only mirrors them. Building this
+layout against the old defaults gives you zones bound to ports with no ENI
+behind them.
+
+### Fixed — the guides now form a path a new operator can walk
+
+Four guides existed and none of them handed off. Someone starting from nothing
+had to already know that `provisioning.md` stands a firewall up and configures
+*nothing*, and that `building-a-folder.md` is where the interfaces, zones and
+routes come from. That is knowledge you only have if you already did it.
+
+`provisioning.md` also opened by describing Day-1 GitOps as a **v2.0 target**.
+It has been built and proven on hardware since v2.0.0 — the banner told a new
+reader the opposite of the truth, which is the failure mode this project keeps
+removing from its own code.
+
+Now: README shows the chain, each guide names the next, and a rebuild is diverted
+up front to the procedure that sequences it rather than starting at step 1 and
+discovering the ordering the hard way.
+
+**Sizing moved into the prerequisites, where it can still be acted on.** The
+licence tier follows the INSTANCE and is fixed at first registration, so a
+deployment profile sized for 4 vCPU still licenses at `VM-SERIES-16` against a
+16-vCPU instance — silently, and billing that way from boot. The guide now states
+it before `terraform apply` and reads the tier back in the verification step,
+which is the last moment it is cheap to catch.
+
+### Fixed — `terraform destroy` had no troubleshooting for the way it actually fails
+
+Found by following the guide, not by reading it. `terraform destroy` failed with
+`DependencyViolation` deleting the VPC, and `provisioning.md` had nothing for it.
+
+The cause is worth knowing by name: **Cortex Xpanse Active Response creates its
+own security group** — a narrowed copy of the mgmt group, described as *"copied
+from rule … by Xpanse Active Response module"*. It remediated the exposed
+management plane by making that copy, which Terraform never sees. So `destroy`
+deleted its own group, left the copy behind, and a non-default security group
+blocks `DeleteVpc`.
+
+The guide now has the enumeration commands for every VPC dependency, the
+mechanism, and the reason to read the group before deleting it: a security tool
+making live changes to this VPC is a fact about the environment rather than a
+stuck resource, and the `/32`s in that group may be the only place an operator IP
+is written down. One of them was — the address previously logged as a stale
+allow-list entry turned out to be part of Xpanse's remediation.
+
+### Fixed — the install step never said where to run it
+
+Found by following the guide. `pip install -e .` was correct read top-to-bottom
+and wrong the moment the reader was anywhere else — and `provisioning.md` sends
+you into `provisioning/aws-vmseries-pilot/` for the Terraform steps.
+
+A venv created there is a perfectly valid venv. `pip install -e .` then fails
+because no `pyproject.toml` sits beside it, and **the error talks about arguments
+rather than about location**, so there is no path from the message to the cause.
+
+The install block now states that it runs from the repository root, says the
+trailing `.` is the argument, and tells a reader who is already set up to
+reactivate rather than reinstall — the venv survives `cd`, so one is all anyone
+needs. Two troubleshooting rows added for the exact errors.
+
+### Fixed — the provisioning steps only worked the first time
+
+Found by following the guide. Step 1 is `cp terraform.tfvars.example
+terraform.tfvars`, which is first-time setup. On a **rebuild** that file already
+holds your values, so the instruction either erases them or gets skipped — and
+nothing then tells the reader which fields do not survive a rebuild.
+
+The registration PIN is the one that bites. Time-limited, single-use, written
+into the S3 bootstrap package and read **once at first boot**. Expire it and the
+firewall comes up, licenses correctly, and never appears in SCM
+(`device-certificate-status: None`). Nothing fails loudly; you wait for a device
+that is never coming.
+
+The copy step is now marked first-time-only, and a rebuild branch lists every
+field that needs refreshing and when — including generating the PIN
+*immediately before* `terraform apply` rather than at the start of teardown,
+which is how the window gets burned.
+
+Same shape as the install-location fix above: correct read linearly the first
+time, silent on the second pass. That is the failure mode of a guide written by
+someone who has only ever done it once.
+
+### Fixed — `onboard` was printed without saying what it does
+
+Asked by the operator walking the guide: the command appeared with a bare
+comment, *"verifies placement + sets a friendly display name"*. That does not say
+it is a **gate**, what exit 3 means, or why a display name would matter.
+
+It also misleads by name. **`onboard` does not onboard the firewall** — the
+device registers itself on first boot and the serial-number onboarding rule
+places it. This command finalises and verifies:
+
+- **Bounded placement poll, fails closed.** It waits until SCM reports `<serial>`
+  in `--folder`, and raises if it never does. Auto-placement is asynchronous and
+  silent, so without this a mismatched onboarding-rule regex surfaces much later
+  as a confusing Day-1 failure.
+- **Sets the display name**, which exists so a re-onboard is *detectable*: a
+  re-registration resets it to `PA-VM`, `verify-catalog` compares it, and a
+  reverted name is the symptom that device-scope config was silently wiped
+  (2026-08-05).
+
+Placement is confirmed before the name is set — naming a device that is not where
+you think it is puts a confident label on the wrong thing.
+
+### Fixed — the repo re-point was only findable under "Replacing a firewall"
+
+Raised by the operator mid-rebuild: *"I don't understand why you want to replace
+firewall now. I haven't even done the additional day 1 provisioning."*
+
+Fair, and the doc caused it. The repo-side steps — update the serial in four
+places — lived only under a heading called **Replacing a firewall**, which reads
+as a destructive restart to someone who has just *built* one. They are not a
+replacement. They are the bridge between `provisioning.md` and
+`building-a-folder.md`, and they apply to a first build exactly as much as to a
+rebuild.
+
+The ordering is not arbitrary either, and neither page said why: an
+`InterfaceRequest` names its firewall **by serial**, so the Day-1 chain targets a
+device that does not exist until the repo is pointed at the real one.
+
+Now the runbook says up front that steps 4-8 apply either way and that nothing is
+destroyed, and `building-a-folder.md` opens by checking the serial — because a
+reader arrives from either direction, and skipping it fails silently: an intent
+naming a stale serial compiles clean and dies at apply.
+
+### Fixed — three corrections found by an operator walking the rebuild
+
+**The serial IS validated, and the runbook said it was not.** `compile` rejects
+an intent naming a firewall the catalog does not declare, with the file, the
+field and the fix — demonstrated 2026-08-10 by doing step 4 and pausing before
+step 5. The docs claimed a stale serial "compiles clean". Overstating a gap
+teaches a reader to distrust checks that work, so the claim is now narrowed to
+what is genuinely unchecked: the interface **port map** against SCM's real
+`default_value`.
+
+**Step 4 named the `devices:` block but not `display_name`.** The obvious edit is
+the serial key, which leaves the name pointing at the old firewall.
+`verify-catalog` catches it, but reports it in the language of the *dangerous*
+reading — a mismatched name usually means a re-onboard silently wiped
+device-scope config. The check cannot tell which side moved, and the runbook now
+says so, or an operator meets an alarming note for a benign cause and learns to
+wave the check away.
+
+**Step 5 did not say which kinds carry a serial.** Only `InterfaceRequest` does:
+an interface address belongs to one firewall, while zones and routes are folder
+policy every firewall inherits. Three of the five files in that directory change
+and two must not.
+
+### Fixed — the replacement procedure stopped short of what a rebuild touches
+
+Found by finishing steps 4-6 and getting eight red tests. The serial is not only
+in the catalog, the intents and a Terraform root: **around a dozen test files
+carry it**, some as fixtures and some asserting against the real tree, and so do
+the live guides — `building-a-folder.md` is pinned by a test that its examples
+still match the real intent files, so a stale serial there is a red build rather
+than a cosmetic wart.
+
+`git rm -r terraform/device-<old>` is also half the cleanup. It removes TRACKED
+files and leaves `.terraform/`, `backend.hcl` and stray `*.tfplan` behind, so the
+old root survives on disk and `apply-order` still sees it. The old state object
+lingers in the backend describing a firewall that no longer exists.
+
+`docs/adr/` is now explicitly excluded. An ADR records a decision made at a time;
+rewriting it is revisionism, the same reason the old evidence bundles stay.
+
+The step also names the fix it wants: a test needing the live serial should READ
+it from `catalog/folders.yaml` rather than hard-code it, so a rebuild churns one
+file instead of a dozen.
+
+### Added — how to replace a firewall
+
+A new serial is threaded through the catalog, the Day-1 intents, a Terraform
+root and the evidence tree, and **nothing in CI catches a half-done
+replacement**: an intent naming a stale serial compiles clean.
+
+`operator-runbook.md` now has the ordered procedure, including the two steps that
+are outside this repository (deactivate the licence before destroying the
+instance; re-point the inherited SCM defaults while the firewall is down) and the
+one that is a judgement call — old evidence bundles stay, because they are the
+record of changes that really happened on a firewall that really existed.
+
+**Known gap, stated where it matters:** `verify-catalog` checks the folder
+hierarchy and does not compare the interface port map against SCM. Nothing else
+does either, so a catalog disagreeing with the real `default_value` writes the
+wrong port with no error at any stage.
+
 ## [2.1.1] — 2026-08-10
 
 ### Correction — the client id was not a credential, and v2.1.0 over-called it

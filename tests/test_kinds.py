@@ -124,13 +124,13 @@ def test_a_firewall_scope_never_merges_with_its_folders():
     state."""
     from fwgitops.compiler import Scope
     in_folder = CompiledZone(folder="prod-edge", name="z", zone_type="layer3", interfaces=[])
-    on_device = CompiledZone(device="007955000894453", name="z", zone_type="layer3",
+    on_device = CompiledZone(device="007955000901881", name="z", zone_type="layer3",
                              interfaces=[])
     grouped = group_by_kind_and_scope([in_folder, on_device])
     assert grouped[("ZoneRequest", Scope("folder", "prod-edge"))] == [in_folder]
-    assert grouped[("ZoneRequest", Scope("device", "007955000894453"))] == [on_device]
+    assert grouped[("ZoneRequest", Scope("device", "007955000901881"))] == [on_device]
     # And they land in different Terraform roots.
-    assert Scope("device", "007955000894453").dirname == "device-007955000894453"
+    assert Scope("device", "007955000901881").dirname == "device-007955000901881"
     assert Scope("folder", "prod-edge").dirname == "prod-edge"
 
 

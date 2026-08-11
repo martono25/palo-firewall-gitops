@@ -155,8 +155,8 @@ its checks start without you touching them.
 
 ## Bringing the pilot up and putting it away
 
-The pilot is suspended between sessions to stop the EC2 draw (`m5.4xlarge`,
-sized for ENIs rather than CPU).
+The pilot is suspended between sessions to stop the EC2 draw (`m5.xlarge` — 4
+vCPU, 4 ENIs, which is both this deployment's ceiling and its requirement).
 
 **Up:**
 
@@ -185,6 +185,249 @@ skipped; silently green would be the worse failure.
 
 **If SSH times out**, your egress IP has changed. Re-point the management
 security group at your current `/32` — never widen it.
+
+---
+
+## Replacing a firewall (new serial)
+
+**Steps 4-8 are also what you do after building a firewall for the first time.**
+They point the repository at a serial — nothing is destroyed, nothing is undone.
+If you have just provisioned and are wondering why you are reading a page about
+replacement, skip to [step 4](#step-4); that is the bridge between
+[`provisioning.md`](provisioning.md) and
+[`building-a-folder.md`](building-a-folder.md).
+
+**Why it comes before Day-1.** The Day-1 chain is a set of intents, and an
+`InterfaceRequest` names its target firewall by serial:
+
+```yaml
+spec:
+  device: "007955000901881"     # this firewall, not that one
+```
+
+Until that says the serial you actually have, the Day-1 apply targets a device
+that does not exist. So the order is: provision → point the repo at the serial →
+Day-1 chain → rules.
+
+The serial is threaded through the repository, so a rebuild is not just a
+`terraform apply`.
+
+**What IS caught:** an intent naming a firewall the catalog does not declare is
+rejected by `compile`, with the file, the field and the fix. Doing step 4 and
+forgetting step 5 fails loudly and safely — verified 2026-08-10.
+
+**What is NOT caught:** the catalog's interface **port map** against SCM. Nothing
+compares `catalog/interfaces.yaml` to the real `default_value` of `$eth-*`, so a
+port that disagrees writes the wrong interface with no error at any stage. That
+is why step 4's two halves — the per-serial map and `create_in` — have to move
+together and be read twice.
+
+Do it in this order. Steps 1-3 are the rebuild itself and only apply if you are
+replacing an existing firewall; steps 4-8 apply either way.
+
+1. **Deactivate the old licence** in the Palo Alto CSP before destroying the
+   instance, or the entitlement stays bound to a machine that no longer exists.
+2. **Re-point the inherited interface defaults in SCM** at `ngfw-shared`, if you
+   are moving to a 4-ENI layout:
+
+   | Variable | From | To |
+   |---|---|---|
+   | `$eth-local` | `ethernet1/4` | `ethernet1/1` |
+   | `$eth-internet` | `ethernet1/3` | `ethernet1/2` |
+
+   These are SCM defaults **inherited by every firewall under `ngfw-shared`**,
+   not objects this platform owns. Changing them moves which physical port every
+   zone binds, which is free on a firewall that does not exist yet and disruptive
+   on one carrying traffic. Do it while the old instance is down.
+
+3. **Destroy and rebuild**, following [`provisioning.md`](provisioning.md).
+   Capture the new serial from `show system info`.
+<a id="step-4"></a>
+
+4. **Update the catalog** — two files, four things. Changing the serial key and
+   stopping is the easy miss:
+
+   `catalog/folders.yaml`, under the target folder's `devices:`
+   - the **serial key** itself
+   - **`display_name`** — `fwgitops onboard` sets this in SCM, so a catalog left
+     on the old name shows up as a `verify-catalog` note. That note is worded for
+     the dangerous reading (a device reset to `PA-VM` means a re-onboard wiped
+     device-scope config); a stale catalog is the benign one. The check cannot
+     tell which side moved, which is why it makes you look
+
+   `catalog/interfaces.yaml`
+   - the **per-serial port map** for every role
+   - **`create_in`** for any role this platform creates
+
+   The last two must move together — they are the pair that puts two zones on one
+   physical port if they disagree, and nothing compares either to SCM.
+
+   ```sh
+   fwgitops verify-catalog     # expect OK; read every NOTE before believing it
+   ```
+5. **Update the Day-1 intents that name the device.** Only `InterfaceRequest`
+   does. An interface address belongs to ONE firewall — two cannot share an IP —
+   so it is device-scoped and carries a serial:
+
+   ```yaml
+   spec:
+     device: "<old-serial>"   ->   device: "<new-serial>"
+   ```
+
+   ```sh
+   grep -rn '^  device:' intent/          # every line that needs changing
+   ```
+
+   **`ZoneRequest` and `RouteRequest` do not change.** They are folder-scoped
+   policy, shared by every firewall in the folder, and never mention a serial —
+   a new firewall inherits them. If you find yourself editing one, stop: the
+   compiler refuses `device:` on those kinds (ADR-0006).
+
+   Update the trailing comments too (`# fw-prod-edge-4453, PA-VM, connected`),
+   or the file describes a machine that no longer exists.
+
+   The **directory name** (`intent/prod/edge-fw-<last4>/`) is cosmetic — nothing
+   reads it, the compiler only reads file contents. Rename it to match the new
+   serial or leave it; there is no functional difference, only whether it lies.
+
+6. **Replace the Terraform device root.** The old one is named for the old
+   serial and its state describes a machine that is gone:
+
+   ```sh
+   fwgitops scaffold-root --device <new-serial> --device-folder prod-edge
+   git rm -r terraform/device-<old-serial>
+   ```
+
+   **`git rm` only removes TRACKED files.** The root keeps its gitignored ones —
+   `.terraform/`, `backend.hcl`, any `*.tfplan`, the generated
+   `*.auto.tfvars.json` — so the directory survives on disk and `fwgitops
+   apply-order` still sees a root:
+
+   ```sh
+   rm -rf terraform/device-<old-serial>
+   ```
+
+   Remove the old state object from the backend too, or it lingers describing a
+   firewall that no longer exists:
+
+   ```sh
+   aws s3 ls s3://<state-bucket>/ --recursive | grep device-
+   aws s3 rm s3://<state-bucket>/device-<old-serial>/terraform.tfstate
+   ```
+
+7. **Follow the serial everywhere else it is written.** Steps 4-6 cover the
+   places that CHANGE BEHAVIOUR; these are the ones that break CI:
+
+   ```sh
+   grep -rln '<old-serial>' tests/ docs/ terraform/
+   ```
+
+   - **`tests/`** — around a dozen files carry it, some as fixtures and some
+     asserting against the real tree. Your pull request will not pass CI until
+     they follow.
+   - **live guides** (`building-a-folder.md`, `requesting-rules.md`,
+     `cli-reference.md`, this page) — `building-a-folder.md` is pinned by a test
+     that asserts its examples still match the real intent files, so a stale
+     serial there is a red build, not a cosmetic wart.
+   - **`docs/adr/` — leave alone.** An ADR records a decision made at a time.
+     Rewriting it is revisionism, the same reason the old evidence bundles stay.
+
+   > This is the step that most wants automating. A test that needs the live
+   > serial should READ it from `catalog/folders.yaml` rather than hard-code it,
+   > and then a rebuild would churn one file instead of a dozen.
+
+8. **Leave the old evidence bundles alone.** `evidence/device-<old-serial>/` is
+   the audit record of changes that really happened on a firewall that really
+   existed. Deleting them to tidy up destroys history; they are supposed to
+   outlive the device.
+
+9. **Expect SCM commit errors until Day-1 runs.** A new firewall inherits the
+   folder's policy the instant it joins — zones, the logical router, rules, all
+   folder-scoped and untouched by the rebuild. Interface addressing is
+   device-scoped and died with the old firewall, so SCM validates an inherited
+   route against a device that has no interface in the nexthop's subnet:
+
+   ```
+   can't find interface in 'default' for next hop 10.100.2.1
+   ```
+
+   **Nothing is wrong.** That is ADR-0002's chain — interfaces before routes —
+   seen from the other end: after a replacement the routes already exist and the
+   interfaces are what is missing. Confirm the shape rather than assume it:
+
+   ```sh
+   ssh admin@<mgmt-ip> 'show interface all'    # "configured hardware interfaces: 0"
+   grep -A3 '^  ip:' intent/<folder>/*/REQ-*.yaml   # the address that will fix it
+   ```
+
+   If the nexthop is inside a subnet one of those intents assigns, applying Day-1
+   clears it. If it is not, the route and the addressing genuinely disagree and
+   the rebuild changed the topology.
+
+10. **Verify before trusting it:**
+
+   ```sh
+   fwgitops verify-catalog          # catalog vs SCM's real hierarchy
+   fwgitops compile intent --check  # every intent still resolves
+   fwgitops device-sync             # SCM vs the running config
+   ```
+
+> **The gap to know about.** `verify-catalog` checks the folder hierarchy. It
+> does **not** compare the interface port map against SCM, and nothing else
+> does either — so a catalog that disagrees with `$eth-*`'s real `default_value`
+> writes the wrong port with no error at any stage. Until that check exists,
+> step 2 and step 4 have to be done together and read twice.
+
+### The first push to a fresh firewall may be refused
+
+`device-sync` on a new device reports:
+
+```
+first-push-pending  running=v85  committed=v85  folder=prod-edge
+NOTE  … SCM still reports is_first_push_done=false. SCM refuses an ADMIN-SCOPED
+      push in this state …
+```
+
+The pipeline pushes admin-scoped by default — that is what makes a push safe on a
+shared folder — so the Day-1 apply may fail at the push step.
+
+**The evidence is mixed and worth stating rather than smoothing over.**
+`devicesync.py` records the flag staying `false` across two *successful* pushes,
+and admin-scoped pushes to the previous firewall worked while it was false. So
+"SCM refuses" and "pushes succeed anyway" are both in the record. Treat the first
+apply as the experiment.
+
+**Failing is safe.** A refused push exits 3, fail-closed: nothing reaches the
+device and nothing is half-committed. If it happens:
+
+```sh
+fwgitops push --scope-dir device-<serial> --all-admins --record push-dev.json
+```
+
+That is the legitimate first-push case rather than break-glass abuse — on a fresh
+device the only thing staged is your own Day-1 config. Re-run the apply
+afterwards so the evidence bundle records a normal push.
+
+Do **not** pre-emptively run this before the apply. Nothing is staged yet, and an
+empty push mints a config version for no change — which is what the
+nothing-staged skip in `apply.yml` exists to avoid.
+
+---
+
+### → NEXT: configure the firewall from Git
+
+The repository now names your firewall, and `compile --check` passes. The device
+still has **no interfaces, no zones and no routes** — that is the Day-1 chain, and
+it has not run.
+
+Go to [`building-a-folder.md`](building-a-folder.md). If the folder already
+exists and you are only re-pointing it at a rebuilt firewall, you can go straight
+to [§ Applying the chain](building-a-folder.md#applying-the-chain), which is the
+commit-PR-merge sequence that actually ships it.
+
+**Expect to give the changed intents new tickets.** You edited existing files
+rather than adding them, and a changed `spec` carrying the old
+`metadata.ticket` is rejected.
 
 ---
 

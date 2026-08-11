@@ -5,7 +5,7 @@
 the scope those rules land in.
 
 > **This is a reconstruction of a real build, not an imagined one.** Every step
-> below is how `prod-edge` and the pilot firewall `007955000894453` were actually
+> below is how `prod-edge` and the pilot firewall `007955000901881` were actually
 > brought up, and every file it names is in this repository. Where something
 > failed the first time, it says so — those are the parts you would otherwise
 > rediscover against a production firewall.
@@ -44,6 +44,22 @@ Each link needs the one before it:
 
 ---
 
+## Before you start: does the repo know your firewall?
+
+A Day-1 intent names its firewall **by serial**, so a freshly provisioned or
+rebuilt device needs the repository pointed at it first. Check:
+
+```sh
+grep -rn 'device:' intent/ | grep -v '#'
+fwgitops verify-catalog          # catalog vs SCM's real hierarchy
+```
+
+If those serials are not the firewall you have, stop and do
+[`operator-runbook.md` § Replacing a firewall, steps 4-8](operator-runbook.md#replacing-a-firewall-new-serial)
+first. `compile` will reject an intent naming a firewall the catalog does not
+declare, so you cannot get far with the serial alone wrong — but the interface
+PORT map is not checked against SCM, and that one is silent.
+
 ## Part 0 — before any intent will compile
 
 This is where a greenfield folder actually gets stuck, and none of it lives in
@@ -59,7 +75,7 @@ folders:
     children: []
     targetable: true
     devices:
-      "007955000894453":
+      "007955000901881":
         display_name: fw-prod-edge-4453
 ```
 
@@ -84,7 +100,7 @@ hand-writing:
 
 ```sh
 fwgitops scaffold-root --folder prod-edge
-fwgitops scaffold-root --device 007955000894453 --device-folder prod-edge
+fwgitops scaffold-root --device 007955000901881 --device-folder prod-edge
 fwgitops scaffold-root --check          # CI runs this
 ```
 
@@ -120,7 +136,7 @@ interfaces:
     create_in:
       prod-edge: ethernet1/2      # this platform CREATES this variable
     devices:
-      "007955000894453": ethernet1/2
+      "007955000901881": ethernet1/2
 ```
 
 `local` and `internet` have **no `create_in`** — they are SCM defaults inherited
@@ -131,7 +147,7 @@ creates itself.
 
 ## Part 1 — InterfaceRequest: address the ports
 
-Real file: [`intent/prod/edge-fw-4453/REQ-2026-0801.yaml`](../intent/prod/edge-fw-4453/REQ-2026-0801.yaml)
+Real file: [`intent/prod/edge-fw-1881/REQ-2026-0801.yaml`](../intent/prod/edge-fw-1881/REQ-2026-0801.yaml)
 
 ```yaml
 apiVersion: fw-intent/v1
@@ -143,7 +159,7 @@ metadata:
   justification: "Day-1 build: address the internal interface"
   requested: 2026-08-04
 spec:
-  device: "007955000894453"     # a SERIAL, not a folder
+  device: "007955000901881"     # a SERIAL, not a folder
   interface: local              # a ROLE from catalog/interfaces.yaml
   ip:
     - 10.100.3.125/24
@@ -174,7 +190,7 @@ The pilot took three: `local`, `internet` (REQ-2026-0802) and `dmz`
 
 ## Part 2 — ZoneRequest: declare the zone, bind the interface
 
-Real file: [`intent/prod/edge-fw-4453/REQ-2026-0806.yaml`](../intent/prod/edge-fw-4453/REQ-2026-0806.yaml)
+Real file: [`intent/prod/edge-fw-1881/REQ-2026-0806.yaml`](../intent/prod/edge-fw-1881/REQ-2026-0806.yaml)
 
 ```yaml
 apiVersion: fw-intent/v1
@@ -216,7 +232,7 @@ approvable.
 
 ## Part 3 — RouteRequest: the most dangerous link
 
-Real file: [`intent/prod/edge-fw-4453/REQ-2026-0803.yaml`](../intent/prod/edge-fw-4453/REQ-2026-0803.yaml)
+Real file: [`intent/prod/edge-fw-1881/REQ-2026-0803.yaml`](../intent/prod/edge-fw-1881/REQ-2026-0803.yaml)
 
 ```yaml
 apiVersion: fw-intent/v1
@@ -258,19 +274,112 @@ device has the change.** Anything asserting "it is live" must poll the device.
 ## Part 4 — the folder is ready for rules
 
 With interfaces addressed, a zone declared and a route in place, the folder can
-take `AccessRequest`s. That is [`requesting-rules.md`](requesting-rules.md), and
-app teams write those.
+take `AccessRequest`s.
+
+### → NEXT: prove it end to end, then hand it over
+
+**1. Confirm the chain reached the device.** SCM holding it is not the same as
+the firewall running it:
+
+```sh
+fwgitops device-sync
+printf 'set cli pager off\nshow interface all\n' | ssh -T -i <key>.pem admin@<mgmt-ip>
+```
+
+Interfaces should be up with addresses and zones — not placeholder MACs.
+
+**2. Request one rule yourself**, as a requester would:
+[`requesting-rules.md`](requesting-rules.md). The fastest version is the Issue
+Form — open an issue, fill it in, and the platform opens the pull request. That
+is the path app teams use, and walking it once is how you find out whether it
+works for someone who is not you.
+
+**3. Then you are running it.** Day to day is
+[`operator-runbook.md`](operator-runbook.md): a run waiting for approval, drift
+firing, a rule to remove, the token expiring.
 
 ---
 
 ## Applying the chain
 
-Compile everything and check what each change is worth:
+**You do not run the apply. Merging to `main` runs it.** `apply.yml` triggers on a
+push to `main` touching `intent/**`, `catalog/**` or `terraform/**`, so the whole
+sequence is an ordinary pull request.
+
+### 1. Check locally first
 
 ```sh
 fwgitops compile intent --check     # fail-closed validation, writes nothing
 fwgitops classify intent            # per-change risk tier
 ```
+
+**If you EDITED an existing intent rather than adding one, give it a new
+ticket.** A changed `spec` with the old `metadata.ticket` is rejected — otherwise
+the evidence bundle for this change cites the request that authorised the
+previous one:
+
+```
+REQ-2026-0801: `spec` changed but `metadata.ticket` is still 'JIRA-902'
+```
+
+Update `ticket`, `requested`, and `justification` if the reason differs.
+
+### 2. Open a pull request
+
+**Starting on `main` with uncommitted changes:**
+
+```sh
+git checkout -b day1/<what-this-does>
+git add intent/ catalog/ terraform/          # by name, not -A
+git commit                                   # if anything is REMOVED, the PR body
+                                             # needs `Removes: <REQ-id> (TICKET)`
+git push -u origin HEAD
+gh pr create --fill
+gh pr checks --watch
+```
+
+**Already on a branch** — which you are if you came from
+[`operator-runbook.md` § Replacing a firewall](operator-runbook.md#replacing-a-firewall-new-serial),
+since the catalog and Terraform edits are committed there. Do not branch again;
+you would fork the branch you are on. Add only what is still uncommitted:
+
+```sh
+git status --short                           # what is actually outstanding
+git add intent/                              # or whatever `status` lists
+git commit
+git push
+gh pr create --fill
+gh pr checks --watch
+```
+
+Check `git branch --show-current` if you are unsure which case you are in.
+
+`pytest` and `compile-and-plan` must pass — they are required, and `main` takes
+no direct push.
+
+### 3. Merge, and watch the apply it starts
+
+```sh
+gh pr merge --squash --delete-branch
+gh run list --workflow apply.yml --limit 1
+gh run watch <run-id>
+```
+
+The run classifies first, then applies each Terraform root in dependency order.
+
+### 4. Approve it if the tier says so
+
+A LOW changeset applies unattended. HIGH or CRITICAL holds at the
+`firewall-apply` environment for a named reviewer, and the run sits at `waiting`
+until someone approves it — see
+[`operator-runbook.md` § A run is waiting for you](operator-runbook.md#a-run-is-waiting-for-you).
+
+A Day-1 chain containing a default route is HIGH, so **expect to approve it**.
+
+### 5. Merge the evidence pull request
+
+The apply opens `evidence: bundles for <sha>`. Merge it; the record is not in the
+source of truth until you do.
 
 The apply pipeline walks scopes in dependency order — `fwgitops apply-order`
 drives the loop, so the device root applies before the folder root. It fails
@@ -295,7 +404,7 @@ sources of truth for one fact.
 Afterwards, each change has a record:
 
 ```
-evidence/device-007955000894453/REQ-2026-0801.json
+evidence/device-007955000901881/REQ-2026-0801.json
 evidence/prod-edge/REQ-2026-0806.json
 ```
 

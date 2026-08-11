@@ -22,39 +22,46 @@ module "vmseries" {
       security_group_ids = [aws_security_group.mgmt.id]
       create_public_ip   = true
     }
-    dataplane = {
-      device_index       = 1
-      subnet_id          = aws_subnet.dataplane.id
-      security_group_ids = [aws_security_group.dataplane.id]
-      source_dest_check  = false
-    }
-    # ── ethernet1/2 .. ethernet1/4 ────────────────────────────────────────
-    # device_index N maps to ethernet1/N. The SCM folder variables already point
-    # $eth-internet -> ethernet1/3 and $eth-local -> ethernet1/4, so those two
-    # indexes are what make the existing config real; before this they had
-    # placeholder MACs and were link-down.
+
+    # ── THREE DATAPLANE ENIs, CONTIGUOUS FROM INDEX 1 ─────────────────────
+    # device_index N maps to ethernet1/N, and an ENI at index 4 is what forced
+    # a 16-vCPU instance: 4 vCPU caps at 4 ENIs on EVERY family in
+    # ap-southeast-1 (checked against `describe-instance-types`, not recalled),
+    # so mgmt + 3 dataplane is the ceiling. That is enough — this firewall only
+    # ever used three roles.
+    #
+    # The old layout wasted one: a `spare` ENI at index 2 existed purely to keep
+    # indexes contiguous up to 3 and 4, because $eth-internet and $eth-local
+    # resolve to ethernet1/3 and ethernet1/4. Those are SCM defaults inherited
+    # from `ngfw-shared`; re-pointing them to ethernet1/2 and ethernet1/1 is what
+    # makes this layout legal, and it is a change in SCM, not here.
+    #
+    # DO NOT APPLY THIS BEFORE THAT SCM CHANGE. The zones bind the folder
+    # variables, so a firewall built this way with the old defaults has its zones
+    # pointing at ports that have no ENI behind them.
     #
     # source_dest_check MUST stay false on every dataplane ENI — a firewall
     # forwards traffic it did not originate, and AWS drops that otherwise.
-    spare = {
-      # Index 2 exists only to keep the indexes contiguous (see network.tf).
-      # Unconfigured on the firewall.
-      device_index       = 2
-      subnet_id          = aws_subnet.dataplane.id
+
+    trust = {
+      # ethernet1/1 = $eth-local — the interface REQ-2026-0801 addresses.
+      device_index       = 1
+      subnet_id          = aws_subnet.trust.id
       security_group_ids = [aws_security_group.dataplane.id]
       source_dest_check  = false
     }
     untrust = {
-      # ethernet1/3 = $eth-internet
-      device_index       = 3
+      # ethernet1/2 = $eth-internet
+      device_index       = 2
       subnet_id          = aws_subnet.untrust.id
       security_group_ids = [aws_security_group.dataplane.id]
       source_dest_check  = false
     }
-    trust = {
-      # ethernet1/4 = $eth-local — the interface REQ-2026-0801 addresses.
-      device_index       = 4
-      subnet_id          = aws_subnet.trust.id
+    dmz = {
+      # ethernet1/3 = $eth-dmz, created by this platform in `prod-edge`
+      # (catalog/interfaces.yaml `create_in`) rather than inherited.
+      device_index       = 3
+      subnet_id          = aws_subnet.dataplane.id
       security_group_ids = [aws_security_group.dataplane.id]
       source_dest_check  = false
     }
