@@ -223,9 +223,39 @@ printf 'set cli pager off\nshow system info\n' \
 #   vm-license: VM-SERIES-4    <- matches the deployment profile you sized
 
 # In SCM (via the API), the device appears as {name:<serial>, parent:<folder>}:
+set -a; . ~/.fwgitops/scm.env; set +a       # onboard talks to SCM
 fwgitops onboard <serial> --folder <scm_folder> --name fw-<folder>-<suffix>
-#   verifies placement + sets a friendly display name
 ```
+
+**`onboard` does not onboard the firewall.** The device does that itself: on
+first boot it registers with SCM, and the serial-number onboarding rule matches
+its serial prefix and places it in a folder. This command **finalises and
+verifies** that, and it is a gate rather than a formality:
+
+- **It waits for placement, bounded, and fails closed.** It polls SCM for the
+  folder holding `<serial>` until that equals `--folder`. If it never matches it
+  raises rather than continuing:
+
+  ```
+  device '007…' not in folder 'prod-edge' after N attempts (currently: None).
+  Check the onboarding rule's serial match and that the device connected.
+  ```
+
+  **Exit 3 means placement never confirmed.** Auto-placement is asynchronous and
+  silent, so without this you carry on to the Day-1 chain and hit a confusing
+  failure much later, when the real cause was an onboarding rule whose regex did
+  not match this serial.
+
+- **It sets the SCM display name.** Cosmetic, with one real use: a **re-onboard
+  resets it to `PA-VM`**, and `verify-catalog` compares it. A display name that
+  reverted is a reliable symptom of a re-registration — which silently wipes
+  device-scope config, as it did on 2026-08-05. Name it so that signal exists.
+
+Placement is confirmed **before** the name is set, deliberately: naming a device
+that is not where you think it is puts a confident label on the wrong thing.
+
+Safe to re-run — the poll is idempotent and setting the same name twice is a
+no-op.
 
 Once it shows in the folder and connected, it's ready — Day-2 rule requests to
 that `environment` (which maps to the folder) will apply to it.
@@ -278,7 +308,8 @@ and a Terraform root before anything will compile against it.
 | `fwgitops onboard/push/enrich` → config/credentials error | SCM env vars not loaded in this shell — run `set -a; source ~/.fwgitops/scm.env; set +a` first (see *Configure credentials*). |
 | Device never appears in SCM; SSH shows `serial: unknown`, `device-certificate-status: None` | Registration/licensing failed — registration PIN expired/used up, or **no free license seats** (delete stale devices in CSP). |
 | Device onboards but rules don't reach it for 20-30 min | Normal — a fresh VM finishes content bootstrap before its first config push. Verify on-device with `show running security-policy`, not just the SCM `is_first_push_done` flag (it lags). |
-| `mgmt` unreachable | `mgmt_allowed_cidr` doesn't include your IP; or the device is still booting. |
+| SSH **times out** | Network path. `mgmt_allowed_cidr` does not include your current egress IP (`curl -s ifconfig.me` — it is dynamic), or you are hitting the wrong address. |
+| SSH → **`Connection refused`** | The opposite, and good news: TCP reached the host, so the security group is right and nothing is listening yet. PAN-OS is still booting. Confirm rather than wait blind — `aws ec2 get-console-output --instance-id <id> --output text --query Output \| tail -25`. A first boot runs FIPS-CC self-tests and file-system integrity verification on both planes before the management plane accepts SSH; 10-20 minutes is normal. |
 | Device lands in "Available Devices", not the folder | The serial-number onboarding rule didn't match — check the rule's serial regex vs the device serial in SCM. |
 
 ### `terraform destroy` fails: `DependencyViolation` deleting the VPC

@@ -307,3 +307,43 @@ def test_provisioning_handles_the_second_pass_not_just_the_first():
     assert "immediately before" in prov and "expires while you work" in prov, (
         "PIN timing is the trap: generating it at the start of teardown burns "
         "the window")
+
+
+def test_provisioning_separates_refused_from_timed_out():
+    """FOUND BY FOLLOWING THE GUIDE, 2026-08-10. One row said "`mgmt`
+    unreachable | wrong CIDR, or still booting" — two opposite causes under one
+    symptom, which sends the reader to check a security group that is fine.
+
+    The distinction is free and decisive. TIMEOUT means the packet never
+    arrived: network path, allow-list, wrong address. REFUSED means it arrived
+    and nothing is listening: the path is correct and PAN-OS is still coming up.
+
+    And the guide should say how to CONFIRM rather than wait — console output
+    shows the FIPS-CC integrity stage a first boot sits in."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "Connection refused" in prov and "times out" in prov, (
+        "the two symptoms have opposite causes and need separate rows")
+    assert "TCP reached the host" in prov, (
+        "say what refused MEANS, or the reader still checks the firewall")
+    assert "get-console-output" in prov, (
+        "give a way to see boot progress instead of waiting blind")
+
+
+def test_provisioning_explains_what_onboard_actually_does():
+    """ASKED BY THE OPERATOR FOLLOWING THE GUIDE, 2026-08-10. The command was
+    printed with a bare "verifies placement + sets a friendly display name",
+    which does not say it is a GATE, what exit 3 means, or why a display name
+    would matter.
+
+    Both halves have to stay explained. The placement poll is the gate — without
+    it a mismatched onboarding-rule regex surfaces much later as a confusing
+    Day-1 failure. The display name is the re-onboard signal: a re-registration
+    resets it to PA-VM and silently wipes device-scope config, which is how the
+    2026-08-05 incident was caught."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "onboard does not onboard the firewall" in prov, (
+        "the name misleads — say what the device does for itself")
+    assert "Exit 3 means placement never confirmed" in prov, (
+        "it is a gate; the failure has to be actionable")
+    assert "resets it to PA-VM" in prov, (
+        "the display name exists so a re-onboard is detectable")

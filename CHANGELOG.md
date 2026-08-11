@@ -111,6 +111,28 @@ Same shape as the install-location fix above: correct read linearly the first
 time, silent on the second pass. That is the failure mode of a guide written by
 someone who has only ever done it once.
 
+### Fixed — `onboard` was printed without saying what it does
+
+Asked by the operator walking the guide: the command appeared with a bare
+comment, *"verifies placement + sets a friendly display name"*. That does not say
+it is a **gate**, what exit 3 means, or why a display name would matter.
+
+It also misleads by name. **`onboard` does not onboard the firewall** — the
+device registers itself on first boot and the serial-number onboarding rule
+places it. This command finalises and verifies:
+
+- **Bounded placement poll, fails closed.** It waits until SCM reports `<serial>`
+  in `--folder`, and raises if it never does. Auto-placement is asynchronous and
+  silent, so without this a mismatched onboarding-rule regex surfaces much later
+  as a confusing Day-1 failure.
+- **Sets the display name**, which exists so a re-onboard is *detectable*: a
+  re-registration resets it to `PA-VM`, `verify-catalog` compares it, and a
+  reverted name is the symptom that device-scope config was silently wiped
+  (2026-08-05).
+
+Placement is confirmed before the name is set — naming a device that is not where
+you think it is puts a confident label on the wrong thing.
+
 ### Added — how to replace a firewall
 
 A new serial is threaded through the catalog, the Day-1 intents, a Terraform
