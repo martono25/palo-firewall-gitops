@@ -680,6 +680,7 @@ def run_classify(
     gate: Optional[str] = None,
     state_snapshot_paths: Optional[List[Path]] = None,
     baseline_root: Optional[Path] = None,
+    baseline_catalog_dir: Optional[Path] = None,
     change_message_path: Optional[Path] = None,
     max_tier: bool = False,
     service_catalog_path: Path = Path("catalog/services.yaml"),
@@ -832,8 +833,13 @@ def run_classify(
     # comparing trees keeps this pure, unlike reading git here.
     removed_count = 0
     if baseline_root is not None:
+        b_env, b_cats, b_ok = _baseline_catalogs(baseline_catalog_dir, env_map_path, err)
+        if not b_ok:
+            return 1
         removals, mods, code = _load_changeset(baseline_root, intent_root, env_map,
-                                               cats, err)
+                                               cats, err,
+                                               baseline_env_map=b_env,
+                                               baseline_cats=b_cats)
         if removals is None:
             return code
 
@@ -925,13 +931,57 @@ def run_classify(
     return 0
 
 
-def _load_changeset(baseline_root: Path, intent_root: Path, env_map, cats, err):
+def _baseline_catalogs(baseline_catalog_dir: Optional[Path], env_map_path: Path, err):
+    """(env_map, cats, ok) for a baseline tree, from the catalog that shipped with it.
+
+    Returns (None, None, True) when no directory is given — the caller then
+    reuses today's, which is the old behaviour and correct whenever the catalog
+    has not moved.
+    """
+    if baseline_catalog_dir is None:
+        return None, None, True
+    d = Path(baseline_catalog_dir)
+    if not d.is_dir():
+        print(f"error: --baseline-catalog {d} is not a directory", file=err)
+        return None, None, False
+    cats, ok = _load_catalogs(d / "services.yaml", d / "apps.yaml", err)
+    if not ok:
+        return None, None, False
+    # The env map lives beside the rest; fall back to today's if the archived
+    # tree predates it rather than failing a run over a file that never moved.
+    env_path = d / env_map_path.name
+    if not env_path.is_file():
+        return None, cats, True
+    try:
+        return EnvMap.from_dict(read_yaml(env_path)), cats, True
+    except Exception as e:  # noqa: BLE001
+        print(f"error: invalid baseline env map {env_path}: {e}", file=err)
+        return None, None, False
+
+
+def _load_changeset(baseline_root: Path, intent_root: Path, env_map, cats, err,
+                    baseline_env_map=None, baseline_cats=None):
     """(removals, modifications, exit_code). Both None when the baseline is unusable.
 
     FAIL CLOSED. An unreadable or invalid baseline returns an error rather than
     "no removals" — silently reporting zero removals because the comparison
     broke is precisely the blindness this feature removes.
+
+    THE BASELINE IS READ WITH THE BASELINE'S CATALOG. Both trees used to be
+    parsed with today's, which makes a legitimate change unrepresentable: replace
+    a firewall, and `main`'s intents name a serial the new catalog no longer
+    declares, so the baseline is "invalid" and the whole run fails closed. The
+    pipeline could not apply a firewall replacement at all (measured 2026-08-10).
+
+    A baseline is a PAST STATE. It was valid under the catalog it shipped with,
+    and judging it by today's is the same category error as an evidence bundle
+    citing the ticket that authorised the previous version of a rule.
+
+    `baseline_*` default to the current ones, so a caller that has no archived
+    catalog behaves exactly as before.
     """
+    baseline_env_map = env_map if baseline_env_map is None else baseline_env_map
+    baseline_cats = cats if baseline_cats is None else baseline_cats
     from fwgitops.evidence import sha256_file
     from fwgitops.removal import Removal, find_modifications, find_removals
 
@@ -939,17 +989,22 @@ def _load_changeset(baseline_root: Path, intent_root: Path, env_map, cats, err):
         print(f"error: baseline intent tree not found: {baseline_root}", file=err)
         return None, None, 1
 
-    def index(root: Path, strict: bool):
+    def index(root: Path, strict: bool, _env_map=None, _cats=None):
+        _env_map = env_map if _env_map is None else _env_map
+        _cats = cats if _cats is None else _cats
         out: Dict[Tuple[str, str], Removal] = {}
         for path in discover_intents(root):
             try:
                 doc = read_yaml(path)
-                req = load_intent(doc, env_map=env_map, **cats)
+                req = load_intent(doc, env_map=_env_map, **_cats)
             except Exception as e:  # noqa: BLE001
                 if strict:
                     print(f"error: baseline intent {_display_path(path)} is unreadable "
                           f"({e}). Refusing to report removals from a baseline that "
-                          f"cannot be fully parsed.", file=err)
+                          f"cannot be fully parsed. If the baseline predates a "
+                          f"catalog change — a replaced firewall, a renamed folder "
+                          f"— pass --baseline-catalog pointing at the catalog that "
+                          f"shipped WITH it.", file=err)
                     raise
                 continue
             kind = doc.get("kind")
@@ -965,7 +1020,8 @@ def _load_changeset(baseline_root: Path, intent_root: Path, env_map, cats, err):
         return out
 
     try:
-        base = index(baseline_root, strict=True)
+        base = index(baseline_root, strict=True,
+                     _env_map=baseline_env_map, _cats=baseline_cats)
     except Exception:  # noqa: BLE001 - already reported above
         return None, None, 2
     current = index(intent_root, strict=False)
@@ -1835,6 +1891,7 @@ def run_evidence(
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     baseline_root: Optional[Path] = None,
+    baseline_catalog_dir: Optional[Path] = None,
     change_message_path: Optional[Path] = None,
     approvers: Optional[List[str]] = None,
     pr_url: Optional[str] = None,
@@ -1954,8 +2011,13 @@ def run_evidence(
     # still says WHAT went — reading git history is not required.
     if baseline_root is not None:
         env_map = EnvMap.from_dict(read_yaml(env_map_path))
+        b_env, b_cats, b_ok = _baseline_catalogs(baseline_catalog_dir, env_map_path, err)
+        if not b_ok:
+            return 1
         removals, _mods, code = _load_changeset(baseline_root, intent_root, env_map,
-                                                cats, err)
+                                                cats, err,
+                                                baseline_env_map=b_env,
+                                                baseline_cats=b_cats)
         if removals is None:
             return code
         trailers = _removes_trailers(change_message_path, err)
@@ -2492,6 +2554,13 @@ def build_parser() -> argparse.ArgumentParser:
                          "a deleted intent is absent from the current tree, so without this "
                          "nothing classifies it and the gate never sees it. CI materialises "
                          "it with `git archive`.")
+    cl.add_argument("--baseline-catalog", dest="baseline_catalog_dir", default=None,
+                    type=Path, metavar="DIR",
+                    help="the catalog directory that shipped WITH --baseline. A "
+                         "baseline is a past state and was valid under its own "
+                         "catalog; judging it by today's makes a replaced firewall "
+                         "or a renamed folder unrepresentable. Defaults to the "
+                         "current catalog, which is right whenever it has not moved.")
     cl.add_argument("--change-message", dest="change_message", default=None, type=Path,
                     help="file holding the text that will land on main (with squash "
                          "merges, the PR title + body). Read for `Removes: <REQ-id> "
@@ -2514,6 +2583,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "`git archive`). Without it a REMOVAL produces no record at "
                         "all: a deleted intent is absent from the current tree, so "
                         "there is nothing left to build one from.")
+    e.add_argument("--baseline-catalog", dest="baseline_catalog_dir", default=None,
+                   type=Path, metavar="DIR",
+                   help="the catalog directory that shipped WITH --baseline. A "
+                        "baseline is a past state and was valid under its own "
+                        "catalog; judging it by today's makes a replaced firewall "
+                        "or a renamed folder unrepresentable. Defaults to the "
+                        "current catalog, which is right whenever it has not moved.")
     e.add_argument("--change-message", dest="change_message", default=None, type=Path,
                    help="file holding the text that lands on main (with squash merges, "
                         "the PR title + body). Read for `Removes: <REQ-id> (TICKET)` "
@@ -2715,7 +2791,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_classify(
             args.intent_root, args.env_map, gate=args.gate,
             state_snapshot_paths=args.state_snapshots,
-            baseline_root=args.baseline, change_message_path=args.change_message,
+            baseline_root=args.baseline,
+            baseline_catalog_dir=args.baseline_catalog_dir,
+            change_message_path=args.change_message,
             max_tier=args.max_tier,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
         )
@@ -2724,7 +2802,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.intent_root, args.env_map, args.out, status=args.status,
             tfvars_root=args.tfvars_root,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
-            baseline_root=args.baseline_root, change_message_path=args.change_message,
+            baseline_root=args.baseline_root,
+            baseline_catalog_dir=args.baseline_catalog_dir,
+            change_message_path=args.change_message,
             approvers=args.approvers, pr_url=args.pr_url,
             push_records=args.push_records,
         )

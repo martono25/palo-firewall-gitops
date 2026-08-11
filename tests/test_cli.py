@@ -990,3 +990,65 @@ def test_no_bundle_can_carry_a_push_identity(tmp_path):
     blob = (out_root / "prod-edge" / "REQ-2026-0417.json").read_text()
     assert "panserviceaccount" not in blob and "iam." not in blob, (
         "an identity from a push record reached the committed bundle")
+
+
+# ── A BASELINE IS A PAST STATE ─────────────────────────────────────────────
+def _catalog_pair(tmp_path):
+    """Two catalog dirs: one declaring a firewall, one that no longer does.
+
+    Copied from the repo's real catalogs so every OTHER lookup keeps working —
+    the difference between the two is exactly the device, which is the thing
+    under test.
+    """
+    import re, shutil
+    real = Path(__file__).resolve().parents[1] / "catalog"
+    before, after = tmp_path / "cat-before", tmp_path / "cat-after"
+    shutil.copytree(real, before)
+    shutil.copytree(real, after)
+    # The serial comes FROM the fixture, not a literal: a repo-wide rename of the
+    # live serial once left this pointing at a device that was already absent,
+    # so the "should fail" case passed for the wrong reason.
+    serial = re.search(r'device:\s*"(\d+)"', DEVICE_INTENT).group(1)
+    # `after` forgets that firewall — the state of the world once it is replaced.
+    for name in ("folders.yaml", "interfaces.yaml"):
+        text = (after / name).read_text()
+        assert serial in text, f"{name} must declare {serial} for this test to mean anything"
+        (after / name).write_text(text.replace(serial, "007955000999999"))
+    return before, after
+
+
+def test_a_baseline_is_read_with_the_catalog_that_shipped_with_it(tmp_path):
+    """MEASURED 2026-08-10: THE PIPELINE COULD NOT APPLY A FIREWALL REPLACEMENT.
+
+    Both trees were parsed with TODAY's catalog. Replace a firewall and `main`'s
+    intents name a serial the new catalog no longer declares, so the baseline is
+    "invalid", `classify` fails closed, the CI job dies and `apply` is skipped.
+    A legitimate operation was unrepresentable.
+
+    A baseline is a PAST STATE. It was valid under the catalog it shipped with,
+    and judging it by today's is the same category error as an evidence bundle
+    citing the ticket that authorised the previous version of a rule.
+
+    Both directions are asserted, because the fix is only real if the two paths
+    DIFFER — a test that passes either way is what nearly shipped here."""
+    from fwgitops.cli import run_classify
+
+    before, after = _catalog_pair(tmp_path)
+    base_intent, env_map, _ = _setup(tmp_path / "before")
+    (base_intent / "prod" / "IF.yaml").write_text(DEVICE_INTENT)   # names …894453
+    cur_intent, _, _ = _setup(tmp_path / "after")                   # the device is gone
+
+    msg = tmp_path / "msg.txt"
+    msg.write_text("chore: replace it\n\nRemoves: REQ-2026-0801 (JIRA-9)\n")
+    kw = dict(baseline_root=base_intent, change_message_path=msg, max_tier=True,
+              service_catalog_path=after / "services.yaml",
+              app_catalog_path=after / "apps.yaml")
+
+    # WITHOUT the baseline catalog: the old behaviour, and the blockage.
+    assert run_classify(cur_intent, env_map, **kw) != 0, (
+        "today's catalog cannot parse a baseline that predates it — if this "
+        "passes, the fixture is no longer reproducing the real failure")
+
+    # WITH it: the baseline is judged by its own catalog and the run proceeds.
+    assert run_classify(cur_intent, env_map, baseline_catalog_dir=before, **kw) == 0, (
+        "a baseline read with its own catalog must classify cleanly")
