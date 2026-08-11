@@ -50,8 +50,14 @@ def test_first_push_pending_is_a_NOTE_not_a_failure():
 
     So a device can be demonstrably current and still report false. Blocking on
     it is a FALSE POSITIVE on a healthy firewall, which is how a check gets
-    ignored. Still reported, because SCM refuses an ADMIN-SCOPED push while it is
-    false — real, and not the same as "running stale config".
+    ignored.
+
+    CORRECTED 2026-08-11. This used to add "still reported, because SCM refuses
+    an ADMIN-SCOPED push while it is false". That was never measured, and the
+    measurement contradicts it: the pipeline's normal admin-scoped push to a
+    brand-new firewall reporting `false` succeeded first time (job 202, three
+    interfaces committed and verified on the device). The flag is reported
+    because SCM exposes it, not because it predicts anything.
     """
     dev = {**DEV, "is_first_push_done": False}
     r = compare([dev], {"007955000901881": 70}, {"prod-edge": 70})[0]

@@ -42,10 +42,18 @@ false`. Blocking on it produced a FALSE POSITIVE on a healthy firewall, which is
 how a check gets ignored — the same reasoning that keeps `targetable: false` an
 acknowledgement in `verify-catalog`.
 
-It is still reported, because it does correlate with something real: SCM refuses
-an ADMIN-SCOPED push while it is false, so a pipeline whose pushes are
-admin-scoped will fail until a full push runs. That is worth knowing and is not
-the same as "the firewall is running stale config".
+It is still reported, but the "SCM refuses an admin-scoped push while it is
+false" claim that used to sit here DID NOT HOLD. Measured 2026-08-11 on a
+freshly provisioned firewall (007955000901881) reporting
+`is_first_push_done: false`: the pipeline's normal ADMIN-SCOPED push succeeded
+first time — device-scope job 202, three interfaces committed and verified on
+the device. Admin-scoped pushes to the previous firewall had also succeeded
+while the flag was false.
+
+So the flag correlates with nothing this pipeline needs to act on. It is
+reported because it is a state SCM exposes and an operator will see it, not
+because it predicts a failure — and a note that predicts one that never comes
+is how a real warning gets ignored.
 
 THE AUTHORITATIVE SIGNAL IS THE VERSION COMPARISON.
 
@@ -157,11 +165,12 @@ def compare(devices: Iterable[dict], running: Dict[str, int],
             out.append(DeviceSync(
                 serial, folder, FIRST_PUSH_PENDING, ver, latest,
                 f"running the newest committed version (v{ver}) — the firewall is "
-                f"CURRENT — but SCM still reports is_first_push_done=false. SCM refuses "
-                f"an ADMIN-SCOPED push in this state, so this pipeline's normal push "
-                f"will fail until a full (--all-admins) push runs. Measured on this "
-                f"tenant: the flag did NOT clear after two successful pushes, so it is "
-                f"reported and not treated as stale config."))
+                f"CURRENT — but SCM still reports is_first_push_done=false. On this "
+                f"tenant that flag predicts nothing: it did not clear after several "
+                f"successful pushes, and an ADMIN-SCOPED push to a fresh firewall "
+                f"reporting false succeeded first time (2026-08-11, job 202). "
+                f"Reported because SCM exposes it and you will see it, NOT because "
+                f"it blocks anything."))
         else:
             out.append(DeviceSync(serial, folder, IN_SYNC, ver, latest,
                                   "running the newest committed version"))
