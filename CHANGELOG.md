@@ -89,6 +89,28 @@ trailing `.` is the argument, and tells a reader who is already set up to
 reactivate rather than reinstall — the venv survives `cd`, so one is all anyone
 needs. Two troubleshooting rows added for the exact errors.
 
+### Fixed — the provisioning steps only worked the first time
+
+Found by following the guide. Step 1 is `cp terraform.tfvars.example
+terraform.tfvars`, which is first-time setup. On a **rebuild** that file already
+holds your values, so the instruction either erases them or gets skipped — and
+nothing then tells the reader which fields do not survive a rebuild.
+
+The registration PIN is the one that bites. Time-limited, single-use, written
+into the S3 bootstrap package and read **once at first boot**. Expire it and the
+firewall comes up, licenses correctly, and never appears in SCM
+(`device-certificate-status: None`). Nothing fails loudly; you wait for a device
+that is never coming.
+
+The copy step is now marked first-time-only, and a rebuild branch lists every
+field that needs refreshing and when — including generating the PIN
+*immediately before* `terraform apply` rather than at the start of teardown,
+which is how the window gets burned.
+
+Same shape as the install-location fix above: correct read linearly the first
+time, silent on the second pass. That is the failure mode of a guide written by
+someone who has only ever done it once.
+
 ### Added — how to replace a firewall
 
 A new serial is threaded through the catalog, the Day-1 intents, a Terraform

@@ -174,6 +174,7 @@ cd provisioning/aws-vmseries-pilot
 $EDITOR backend.hcl
 
 # 1. Fill in your inputs (secrets stay local — this file is gitignored)
+#    FIRST TIME ONLY — this overwrites an existing file:
 cp terraform.tfvars.example terraform.tfvars
 $EDITOR terraform.tfvars     # ssh_key_name, mgmt_allowed_cidr, vmseries_ami_id,
                              # scm_folder, scm_registration_pin_id/value, vmseries_authcode
@@ -185,6 +186,24 @@ terraform apply
 # 3. Wait ~10-20 min: boot -> license -> register -> auto-onboard to the folder.
 #    A fresh device also downloads content (App-ID/AV) before its first config push.
 ```
+
+### Rebuilding? Do not re-copy the example
+
+`terraform.tfvars` already exists and holds your values — `cp` would erase them.
+Edit it in place, and refresh the fields that do not survive a rebuild:
+
+| Field | Refresh when |
+|---|---|
+| `scm_registration_pin_id` / `scm_registration_pin_value` | **every rebuild.** PINs are time-limited and single-use. Generate in CSP → *Products → Device Certificates → Generate Registration PIN*, **immediately before `terraform apply`** — not at the start of teardown, or it expires while you work |
+| `mgmt_allowed_cidr` | your egress IP changed. `curl -s ifconfig.me` |
+| `instance_type` | you are changing the vCPU count — see the sizing note in *Prerequisites* |
+| `vmseries_ami_id` | you are moving PAN-OS version |
+| `vmseries_authcode` | the old seat was consumed and you are using a different one |
+
+The PIN is written into the S3 bootstrap package and read **once, at first
+boot**. If it expires between `apply` and boot, the firewall comes up, licenses
+correctly, and never appears in SCM — `device-certificate-status: None`. Nothing
+fails loudly; you just wait for a device that is never coming.
 
 ### Verify it came up
 

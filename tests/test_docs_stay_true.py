@@ -283,3 +283,27 @@ def test_provisioning_says_where_to_run_the_install():
     assert "You are not at the repo root" in prov, (
         "the wrong-directory failure needs its own troubleshooting row: the pip "
         "error names an argument, never a location")
+
+
+def test_provisioning_handles_the_second_pass_not_just_the_first():
+    """FOUND BY FOLLOWING THE GUIDE, 2026-08-10. Step 1 says
+    `cp terraform.tfvars.example terraform.tfvars`, which is first-time setup.
+    On a rebuild that file already holds your values, so the instruction either
+    erases them or gets skipped — and nothing then tells the reader which fields
+    do not survive a rebuild.
+
+    The registration PIN is the one that bites: time-limited, single-use, read
+    once at first boot. Expire it and the firewall licenses correctly and never
+    appears in SCM, with nothing failing loudly.
+
+    Same shape as the install-location bug: correct read linearly the first
+    time, silent on the second pass. That is the failure mode of a guide written
+    by someone who has only ever done it once."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "FIRST TIME ONLY" in prov, (
+        "the copy step overwrites a populated tfvars on a rebuild")
+    assert "Rebuilding? Do not re-copy the example" in prov, (
+        "a rebuild needs its own branch, not a re-read of first-time setup")
+    assert "immediately before" in prov and "expires while you work" in prov, (
+        "PIN timing is the trap: generating it at the start of teardown burns "
+        "the window")
