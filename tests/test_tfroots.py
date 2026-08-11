@@ -1,7 +1,7 @@
 """Every Terraform root must declare the module's variables identically.
 
 The roots are copies: `terraform/prod-edge/variables.tf` and
-`terraform/device-007955000894453/variables.tf` restate the module's `variable`
+`terraform/device-007955000901881/variables.tf` restate the module's `variable`
 blocks verbatim, because a root has to declare a variable for the tfvars data to
 reach the module at all.
 
@@ -72,7 +72,7 @@ def test_there_is_at_least_one_root():
     assert "prod-edge" in names
     # A firewall gets its own root: a device write is a per-device OVERRIDE of a
     # distinct object, so it must not share state with its folder.
-    assert "device-007955000894453" in names
+    assert "device-007955000901881" in names
 
 
 @pytest.mark.parametrize("root", _roots(), ids=lambda p: p.name)
@@ -148,7 +148,7 @@ def test_scope_dirname_matches_the_root_layout():
     from fwgitops.compiler import Scope
     names = {r.name for r in _roots()}
     assert Scope("folder", "prod-edge").dirname in names
-    assert Scope("device", "007955000894453").dirname in names
+    assert Scope("device", "007955000901881").dirname in names
 
 
 def test_a_literal_service_is_passed_through_not_resolved_as_an_object():

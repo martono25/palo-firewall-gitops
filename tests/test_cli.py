@@ -633,7 +633,7 @@ def test_snapshot_requires_exactly_one_scope(capsys):
     would read the wrong scope or none."""
     from fwgitops.cli import main
     assert main(["snapshot", "InterfaceRequest", "prod-edge",
-                 "--device", "007955000894453", "--out", "/tmp/x.json"]) == 1
+                 "--device", "007955000901881", "--out", "/tmp/x.json"]) == 1
     assert "exactly one" in capsys.readouterr().err
     assert main(["snapshot", "InterfaceRequest", "--out", "/tmp/x.json"]) == 1
     assert "exactly one" in capsys.readouterr().err
@@ -786,7 +786,7 @@ folders:
     children: []
     targetable: true
     devices:
-      "007955000894453": {display_name: fw-a, model: PA-VM, targetable: true}
+      "007955000901881": {display_name: fw-a, model: PA-VM, targetable: true}
   GitOps:
     children: []
     targetable: true
@@ -916,7 +916,7 @@ metadata:
   justification: "Address the internal interface"
   requested: 2026-08-04
 spec:
-  device: "007955000894453"
+  device: "007955000901881"
   interface: local
   ip:
     - 10.100.3.125/24
@@ -940,8 +940,8 @@ def test_a_push_record_is_matched_by_SCOPE_not_by_scm_address(tmp_path):
 
     rec = tmp_path / "push-device.json"
     rec.write_text(json.dumps({
-        "scope_dir": "device-007955000894453",   # the Terraform root
-        "folder": "007955000894453",             # the SCM address
+        "scope_dir": "device-007955000901881",   # the Terraform root
+        "folder": "007955000901881",             # the SCM address
         "status": "success", "job_id": "191", "admin_count": 1, "all_admins": False,
     }))
     out_root = tmp_path / "evidence"
@@ -949,7 +949,7 @@ def test_a_push_record_is_matched_by_SCOPE_not_by_scm_address(tmp_path):
                         tfvars_root=tmp_path / "tf") == 0
 
     device = json.loads(
-        (out_root / "device-007955000894453" / "REQ-2026-0801.json").read_text())
+        (out_root / "device-007955000901881" / "REQ-2026-0801.json").read_text())
     assert device["push"] is not None and device["push"]["job_id"] == "191", (
         "a device-scoped bundle must receive the record for its Terraform root")
 

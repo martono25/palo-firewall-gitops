@@ -83,7 +83,7 @@ folders:
         # `fwgitops verify-catalog` now compares it, because the reset is
         # cosmetic but is a reliable symptom of a re-registration — and a
         # re-registration wipes device-scope config.
-        display_name: fw-prod-edge-4453
+        display_name: fw-prod-edge-1881
         model: PA-VM
         # CONNECTED 2026-08-02. A push can commit to it.
         targetable: true

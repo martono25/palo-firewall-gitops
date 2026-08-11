@@ -414,3 +414,25 @@ def test_the_catalog_step_lists_display_name_too():
         "name the field — 'the devices: block' reads as just the serial")
     assert "cannot tell which side moved" in runbook, (
         "explain why the note sounds alarming for a harmless cause")
+
+
+def test_the_replacement_covers_everywhere_the_serial_is_written():
+    """FOUND BY THE OPERATOR, 2026-08-10, after finishing steps 4-6: eight tests
+    red. The serial is not only in the catalog, the intents and a Terraform
+    root — around a dozen test files carry it, and so do the live guides, one of
+    which is pinned by a test asserting its examples match the real intents.
+
+    `git rm` is also only half the cleanup: it removes TRACKED files, leaving
+    `.terraform/`, `backend.hcl` and stray plans behind, so the old root
+    survives on disk.
+
+    ADRs stay as written — an ADR records a decision made at a time, and
+    rewriting it is revisionism."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "git rm only removes TRACKED files" in runbook, (
+        "the old root survives on disk otherwise")
+    assert "will not pass CI until they follow" in runbook, (
+        "tests carry the serial; say so before the operator finds out from a "
+        "red build")
+    assert "docs/adr/ — leave alone" in runbook, (
+        "and say what must NOT be rewritten, or someone tidies the history")

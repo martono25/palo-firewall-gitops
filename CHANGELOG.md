@@ -177,6 +177,27 @@ an interface address belongs to one firewall, while zones and routes are folder
 policy every firewall inherits. Three of the five files in that directory change
 and two must not.
 
+### Fixed — the replacement procedure stopped short of what a rebuild touches
+
+Found by finishing steps 4-6 and getting eight red tests. The serial is not only
+in the catalog, the intents and a Terraform root: **around a dozen test files
+carry it**, some as fixtures and some asserting against the real tree, and so do
+the live guides — `building-a-folder.md` is pinned by a test that its examples
+still match the real intent files, so a stale serial there is a red build rather
+than a cosmetic wart.
+
+`git rm -r terraform/device-<old>` is also half the cleanup. It removes TRACKED
+files and leaves `.terraform/`, `backend.hcl` and stray `*.tfplan` behind, so the
+old root survives on disk and `apply-order` still sees it. The old state object
+lingers in the backend describing a firewall that no longer exists.
+
+`docs/adr/` is now explicitly excluded. An ADR records a decision made at a time;
+rewriting it is revisionism, the same reason the old evidence bundles stay.
+
+The step also names the fix it wants: a test needing the live serial should READ
+it from `catalog/folders.yaml` rather than hard-code it, so a rebuild churns one
+file instead of a dozen.
+
 ### Added — how to replace a firewall
 
 A new serial is threaded through the catalog, the Day-1 intents, a Terraform

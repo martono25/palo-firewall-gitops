@@ -202,7 +202,7 @@ replacement, skip to [step 4](#step-4); that is the bridge between
 
 ```yaml
 spec:
-  device: "007955000894453"     # this firewall, not that one
+  device: "007955000901881"     # this firewall, not that one
 ```
 
 Until that says the serial you actually have, the Day-1 apply targets a device
@@ -298,15 +298,50 @@ replacing an existing firewall; steps 4-8 apply either way.
    git rm -r terraform/device-<old-serial>
    ```
 
-   Remove the old root's state object from the backend too, or it lingers as a
-   state file nothing reconciles.
+   **`git rm` only removes TRACKED files.** The root keeps its gitignored ones —
+   `.terraform/`, `backend.hcl`, any `*.tfplan`, the generated
+   `*.auto.tfvars.json` — so the directory survives on disk and `fwgitops
+   apply-order` still sees a root:
 
-7. **Leave the old evidence bundles alone.** `evidence/device-<old-serial>/` is
+   ```sh
+   rm -rf terraform/device-<old-serial>
+   ```
+
+   Remove the old state object from the backend too, or it lingers describing a
+   firewall that no longer exists:
+
+   ```sh
+   aws s3 ls s3://<state-bucket>/ --recursive | grep device-
+   aws s3 rm s3://<state-bucket>/device-<old-serial>/terraform.tfstate
+   ```
+
+7. **Follow the serial everywhere else it is written.** Steps 4-6 cover the
+   places that CHANGE BEHAVIOUR; these are the ones that break CI:
+
+   ```sh
+   grep -rln '<old-serial>' tests/ docs/ terraform/
+   ```
+
+   - **`tests/`** — around a dozen files carry it, some as fixtures and some
+     asserting against the real tree. Your pull request will not pass CI until
+     they follow.
+   - **live guides** (`building-a-folder.md`, `requesting-rules.md`,
+     `cli-reference.md`, this page) — `building-a-folder.md` is pinned by a test
+     that asserts its examples still match the real intent files, so a stale
+     serial there is a red build, not a cosmetic wart.
+   - **`docs/adr/` — leave alone.** An ADR records a decision made at a time.
+     Rewriting it is revisionism, the same reason the old evidence bundles stay.
+
+   > This is the step that most wants automating. A test that needs the live
+   > serial should READ it from `catalog/folders.yaml` rather than hard-code it,
+   > and then a rebuild would churn one file instead of a dozen.
+
+8. **Leave the old evidence bundles alone.** `evidence/device-<old-serial>/` is
    the audit record of changes that really happened on a firewall that really
    existed. Deleting them to tidy up destroys history; they are supposed to
    outlive the device.
 
-8. **Verify before trusting it:**
+9. **Verify before trusting it:**
 
    ```sh
    fwgitops verify-catalog          # catalog vs SCM's real hierarchy

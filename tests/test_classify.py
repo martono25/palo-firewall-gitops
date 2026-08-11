@@ -403,7 +403,7 @@ def test_device_entries_are_not_folders_and_are_absent_from_the_catalog():
 
     from fwgitops.catalog import FolderHierarchy
     h = FolderHierarchy.from_dict(yaml.safe_load(open("catalog/folders.yaml")))
-    for serial in ("007955000894453", "007955000893662"):
+    for serial in ("007955000901881", "007955000893662"):
         assert not h.known(serial), f"{serial} is a device, not a folder"
         assert not h.is_targetable(serial)
     assert h.targetable_folders() == ["GitOps", "prod-edge"]
@@ -444,7 +444,7 @@ def test_the_tenants_serials_survive_unquoted_only_by_luck():
     design, and the reason the shipped catalog quotes them anyway."""
     import yaml
 
-    parsed = yaml.safe_load("folders:\n  007955000894453:\n    children: []\n")
+    parsed = yaml.safe_load("folders:\n  007955000901881:\n    children: []\n")
     assert isinstance(next(iter(parsed["folders"])), str)
 
 

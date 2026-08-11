@@ -141,8 +141,8 @@ def test_a_device_scoped_bundle_lands_under_its_own_directory():
 
     p = bundle_path("evidence", {"req_id": "REQ-2026-0801",
                                  "compiled": {"scope": {"kind": "device",
-                                                        "value": "007955000894453"}}})
-    assert p == Path("evidence/device-007955000894453/REQ-2026-0801.json")
+                                                        "value": "007955000901881"}}})
+    assert p == Path("evidence/device-007955000901881/REQ-2026-0801.json")
 
 
 # ── the approval evidence must actually be COLLECTED ──────────────────────
@@ -200,7 +200,7 @@ def _apply_loop() -> str:
 def test_a_scope_with_no_RULES_is_still_applied():
     """MEASURED on the first successful apply (2026-08-09, run 31304463821): the
     loop guarded on `rules.auto.tfvars.json`, printed "no rules in
-    device-007955000894453 — skip", and Terraform never ran against a root
+    device-007955000901881 — skip", and Terraform never ran against a root
     holding three InterfaceRequests. The job reported success.
 
     Nothing broke that day only because those interfaces had already been applied

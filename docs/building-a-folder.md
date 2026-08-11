@@ -5,7 +5,7 @@
 the scope those rules land in.
 
 > **This is a reconstruction of a real build, not an imagined one.** Every step
-> below is how `prod-edge` and the pilot firewall `007955000894453` were actually
+> below is how `prod-edge` and the pilot firewall `007955000901881` were actually
 > brought up, and every file it names is in this repository. Where something
 > failed the first time, it says so — those are the parts you would otherwise
 > rediscover against a production firewall.
@@ -75,7 +75,7 @@ folders:
     children: []
     targetable: true
     devices:
-      "007955000894453":
+      "007955000901881":
         display_name: fw-prod-edge-4453
 ```
 
@@ -100,7 +100,7 @@ hand-writing:
 
 ```sh
 fwgitops scaffold-root --folder prod-edge
-fwgitops scaffold-root --device 007955000894453 --device-folder prod-edge
+fwgitops scaffold-root --device 007955000901881 --device-folder prod-edge
 fwgitops scaffold-root --check          # CI runs this
 ```
 
@@ -136,7 +136,7 @@ interfaces:
     create_in:
       prod-edge: ethernet1/2      # this platform CREATES this variable
     devices:
-      "007955000894453": ethernet1/2
+      "007955000901881": ethernet1/2
 ```
 
 `local` and `internet` have **no `create_in`** — they are SCM defaults inherited
@@ -159,7 +159,7 @@ metadata:
   justification: "Day-1 build: address the internal interface"
   requested: 2026-08-04
 spec:
-  device: "007955000894453"     # a SERIAL, not a folder
+  device: "007955000901881"     # a SERIAL, not a folder
   interface: local              # a ROLE from catalog/interfaces.yaml
   ip:
     - 10.100.3.125/24
@@ -311,7 +311,7 @@ sources of truth for one fact.
 Afterwards, each change has a record:
 
 ```
-evidence/device-007955000894453/REQ-2026-0801.json
+evidence/device-007955000901881/REQ-2026-0801.json
 evidence/prod-edge/REQ-2026-0806.json
 ```
 

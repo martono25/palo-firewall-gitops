@@ -22,7 +22,7 @@ from fwgitops.devicesync import (  # noqa: E402
     running_by_device,
 )
 
-DEV = {"serial_number": "007955000894453", "name": "007955000894453",
+DEV = {"serial_number": "007955000901881", "name": "007955000901881",
        "folder": "prod-edge", "is_first_push_done": True}
 
 
@@ -30,13 +30,13 @@ def test_a_device_behind_its_folder_is_flagged():
     """The case that motivated this: config exists in SCM that the firewall is
     not enforcing, and the next successful push by ANYONE applies it — including
     someone pushing something unrelated."""
-    r = compare([DEV], {"007955000894453": 68}, {"prod-edge": 70})[0]
+    r = compare([DEV], {"007955000901881": 68}, {"prod-edge": 70})[0]
     assert r.state == BEHIND and r.is_problem
     assert "next successful push by anyone" in r.detail
 
 
 def test_a_device_running_the_newest_version_is_clean():
-    r = compare([DEV], {"007955000894453": 70}, {"prod-edge": 70})[0]
+    r = compare([DEV], {"007955000901881": 70}, {"prod-edge": 70})[0]
     assert r.state == IN_SYNC and not r.is_problem
 
 
@@ -54,7 +54,7 @@ def test_first_push_pending_is_a_NOTE_not_a_failure():
     false — real, and not the same as "running stale config".
     """
     dev = {**DEV, "is_first_push_done": False}
-    r = compare([dev], {"007955000894453": 70}, {"prod-edge": 70})[0]
+    r = compare([dev], {"007955000901881": 70}, {"prod-edge": 70})[0]
     assert r.state == FIRST_PUSH_PENDING
     assert not r.is_problem, "a current firewall must not be reported as out of sync"
     assert r.is_note
@@ -65,14 +65,14 @@ def test_behind_wins_over_first_push_pending():
     """If the version really is behind, that is the finding — the flag must not
     downgrade a genuinely stale firewall to a note."""
     dev = {**DEV, "is_first_push_done": False}
-    r = compare([dev], {"007955000894453": 68}, {"prod-edge": 70})[0]
+    r = compare([dev], {"007955000901881": 68}, {"prod-edge": 70})[0]
     assert r.state == BEHIND and r.is_problem
 
 
 def test_a_missing_version_is_UNKNOWN_not_assumed_fine():
     """Fail closed. "No data" and "up to date" must not look the same."""
     assert compare([DEV], {}, {"prod-edge": 70})[0].state == UNKNOWN
-    assert compare([DEV], {"007955000894453": 70}, {})[0].state == UNKNOWN
+    assert compare([DEV], {"007955000901881": 70}, {})[0].state == UNKNOWN
     assert all(compare([DEV], {}, {})[0].is_problem for _ in (1,))
 
 
@@ -105,14 +105,14 @@ class _Session:
 
 def test_the_command_exits_2_when_a_device_is_behind(capsys):
     rc = run_device_sync(session=_Session(
-        [DEV], [{"device": "007955000894453", "version": 68}], [{"id": 70}]))
+        [DEV], [{"device": "007955000901881", "version": 68}], [{"id": 70}]))
     assert rc == 2
     assert "OUT OF SYNC" in capsys.readouterr().err
 
 
 def test_the_command_exits_0_when_everything_is_current(capsys):
     rc = run_device_sync(session=_Session(
-        [DEV], [{"device": "007955000894453", "version": 70}], [{"id": 70}]))
+        [DEV], [{"device": "007955000901881", "version": 70}], [{"id": 70}]))
     assert rc == 0
     assert "running the newest committed config" in capsys.readouterr().out
 
@@ -122,7 +122,7 @@ def test_the_command_exits_0_for_first_push_pending_but_says_so(capsys):
     admin-scoped push. Worth printing, not worth failing a scheduled job over."""
     dev = {**DEV, "is_first_push_done": False}
     rc = run_device_sync(session=_Session(
-        [dev], [{"device": "007955000894453", "version": 72}], [{"id": 72}]))
+        [dev], [{"device": "007955000901881", "version": 72}], [{"id": 72}]))
     out = capsys.readouterr().out
     assert rc == 0
     assert "NOTE" in out and "is_first_push_done" in out
@@ -164,7 +164,7 @@ def test_a_device_scope_row_defines_at_device_not_in_a_folder(tmp_path, capsys):
     snap = tmp_path / "s.json"
     snap.write_text(json.dumps([{
         "kind": "InterfaceRequest", "name": "ethernet1/2",
-        "device": "007955000894453", "scope": "device:007955000894453",
+        "device": "007955000901881", "scope": "device:007955000901881",
         "layer3": {}}]))
     env = tmp_path / "env.yaml"
     env.write_text("prod:\n  folder: prod-edge\n  from_zone: l\n  to_zone: i\n")
@@ -186,11 +186,11 @@ def test_only_the_scopes_the_snapshot_COVERS_are_compared(tmp_path, capsys):
     from fwgitops.drift import ActualObject, detect_object_drift
 
     declared = {
-        ("device:007955000894453", "ethernet1/2"): {"name": "ethernet1/2"},
+        ("device:007955000901881", "ethernet1/2"): {"name": "ethernet1/2"},
         ("prod-edge", "dmz"): {"name": "dmz"},
     }
-    actual = [ActualObject(kind="InterfaceRequest", folder="device:007955000894453",
-                           name="ethernet1/2", scope="device:007955000894453",
+    actual = [ActualObject(kind="InterfaceRequest", folder="device:007955000901881",
+                           name="ethernet1/2", scope="device:007955000901881",
                            fields={"name": "ethernet1/2"})]
     covered = {a.scope_folder for a in actual}
     scoped = {k: v for k, v in declared.items() if k[0] in covered}
