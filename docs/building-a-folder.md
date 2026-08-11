@@ -44,6 +44,21 @@ Each link needs the one before it:
 
 ---
 
+## Before you start: does the repo know your firewall?
+
+A Day-1 intent names its firewall **by serial**, so a freshly provisioned or
+rebuilt device needs the repository pointed at it first. Check:
+
+```sh
+grep -rn 'device:' intent/ | grep -v '#'
+fwgitops verify-catalog          # catalog vs SCM's real hierarchy
+```
+
+If those serials are not the firewall you have, stop and do
+[`operator-runbook.md` § Replacing a firewall, steps 4-8](operator-runbook.md#replacing-a-firewall-new-serial)
+first. Nothing here will fail loudly otherwise — an intent naming a stale serial
+compiles clean and dies at apply.
+
 ## Part 0 — before any intent will compile
 
 This is where a greenfield folder actually gets stuck, and none of it lives in

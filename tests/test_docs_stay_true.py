@@ -347,3 +347,30 @@ def test_provisioning_explains_what_onboard_actually_does():
         "it is a gate; the failure has to be actionable")
     assert "resets it to PA-VM" in prov, (
         "the display name exists so a re-onboard is detectable")
+
+
+def test_the_repo_repoint_is_findable_from_both_directions():
+    """RAISED BY THE OPERATOR MID-REBUILD, 2026-08-10: "I don't understand why
+    you want to replace firewall now. I haven't even done the additional day 1
+    provisioning."
+
+    Fair. The repo-side steps — update the serial in four places — lived only
+    under a heading called "Replacing a firewall", which reads as a destructive
+    restart to someone who has just BUILT one. They are not a replacement; they
+    are the bridge between provisioning and Day-1.
+
+    And the ordering is not arbitrary: an InterfaceRequest names its firewall by
+    serial, so the Day-1 chain targets a device that does not exist until the
+    repo is pointed at the real one. Both pages have to say so, because a reader
+    arrives from either side."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "also what you do after building a firewall for the first time" in runbook, (
+        "the section title says replacement; the content is not only that")
+    assert "nothing is destroyed, nothing is undone" in runbook, (
+        "say it plainly — the heading alarms someone who just provisioned")
+
+    folder = _flat(DOCS / "building-a-folder.md")
+    assert "does the repo know your firewall" in folder, (
+        "the Day-1 guide must check the serial before its first step")
+    assert "compiles clean and dies at apply" in folder, (
+        "and say why skipping it fails silently rather than loudly")

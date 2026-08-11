@@ -190,11 +190,31 @@ security group at your current `/32` — never widen it.
 
 ## Replacing a firewall (new serial)
 
-The serial is threaded through the repository, so a rebuild is not just a
-`terraform apply`. Nothing in CI catches a half-done replacement: the catalog is
-a hand-maintained mirror, and an intent naming a stale serial **compiles clean**.
+**Steps 4-8 are also what you do after building a firewall for the first time.**
+They point the repository at a serial — nothing is destroyed, nothing is undone.
+If you have just provisioned and are wondering why you are reading a page about
+replacement, skip to [step 4](#step-4); that is the bridge between
+[`provisioning.md`](provisioning.md) and
+[`building-a-folder.md`](building-a-folder.md).
 
-Do it in this order. Steps 1-2 are outside this repository.
+**Why it comes before Day-1.** The Day-1 chain is a set of intents, and an
+`InterfaceRequest` names its target firewall by serial:
+
+```yaml
+spec:
+  device: "007955000894453"     # this firewall, not that one
+```
+
+Until that says the serial you actually have, the Day-1 apply targets a device
+that does not exist. So the order is: provision → point the repo at the serial →
+Day-1 chain → rules.
+
+The serial is threaded through the repository, so a rebuild is not just a
+`terraform apply`. Nothing in CI catches a half-done change: the catalog is a
+hand-maintained mirror, and an intent naming a stale serial **compiles clean**.
+
+Do it in this order. Steps 1-3 are the rebuild itself and only apply if you are
+replacing an existing firewall; steps 4-8 apply either way.
 
 1. **Deactivate the old licence** in the Palo Alto CSP before destroying the
    instance, or the entitlement stays bound to a machine that no longer exists.
@@ -213,6 +233,8 @@ Do it in this order. Steps 1-2 are outside this repository.
 
 3. **Destroy and rebuild**, following [`provisioning.md`](provisioning.md).
    Capture the new serial from `show system info`.
+<a id="step-4"></a>
+
 4. **Update the catalog** — `catalog/folders.yaml` (the `devices:` block under
    the target folder) and `catalog/interfaces.yaml` (the per-serial port map for
    every role, plus `create_in` for any role this platform creates).

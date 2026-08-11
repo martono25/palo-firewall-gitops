@@ -133,6 +133,27 @@ places it. This command finalises and verifies:
 Placement is confirmed before the name is set — naming a device that is not where
 you think it is puts a confident label on the wrong thing.
 
+### Fixed — the repo re-point was only findable under "Replacing a firewall"
+
+Raised by the operator mid-rebuild: *"I don't understand why you want to replace
+firewall now. I haven't even done the additional day 1 provisioning."*
+
+Fair, and the doc caused it. The repo-side steps — update the serial in four
+places — lived only under a heading called **Replacing a firewall**, which reads
+as a destructive restart to someone who has just *built* one. They are not a
+replacement. They are the bridge between `provisioning.md` and
+`building-a-folder.md`, and they apply to a first build exactly as much as to a
+rebuild.
+
+The ordering is not arbitrary either, and neither page said why: an
+`InterfaceRequest` names its firewall **by serial**, so the Day-1 chain targets a
+device that does not exist until the repo is pointed at the real one.
+
+Now the runbook says up front that steps 4-8 apply either way and that nothing is
+destroyed, and `building-a-folder.md` opens by checking the serial — because a
+reader arrives from either direction, and skipping it fails silently: an intent
+naming a stale serial compiles clean and dies at apply.
+
 ### Added — how to replace a firewall
 
 A new serial is threaded through the catalog, the Day-1 intents, a Terraform
