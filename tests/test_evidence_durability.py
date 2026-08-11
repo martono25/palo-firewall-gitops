@@ -653,3 +653,31 @@ def test_a_missing_token_is_announced_not_silently_tolerated():
         assert "HAS_PAT" in (step.get("env") or {}), name
         assert "::warning::" in step["run"] and "AUTOMATION_PR_TOKEN" in step["run"], (
             f"{name}: an absent or expired token must be visible in the run")
+
+
+def test_the_workflow_archives_the_catalog_with_the_baseline():
+    """MEASURED 2026-08-10: the pipeline could not apply a firewall replacement.
+
+    `git archive "$base" intent` brought the baseline's INTENTS and left its
+    catalog behind, so both trees were parsed with today's. Replace a firewall
+    and `main`'s intents name a serial the new catalog no longer declares — the
+    baseline reads as invalid, classify fails closed, and apply is skipped.
+
+    The CLI fix (`--baseline-catalog`) is inert unless the workflow archives the
+    catalog and passes it. Both halves are asserted, in both jobs, because the
+    flag existing while nothing supplies it is the same shape as the defect."""
+    steps = _steps() + _workflow()["jobs"]["classify"]["steps"]
+    archives = [s["run"] for s in steps if "git archive" in str(s.get("run", ""))]
+    assert archives, "the baseline is materialised with git archive"
+    for body in archives:
+        assert 'git archive "$base" intent catalog' in body, (
+            "the baseline's own catalog must come with it")
+
+    tier = [s for s in _workflow()["jobs"]["classify"]["steps"]
+            if s.get("id") == "tier"][0]["run"]
+    assert "--baseline-catalog" in tier, (
+        "classify must judge the baseline by the catalog it shipped with")
+
+    ev = [s["run"] for s in _steps() if "fwgitops evidence" in str(s.get("run", ""))][0]
+    assert "--baseline-catalog" in ev, (
+        "and so must evidence — a removal is only visible if the baseline parses")

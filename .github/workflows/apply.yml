@@ -152,9 +152,16 @@ jobs:
           [ -z "$base" ] && base=$(git rev-parse --verify --quiet HEAD^ || true)
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
             mkdir -p /tmp/base-intent
-            git archive "$base" intent | tar -x -C /tmp/base-intent
+            # `catalog` TOO, not just `intent`. A baseline is a past state and
+            # was valid under the catalog it shipped with; parsing it against
+            # today's makes a firewall replacement unrepresentable — `main`'s
+            # intents name a serial the new catalog no longer declares, the
+            # baseline reads as invalid, classify fails closed and apply is
+            # skipped. Measured 2026-08-10 rebuilding the pilot.
+            git archive "$base" intent catalog | tar -x -C /tmp/base-intent
             tier=$(fwgitops classify intent --max-tier \
                      --baseline /tmp/base-intent/intent \
+                     --baseline-catalog /tmp/base-intent/catalog \
                      --change-message /tmp/change-message.txt)
           else
             # No baseline resolvable (a root commit). Tier the whole tree: it
@@ -520,7 +527,13 @@ jobs:
 
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
             mkdir -p /tmp/base-intent
-            git archive "$base" intent | tar -x -C /tmp/base-intent
+            # `catalog` TOO, not just `intent`. A baseline is a past state and
+            # was valid under the catalog it shipped with; parsing it against
+            # today's makes a firewall replacement unrepresentable — `main`'s
+            # intents name a serial the new catalog no longer declares, the
+            # baseline reads as invalid, classify fails closed and apply is
+            # skipped. Measured 2026-08-10 rebuilding the pilot.
+            git archive "$base" intent catalog | tar -x -C /tmp/base-intent
             echo "BASELINE=/tmp/base-intent/intent" >> "$GITHUB_ENV"
             echo "baseline intent tree from $base"
           else
@@ -596,6 +609,10 @@ jobs:
           done < /tmp/approvers.txt
           if [ -n "${BASELINE:-}" ]; then
             args+=(--baseline "$BASELINE" --change-message /tmp/change-message.txt)
+            # The catalog that shipped WITH the baseline, for the same reason the
+            # classify job needs it: a removal is only visible if the baseline
+            # parses, and it parses under its own catalog.
+            [ -d /tmp/base-intent/catalog ] && args+=(--baseline-catalog /tmp/base-intent/catalog)
           fi
 
           # ONE RECORD PER SCOPE THAT WAS PUSHED, so each bundle can name the
