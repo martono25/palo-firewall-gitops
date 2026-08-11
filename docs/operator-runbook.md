@@ -378,6 +378,21 @@ replacing an existing firewall; steps 4-8 apply either way.
 > writes the wrong port with no error at any stage. Until that check exists,
 > step 2 and step 4 have to be done together and read twice.
 
+### → NEXT: configure the firewall from Git
+
+The repository now names your firewall, and `compile --check` passes. The device
+still has **no interfaces, no zones and no routes** — that is the Day-1 chain, and
+it has not run.
+
+Go to [`building-a-folder.md`](building-a-folder.md). If the folder already
+exists and you are only re-pointing it at a rebuilt firewall, you can go straight
+to [§ Applying the chain](building-a-folder.md#applying-the-chain), which is the
+commit-PR-merge sequence that actually ships it.
+
+**Expect to give the changed intents new tickets.** You edited existing files
+rather than adding them, and a changed `spec` carrying the old
+`metadata.ticket` is rejected.
+
 ---
 
 ## Break-glass

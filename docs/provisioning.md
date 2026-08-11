@@ -257,6 +257,38 @@ that is not where you think it is puts a confident label on the wrong thing.
 Safe to re-run — the poll is idempotent and setting the same name twice is a
 no-op.
 
+---
+
+## → NEXT: the repository does not know this firewall yet
+
+**The firewall exists and is in SCM. It has no interfaces, no zones and no
+routes, and nothing in Git mentions its serial.** Two more guides, in this order.
+Do not skip to the second — a Day-1 intent names its firewall by serial, so it
+targets a device that does not exist until the first is done.
+
+**1. Point the repository at the serial** —
+[`operator-runbook.md` § Replacing a firewall, **steps 4 to 10**](operator-runbook.md#replacing-a-firewall-new-serial).
+
+Steps 1-3 of that section are the teardown you have already done (or never
+needed, on a first build). Start at **step 4** and work to **step 10**:
+
+| Step | What |
+|---|---|
+| 4 | catalog: serial, `display_name`, port map, `create_in` |
+| 5 | the Day-1 intents that name the device |
+| 6 | `scaffold-root` for the new device, remove the old root |
+| 7 | follow the serial through `tests/` and the live guides |
+| 8 | leave the old evidence bundles alone |
+| 9 | expect SCM commit errors until Day-1 runs — they are not a fault |
+| 10 | verify: `verify-catalog`, `compile --check`, `device-sync` |
+
+**2. Configure it from Git** —
+[`building-a-folder.md`](building-a-folder.md), then its
+[§ Applying the chain](building-a-folder.md#applying-the-chain) to ship it.
+
+That is where interfaces get addressed, zones declared and routes added — the
+Day-1 chain, as a reviewed pull request.
+
 Once it shows in the folder and connected, it's ready — Day-2 rule requests to
 that `environment` (which maps to the folder) will apply to it.
 

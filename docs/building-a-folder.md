@@ -274,8 +274,29 @@ device has the change.** Anything asserting "it is live" must poll the device.
 ## Part 4 — the folder is ready for rules
 
 With interfaces addressed, a zone declared and a route in place, the folder can
-take `AccessRequest`s. That is [`requesting-rules.md`](requesting-rules.md), and
-app teams write those.
+take `AccessRequest`s.
+
+### → NEXT: prove it end to end, then hand it over
+
+**1. Confirm the chain reached the device.** SCM holding it is not the same as
+the firewall running it:
+
+```sh
+fwgitops device-sync
+printf 'set cli pager off\nshow interface all\n' | ssh -T -i <key>.pem admin@<mgmt-ip>
+```
+
+Interfaces should be up with addresses and zones — not placeholder MACs.
+
+**2. Request one rule yourself**, as a requester would:
+[`requesting-rules.md`](requesting-rules.md). The fastest version is the Issue
+Form — open an issue, fill it in, and the platform opens the pull request. That
+is the path app teams use, and walking it once is how you find out whether it
+works for someone who is not you.
+
+**3. Then you are running it.** Day to day is
+[`operator-runbook.md`](operator-runbook.md): a run waiting for approval, drift
+firing, a rule to remove, the token expiring.
 
 ---
 

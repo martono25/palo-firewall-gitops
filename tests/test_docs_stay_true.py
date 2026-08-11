@@ -480,3 +480,32 @@ def test_the_day1_guide_says_how_to_actually_apply():
         "give the actual commands, not a description of the workflow")
     assert "give it a new ticket" in guide, (
         "editing an existing intent is the normal rebuild case and it is gated")
+
+
+def test_each_guide_hands_off_at_the_point_the_work_ends():
+    """RAISED BY THE OPERATOR, 2026-08-10, after three separate stalls:
+    "from provisioning.md there is no instruction to go to operator-runbook.md
+    with exact step. From there, there is no instruction to go to
+    building-a-folder.md. You keep making mistake that user has done this
+    multiple times."
+
+    Correct, and it was the same root cause each time. A "read these in order"
+    table at the TOP of a document is not a handoff. The reader needs it at the
+    moment the work ends, naming the destination SECTION and STEP — anything
+    vaguer assumes they already know the shape of the system, which is exactly
+    what a first-timer does not have.
+
+    So each phase ends with an explicit NEXT: provisioning -> the repo re-point
+    (steps 4-10, listed) -> Day-1 -> requesting a rule."""
+    prov = _flat(DOCS / "provisioning.md")
+    assert "NEXT: the repository does not know this firewall yet" in prov
+    assert "steps 4 to 10" in prov, (
+        "name the steps — 'see the runbook' is what stalled the operator")
+
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "NEXT: configure the firewall from Git" in runbook
+    assert "Applying the chain" in runbook, (
+        "and point at the section that actually ships it")
+
+    folder = _flat(DOCS / "building-a-folder.md")
+    assert "NEXT: prove it end to end, then hand it over" in folder
