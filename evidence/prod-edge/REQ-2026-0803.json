@@ -1,13 +1,13 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31304463821"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31506938255"
   },
   "approval": {
     "approvers": [],
     "gate": null,
-    "merge_commit": "776302289b18d9a075725dddcb8d98c29816ffac",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/101"
+    "merge_commit": "627acb3ea7dbb48d5cf52a59e234520bd0bc3b71",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/149"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -46,17 +46,17 @@
       "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
     }
   ],
-  "generated_at": "2026-08-09T08:51:26Z",
+  "generated_at": "2026-08-11T15:27:36Z",
   "kind": "RouteRequest",
   "push": null,
   "req_id": "REQ-2026-0803",
   "request": {
-    "intent_file": "intent/prod/edge-fw-4453/REQ-2026-0803.yaml",
-    "intent_sha256": "afbdcfe03eea772bb4f1b1a402f5c1576e1420337511963a9665340308627aa5",
+    "intent_file": "intent/prod/edge-fw-1881/REQ-2026-0803.yaml",
+    "intent_sha256": "7041eeb8f052b41be7aa92c006675de1810ef712be33381cce412e22a65759b1",
     "justification": "Day-1 build for edge firewall fw-prod-edge-4453: default route out the untrust interface so the firewall can forward unmatched traffic. Completes the ADR-0002 Day-1 chain (Interface -> Zone -> Route) on hardware.",
-    "requested": "2026-08-04",
+    "requested": "2026-08-13",
     "requester": "martono@corp",
-    "ticket": "JIRA-904"
+    "ticket": "JIRA-912"
   },
   "risk": {
     "checks_fired": [

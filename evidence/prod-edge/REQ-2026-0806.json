@@ -1,13 +1,13 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31304463821"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31506938255"
   },
   "approval": {
     "approvers": [],
     "gate": null,
-    "merge_commit": "776302289b18d9a075725dddcb8d98c29816ffac",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/101"
+    "merge_commit": "627acb3ea7dbb48d5cf52a59e234520bd0bc3b71",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/149"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -47,17 +47,17 @@
       "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
     }
   ],
-  "generated_at": "2026-08-09T08:51:26Z",
+  "generated_at": "2026-08-11T15:27:36Z",
   "kind": "ZoneRequest",
   "push": null,
   "req_id": "REQ-2026-0806",
   "request": {
-    "intent_file": "intent/prod/edge-fw-4453/REQ-2026-0806.yaml",
-    "intent_sha256": "222ed5b679f74a982bd224ac93bad26ffadc42e3d7ff6dae4ef4c0a5043f8952",
+    "intent_file": "intent/prod/edge-fw-1881/REQ-2026-0806.yaml",
+    "intent_sha256": "e1022a6465ba4bcb690fe420925e0bd3d1685a5a6a35b715dec7aeb8f4c8a0a4",
     "justification": "Declare the dmz zone on the edge firewall folder and bind it to the DMZ interface addressed by REQ-2026-0805. Proves kind #2 end to end on real hardware \u2014 the last Day-1 kind never verified on a device.",
-    "requested": "2026-08-05",
+    "requested": "2026-08-13",
     "requester": "martono@corp",
-    "ticket": "JIRA-906"
+    "ticket": "JIRA-913"
   },
   "risk": {
     "checks_fired": [
