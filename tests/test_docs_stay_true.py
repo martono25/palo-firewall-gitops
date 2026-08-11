@@ -251,8 +251,12 @@ def test_provisioning_troubleshoots_the_teardown_that_actually_failed():
     changes to the VPC is a fact about the environment, not a stuck resource."""
     prov = _flat(DOCS / "provisioning.md")
     assert "DependencyViolation" in prov, "the teardown failure must be documented"
-    assert "Xpanse Active Response" in prov, (
-        "name the tool — an unexplained security group is a mystery, a named one "
-        "is a finding")
+    # The EXPLANATORY sentence, not the tool name anywhere on the page. The
+    # quoted AWS description also contains "Xpanse Active Response", so a looser
+    # assertion survives the explanation being de-named to "some other tool" —
+    # which a mutation run duly demonstrated.
+    assert "Cortex Xpanse Active Response creates its own security groups" in prov, (
+        "name the tool where the cause is explained — an unexplained security "
+        "group is a mystery, a named one is a finding")
     assert "non-default security group blocks" in prov, (
         "the mechanism, so the next person diagnoses rather than guesses")
