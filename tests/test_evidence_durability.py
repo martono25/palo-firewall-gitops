@@ -655,6 +655,34 @@ def test_a_missing_token_is_announced_not_silently_tolerated():
             f"{name}: an absent or expired token must be visible in the run")
 
 
+def test_EVERY_workflow_that_materialises_a_baseline_brings_its_catalog():
+    """The version of the test below that I should have written first.
+
+    That one asserted `apply.yml` and passed while `pr-validate.yml` — which has
+    its own `git archive` and its own `classify --baseline` — still failed on a
+    correct pull request. Fixing one producer and leaving another is the same
+    defect three times over today: tier routing shipping inert, `push --record`
+    with nothing supplying it, and this.
+
+    So this looks for the PATTERN across every workflow rather than naming the
+    file I happened to be editing. Any `git archive` of a baseline must bring
+    `catalog`, and any `--baseline` must be accompanied by `--baseline-catalog`.
+    """
+    for name, wf in _all_workflows().items():
+        for body in _run_bodies(wf):
+            if "git archive" in body and "intent" in body:
+                assert "intent catalog" in body, (
+                    f"{name}: archives a baseline without its catalog — the "
+                    f"baseline will be judged by today's catalog")
+            # Strip the compound flag first, so what remains is only the bare
+            # `--baseline` this is actually asking about.
+            bare = body.replace("--baseline-catalog", "")
+            if "--baseline" in bare:
+                assert "--baseline-catalog" in body, (
+                    f"{name}: passes --baseline without --baseline-catalog, so "
+                    f"a changed catalog makes a correct changeset unparseable")
+
+
 def test_the_workflow_archives_the_catalog_with_the_baseline():
     """MEASURED 2026-08-10: the pipeline could not apply a firewall replacement.
 

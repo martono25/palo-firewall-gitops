@@ -112,8 +112,14 @@ jobs:
           { printf '%s\n\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY"; } > /tmp/change-message.txt
           mkdir -p /tmp/base-intent
           if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            git archive "$BASE_SHA" intent | tar -x -C /tmp/base-intent
+            # `catalog` TOO. A baseline is a past state and was valid under
+            # the catalog it shipped with; parsing it against the PR's catalog
+            # makes a firewall replacement unrepresentable — the base's intents
+            # name a serial the new catalog no longer declares, the baseline
+            # reads as invalid and the check fails on a correct PR.
+            git archive "$BASE_SHA" intent catalog | tar -x -C /tmp/base-intent
             echo "BASELINE=/tmp/base-intent/intent" >> "$GITHUB_ENV"
+            echo "BASELINE_CATALOG=/tmp/base-intent/catalog" >> "$GITHUB_ENV"
           else
             echo "::warning::base commit $BASE_SHA unavailable — removals will NOT be classified"
           fi
@@ -128,6 +134,7 @@ jobs:
           set -euo pipefail
           if [ -n "${BASELINE:-}" ]; then
             fwgitops classify intent --baseline "$BASELINE" \
+              --baseline-catalog "$BASELINE_CATALOG" \
               --change-message /tmp/change-message.txt
           else
             fwgitops classify intent
