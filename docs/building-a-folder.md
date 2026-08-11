@@ -281,12 +281,66 @@ app teams write those.
 
 ## Applying the chain
 
-Compile everything and check what each change is worth:
+**You do not run the apply. Merging to `main` runs it.** `apply.yml` triggers on a
+push to `main` touching `intent/**`, `catalog/**` or `terraform/**`, so the whole
+sequence is an ordinary pull request.
+
+### 1. Check locally first
 
 ```sh
 fwgitops compile intent --check     # fail-closed validation, writes nothing
 fwgitops classify intent            # per-change risk tier
 ```
+
+**If you EDITED an existing intent rather than adding one, give it a new
+ticket.** A changed `spec` with the old `metadata.ticket` is rejected — otherwise
+the evidence bundle for this change cites the request that authorised the
+previous one:
+
+```
+REQ-2026-0801: `spec` changed but `metadata.ticket` is still 'JIRA-902'
+```
+
+Update `ticket`, `requested`, and `justification` if the reason differs.
+
+### 2. Open a pull request
+
+```sh
+git checkout -b day1/<what-this-does>
+git add intent/ catalog/ terraform/          # by name, not -A
+git commit                                   # if anything is REMOVED, the PR body
+                                             # needs `Removes: <REQ-id> (TICKET)`
+git push -u origin HEAD
+gh pr create --fill
+gh pr checks --watch
+```
+
+`pytest` and `compile-and-plan` must pass — they are required, and `main` takes
+no direct push.
+
+### 3. Merge, and watch the apply it starts
+
+```sh
+gh pr merge --squash --delete-branch
+gh run list --workflow apply.yml --limit 1
+gh run watch <run-id>
+```
+
+The run classifies first, then applies each Terraform root in dependency order.
+
+### 4. Approve it if the tier says so
+
+A LOW changeset applies unattended. HIGH or CRITICAL holds at the
+`firewall-apply` environment for a named reviewer, and the run sits at `waiting`
+until someone approves it — see
+[`operator-runbook.md` § A run is waiting for you](operator-runbook.md#a-run-is-waiting-for-you).
+
+A Day-1 chain containing a default route is HIGH, so **expect to approve it**.
+
+### 5. Merge the evidence pull request
+
+The apply opens `evidence: bundles for <sha>`. Merge it; the record is not in the
+source of truth until you do.
 
 The apply pipeline walks scopes in dependency order — `fwgitops apply-order`
 drives the loop, so the device root applies before the folder root. It fails

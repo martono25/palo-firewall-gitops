@@ -459,3 +459,24 @@ def test_the_runbook_warns_that_a_new_firewall_fails_to_commit_first():
         "say so plainly — the error looks like a misconfiguration")
     assert "the rebuild changed the topology" in runbook, (
         "and give the test that separates the benign case from the real one")
+
+
+def test_the_day1_guide_says_how_to_actually_apply():
+    """RAISED BY THE OPERATOR, 2026-08-10: "this command is not clear and it is
+    not in your guide."
+
+    Fair. "Applying the chain" explained tiering, apply-order and evidence, and
+    never said what to TYPE. A reader finished it knowing the concepts and not
+    the actions — and the key fact was missing entirely: you do not run the
+    apply, merging to `main` runs it.
+
+    The stale-ticket gate belongs here too. Editing an existing intent rather
+    than adding one is the normal case during a rebuild, and it is rejected
+    until the ticket changes."""
+    guide = _flat(DOCS / "building-a-folder.md")
+    assert "You do not run the apply. Merging to main runs it." in guide, (
+        "the central fact — the trigger is the merge, not a command")
+    assert "gh pr create" in guide and "gh pr merge" in guide, (
+        "give the actual commands, not a description of the workflow")
+    assert "give it a new ticket" in guide, (
+        "editing an existing intent is the normal rebuild case and it is gated")
