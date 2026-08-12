@@ -185,17 +185,43 @@ You never run any command to fix things — you edit the file on the website.
 2. Once approved and the checks are green, click the green **Merge pull request**
    button → **Confirm merge**.
 
-### Step 7. It goes live automatically — then confirm it
+### Step 7. It goes live — automatically, or after a SECOND approval
 
-Merging kicks off the **apply** automatically — you don't run anything. To check
-that your rule actually deployed, go to
-**[Confirm your rule deployed](#confirm-your-rule-deployed)** below (it covers both
-the website and the command line).
+Merging kicks off the **apply** automatically — you don't run anything.
 
-> **Risk note:** LOW-risk changes apply automatically on merge. HIGH/CRITICAL ones
-> (broad `0.0.0.0/0`, exposing risky ports from the internet, negated matches, an
-> uninspected allow, or a brand-new zone path) are held for an explicit approval
-> step and will **not** auto-apply — the PR check tells you which tier you're in.
+**If your rule was graded LOW**, that is all. It applies on its own within a
+couple of minutes. Go to
+**[Confirm your rule deployed](#confirm-your-rule-deployed)** below.
+
+**If it was graded HIGH or CRITICAL** — a broad `0.0.0.0/0`, a risky port
+exposed from the internet, a negated match, an uninspected allow, or a brand-new
+zone path — the apply **stops and waits for a second approval**, and this is
+where first-timers get stuck:
+
+> **The approval you did in step 6 was on the pull request. This is a different
+> one, in a different place, and the first does not release the second.**
+>
+> It lives on the **run** page, not the PR page: repo → **Actions** →
+> **apply** → your run. At the top is a **Review deployments** button — click
+> it, tick `firewall-apply`, click **Approve and deploy**.
+>
+> Nothing chases this. There is no timeout and no reminder: an un-approved run
+> **waits forever**, and the firewall never gets your rule. From the pull
+> request, which is merged and green, it looks completely finished.
+>
+> To check whether an approval actually registered:
+>
+> ```bash
+> gh api repos/<owner>/<repo>/actions/runs/<run-id>/pending_deployments \
+>   -q '.[].environment.name'
+> ```
+>
+> Printing `firewall-apply` means it is **still waiting**. Printing nothing
+> means it is released. On 2026-08-12 this cost twenty minutes — the approval
+> had been given on the PR page and the run sat waiting, looking done.
+
+The PR check tells you which tier you are in before you merge, so you know which
+of these two paths to expect.
 
 ---
 
@@ -289,8 +315,18 @@ Two ways, both **without logging into SCM**. Use whichever fits your path.
 
 1. Repo → **Actions** tab → **apply** workflow → the run named after your merge
    (it starts within seconds of merging — **you don't run it, the merge does**).
-2. Wait ~2 min. **Green ✅** = deployed; **red ✗** = failed and *nothing changed*
-   (fail-closed) — open the run to read why.
+2. Wait ~2 min for the run to finish.
+
+   - **Green ✅** = the change was accepted **by Strata Cloud Manager**. That is
+     not the same as the firewall running it — the device picks it up somewhere
+     between a few seconds and a few minutes later. Measured 2026-08-12: one
+     change appeared within 48 seconds, another took over three minutes. If you
+     need to know it is *live*, check the firewall itself (command line, below)
+     rather than trusting the green tick.
+   - **Red ✗** = failed, and *nothing changed* (fail-closed) — open the run to
+     read why.
+   - **Still yellow after a few minutes** = it is probably waiting for the
+     deployment approval in step 7, not running slowly.
 3. At the top of the run page, the **"Firewall rules deployed"** summary lists
    every live rule, including yours:
    ```

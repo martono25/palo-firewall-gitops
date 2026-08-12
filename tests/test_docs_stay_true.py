@@ -883,3 +883,43 @@ def test_the_requester_guide_states_the_RULE_PLACEMENT_policy():
     assert "Submitting two rules together does not order them" in guide, (
         "the one thing a requester will assume and must not: batch order is "
         "not the order they submitted in")
+def test_every_guide_that_can_STRAND_a_run_says_the_gate_is_not_the_PR():
+    """The deployment gate is a second approval, in a different place from the
+    pull request approval, and the first does not release the second.
+
+    On 2026-08-12 an approval was given on the PR page; the run sat at `waiting`
+    for twenty minutes looking finished from every surface a reader would check.
+    Any guide that walks someone up to a HIGH change has to say this, because
+    the failure is SILENT — no timeout, no reminder, and a firewall that never
+    gets the change while the pull request shows merged and green.
+
+    Checked across all four rather than the newest, because the reader arrives
+    from whichever one matches their task.
+    """
+    for name in ("requesting-rules.md", "building-a-folder.md",
+                 "removing-things.md"):
+        doc = _flat(DOCS / name).replace("*", "")
+        assert "pending_deployments" in doc, (
+            f"docs/{name} must give the check that says whether an approval "
+            f"registered — from the PR page a stranded run looks finished")
+        assert ("not the pull request approval" in doc
+                or "Approving the pull request is not the same thing" in doc
+                or "approval you did in step 6 was on the pull request" in doc), (
+            f"docs/{name} must say plainly that the PR approval is not this one")
+
+
+def test_no_guide_claims_a_green_run_means_the_firewall_HAS_the_change():
+    """It means Strata Cloud Manager accepted it. The device follows seconds to
+    minutes later — measured 9 s to 48 s once and 1 m 20 s to 3 m 25 s an hour
+    afterwards on the same firewall.
+
+    `requesting-rules.md` used to say "Green = deployed" full stop, which is the
+    claim that sends someone to debug a change that was merely still in flight —
+    and the documented way that ends is a dispatched apply, which baselines
+    against HEAD^ and deletes silently.
+    """
+    doc = _flat(DOCS / "requesting-rules.md").replace("*", "")
+    assert "Green ✅ = deployed;" not in doc, (
+        "a green run is acceptance by SCM, not proof the firewall is running it")
+    assert "not the same as the firewall running it" in doc, (
+        "the requester guide must say what green actually means")
