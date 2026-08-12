@@ -1,0 +1,17 @@
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0812
+  requester: martono@corp.com
+  ticket: JIRA-9020
+  justification: "Web tier to payments API, HTTPS only, inspected"
+  requested: "2026-08-12"
+spec:
+  environment: prod
+  action: allow
+  source: [{cidr: "10.20.1.0/24"}]
+  destination: [{fqdn: "payments.internal"}]
+  service: [{protocol: tcp, port: "443"}]
+  application: ["ssl", "web-browsing"]
+  profile: best-practice
+  log_forwarding: log-best
