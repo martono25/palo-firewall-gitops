@@ -2424,6 +2424,7 @@ def run_adopt_device(
     *,
     folder: str,
     replacing: Optional[str] = None,
+    ticket: Optional[str] = None,
     check: bool = False,
     prune_state: bool = False,
     intent_root: Path = Path("intent"),
@@ -2499,7 +2500,8 @@ def run_adopt_device(
                     for p in discover_intents(intent_root)}
     changes = apply_adoption(adoption, folders_text=folders_path.read_text(),
                              interfaces_text=ifaces_path.read_text(),
-                             intent_files=intent_files, replacing=replacing)
+                             intent_files=intent_files, replacing=replacing,
+                             ticket=ticket)
 
     # The supporting files: fixtures and prose that do not change behaviour but
     # DO break CI. Skipped when nothing is being replaced — there is no old
@@ -2990,6 +2992,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="the serial this one replaces. Rewrites it across both "
                          "catalogs and every device-scoped intent, which is the "
                          "partial-rename failure this command exists to remove.")
+    ad.add_argument("--ticket", default=None, metavar="TICKET",
+                    help="the change ticket authorising THIS adoption. A "
+                         "replacement changes `spec.device` on every "
+                         "device-scoped intent, and a changed spec carrying the "
+                         "previous ticket is rejected — so without this the "
+                         "command writes a pull request that cannot merge, "
+                         "failing a gate its own edit triggered.")
     ad.add_argument("--check", action="store_true",
                     help="print the plan and write nothing — the same code path "
                          "minus the write")
@@ -3177,7 +3186,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_rules(args.folder, contains=args.contains)
     if args.command == "adopt-device":
         return run_adopt_device(args.serial, folder=args.folder,
-                                replacing=args.replacing, check=args.check,
+                                replacing=args.replacing, ticket=args.ticket,
+                                check=args.check,
                                 prune_state=args.prune_state,
                                 intent_root=args.intent_root,
                                 catalog_dir=args.catalog_dir)

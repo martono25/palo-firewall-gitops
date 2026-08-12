@@ -117,9 +117,30 @@ class Written:
     unchanged: List[str] = field(default_factory=list)
 
 
+def _reticket(text: str, ticket: str, today: str) -> str:
+    """Give a changed intent its OWN change ticket.
+
+    A `spec` that changed while `metadata.ticket` did not is REJECTED — otherwise
+    the evidence bundle for this change names the request that authorised the
+    previous one. Replacing a firewall changes `spec.device` on every
+    device-scoped intent, so an adoption trips that gate on every file it edits.
+
+    Found by using the command: it wrote twenty-two files correctly and produced
+    a pull request that could not merge, failing a check the change itself
+    triggered. Automating the edit and leaving the authorisation is only half an
+    answer.
+    """
+    import re
+    text = re.sub(r"^  ticket: \S+$", f"  ticket: {ticket}", text, count=1, flags=re.M)
+    return re.sub(r"^  requested: .*$", f'  requested: "{today}"', text,
+                  count=1, flags=re.M)
+
+
 def apply_adoption(adoption: "Adoption", *, folders_text: str, interfaces_text: str,
                    intent_files: Dict[str, str],
-                   replacing: Optional[str] = None) -> Dict[str, str]:
+                   replacing: Optional[str] = None,
+                   ticket: Optional[str] = None,
+                   today: Optional[str] = None) -> Dict[str, str]:
     """Return `{path: new content}` for every file the adoption changes.
 
     PURE. It takes text and returns text, so `--check` and the real run are the
@@ -144,9 +165,14 @@ def apply_adoption(adoption: "Adoption", *, folders_text: str, interfaces_text: 
         if replacing in interfaces_text:
             out["catalog/interfaces.yaml"] = interfaces_text.replace(
                 replacing, adoption.serial)
+        from datetime import date
+        today = today or date.today().isoformat()
         for path, text in intent_files.items():
             if replacing in text:
-                out[path] = text.replace(replacing, adoption.serial)
+                new_text = text.replace(replacing, adoption.serial)
+                if ticket:
+                    new_text = _reticket(new_text, ticket, today)
+                out[path] = new_text
 
     # The port map is authoritative from SCM, so rewrite each role's entry for
     # this serial even when the serial itself did not change — that is what makes

@@ -215,7 +215,7 @@ replacement, skip to [step 4](#step-4); that is the bridge between
 
 ```yaml
 spec:
-  device: "007955000901881"     # this firewall, not that one
+  device: "007955000902404"     # this firewall, not that one
 ```
 
 Until that says the serial you actually have, the Day-1 apply targets a device
@@ -261,7 +261,8 @@ replacing an existing firewall; steps 4-8 apply either way.
 
    ```sh
    fwgitops adopt-device <new-serial> --folder prod-edge --check      # read it
-   fwgitops adopt-device <new-serial> --folder prod-edge --replacing <old-serial>
+   fwgitops adopt-device <new-serial> --folder prod-edge \
+     --replacing <old-serial> --ticket <TICKET>
    ```
 
    It reads SCM and writes what SCM says: the folder, the `display_name`, and the
@@ -273,6 +274,11 @@ replacing an existing firewall; steps 4-8 apply either way.
    compared `catalog/interfaces.yaml` to the tenant, so a wrong port configured
    the wrong interface with no error at any stage. A value read from SCM cannot
    disagree with SCM.
+
+   **`--ticket` is not optional on a replacement.** Changing `spec.device` is a
+   change, and a changed spec carrying the ticket that authorised the previous
+   one is rejected — the evidence bundle would otherwise name the wrong request.
+   Without it the adoption writes correctly and the pull request cannot merge.
 
    **It refuses rather than guesses.** Exit 3 if SCM has not placed the device,
    or has it in a different folder — naming the folder it actually found. A role

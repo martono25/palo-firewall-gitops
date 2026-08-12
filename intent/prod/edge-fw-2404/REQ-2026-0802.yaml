@@ -22,15 +22,15 @@ kind: InterfaceRequest
 metadata:
   id: REQ-2026-0802
   requester: martono@corp
-  ticket: JIRA-910
+  ticket: JIRA-9200
   justification: >-
-    Day-1 build for edge firewall fw-prod-edge-1881: address the outside
+    Day-1 build for edge firewall fw-prod-edge-2404: address the outside
     interface so the internet zone can carry traffic. Completes the
     1 mgmt + 2 dataplane topology.
-  requested: "2026-08-13"
+  requested: "2026-08-12"
 
 spec:
-  device: "007955000901881"     # fw-prod-edge-1881, PA-VM, connected
+  device: "007955000902404"     # fw-prod-edge-2404, PA-VM, connected
   interface: internet           # role — $eth-internet / ethernet1/2
   ip:
     - 10.100.2.142/24

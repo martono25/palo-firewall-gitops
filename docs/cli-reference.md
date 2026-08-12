@@ -161,7 +161,7 @@ Commit a scope's staged config in SCM.
 
 ```sh
 fwgitops push --scope-dir prod-edge --record push-prod-edge.json
-fwgitops push --device 007955000901881
+fwgitops push --device 007955000902404
 ```
 
 | Flag | Effect |
@@ -289,7 +289,7 @@ Create a Terraform root for a scope, or verify existing ones.
 
 ```sh
 fwgitops scaffold-root --folder prod-edge
-fwgitops scaffold-root --device 007955000901881 --device-folder prod-edge
+fwgitops scaffold-root --device 007955000902404 --device-folder prod-edge
 fwgitops scaffold-root --check     # CI runs this
 fwgitops scaffold-root --sync      # regenerate after a module change
 ```
@@ -321,14 +321,15 @@ from the tree would be circular.
 Point the repository at a firewall, reading SCM for every value.
 
 ```sh
-fwgitops adopt-device 007955000901881 --folder prod-edge --check
-fwgitops adopt-device 007955000901881 --folder prod-edge --replacing 007955000894453
+fwgitops adopt-device 007955000902404 --folder prod-edge --check
+fwgitops adopt-device 007955000902404 --folder prod-edge --replacing 007955000894453
 ```
 
 | Flag | Effect |
 |---|---|
 | `--folder` | the folder SCM must **already** place the device in. Adoption refuses if SCM disagrees — writing the folder you meant would make the catalog assert a placement that is not real, and every later check trusts the catalog |
 | `--replacing OLD` | rewrites the old serial across both catalogs and every device-scoped intent. A **partial** rename is the failure this exists to remove |
+| `--ticket TICKET` | the change ticket authorising **this** adoption. A replacement changes `spec.device`, and a changed spec carrying the previous ticket is rejected — so without this the command writes a pull request that cannot merge, failing a gate its own edit triggered |
 | `--check` | print the plan, write nothing — the same code path minus the write |
 
 **Why it exists.** Adopting a firewall was seventeen hand edits across two
