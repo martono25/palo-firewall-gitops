@@ -308,37 +308,34 @@ replacing an existing firewall; steps 4-8 apply either way.
    is cosmetic. Nothing reads it; the compiler reads file contents. Rename it to
    match the new serial or leave it. The only difference is whether it lies.
 
-6. **Replace the Terraform root.** `adopt-device` prints these; it does not run
-   them, because destroying a root and its state is not something a command
-   should do on your behalf:
+6. **The Terraform roots and the supporting files are done for you.** Step 4
+   scaffolds the new device root, removes the old one — including the gitignored
+   files `git rm` leaves behind — and follows the serial through `tests/` and the
+   guides, which are what break CI.
+
+   `docs/adr/` and `evidence/` are **never** rewritten. An ADR records a decision
+   made at a time, and an evidence bundle is the audit trail of a change that
+   really happened on a firewall that really existed; a rebuild does not un-happen
+   either.
+
+7. **The old state object is still yours to delete.** It is the one step left
+   manual, deliberately: irreversible and *remote*, which is the difference
+   between a command editing your repository and a command reaching into your
+   cloud account to destroy a record.
 
    ```sh
-   fwgitops scaffold-root --device <new-serial> --device-folder prod-edge
-   git rm -r terraform/device-<old-serial>
-   rm -rf   terraform/device-<old-serial>      # git leaves the gitignored files
    aws s3 rm s3://<state-bucket>/device-<old-serial>/terraform.tfstate
    ```
 
-7. **Follow the serial everywhere else it is written.** Steps 4-6 cover the
-   places that CHANGE BEHAVIOUR; these are the ones that break CI:
+   Or opt in and let step 4 do it:
 
    ```sh
-   grep -rln '<old-serial>' tests/ docs/ terraform/
+   fwgitops adopt-device <new> --folder <f> --replacing <old> --prune-state
    ```
 
-   - **`tests/`** — around a dozen files carry it, some as fixtures and some
-     asserting against the real tree. Your pull request will not pass CI until
-     they follow.
-   - **live guides** (`building-a-folder.md`, `requesting-rules.md`,
-     `cli-reference.md`, this page) — `building-a-folder.md` is pinned by a test
-     that asserts its examples still match the real intent files, so a stale
-     serial there is a red build, not a cosmetic wart.
-   - **`docs/adr/` — leave alone.** An ADR records a decision made at a time.
-     Rewriting it is revisionism, the same reason the old evidence bundles stay.
-
-   > This is the step that most wants automating. A test that needs the live
-   > serial should READ it from `catalog/folders.yaml` rather than hard-code it,
-   > and then a rebuild would churn one file instead of a dozen.
+   The bucket is read from a root's `backend.hcl` rather than guessed — deleting
+   from the wrong bucket is not a mistake worth risking to save a flag. If it
+   cannot be read, the command warns and leaves the object alone.
 
 8. **Leave the old evidence bundles alone.** `evidence/device-<old-serial>/` is
    the audit record of changes that really happened on a firewall that really

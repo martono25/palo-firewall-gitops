@@ -3,6 +3,44 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed — `adopt-device` finishes the job: four of the five manual steps are gone
+
+v2.2.0 shipped it covering the catalogs and the intents, and printing the rest.
+The rest is now done:
+
+- **the new Terraform root** is scaffolded (asking first, because `scaffold-root`
+  refuses an existing root on purpose — `main.tf` is written once)
+- **the old root is removed**, including the gitignored files `git rm` leaves
+  behind, which is why the directory survived a "complete" replacement before
+- **the serial is followed through `tests/` and the guides** — seventy-six
+  references across seventeen files on this deployment. They change no behaviour
+  and break CI anyway, so an operator who did everything right still opened a
+  pull request that could not merge
+
+**`docs/adr/` and `evidence/` are never rewritten.** An ADR records a decision
+made at a time; an evidence bundle records a change that really happened on a
+firewall that really existed. A rebuild does not un-happen either, and this is
+the exclusion most likely to be lost to a well-meaning "follow the serial
+everywhere", so it is asserted rather than commented.
+
+**Deleting the old Terraform state stays manual, deliberately.** It is
+irreversible and *remote* — the difference between a command editing your
+repository and a command reaching into your cloud account to destroy a record.
+`--prune-state` opts in; without it the command prints the one-liner. The bucket
+is read from a root's `backend.hcl` rather than guessed, and an unreadable
+backend warns instead of deleting from somewhere plausible.
+
+Fixing this also found a bug in the first version: the root work sat behind the
+"nothing to change" early return, so a device whose catalog already matched was
+left without a Terraform root. The two are independent now.
+
+Four mutations, all caught. Five doc pins fired on the rewrite — one of them
+asserted the *opposite* of the new behaviour, and was inverted rather than
+deleted, because a stale pin quietly passing is how a guide starts contradicting
+its tool.
+
 ## [2.2.0] — 2026-08-12
 
 The release an operator walked, found twelve gaps in, and one command replaced.

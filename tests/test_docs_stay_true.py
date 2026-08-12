@@ -430,14 +430,18 @@ def test_the_replacement_covers_everywhere_the_serial_is_written():
     ADRs stay as written — an ADR records a decision made at a time, and
     rewriting it is revisionism."""
     runbook = _flat(DOCS / "operator-runbook.md")
-    assert "git leaves the gitignored files" in runbook, (
+    assert "gitignored files git rm leaves behind" in runbook, (
         "the old root survives on disk otherwise — `git rm` drops only tracked "
         "files, so the directory and its state config remain")
-    assert "will not pass CI until they follow" in runbook, (
-        "tests carry the serial; say so before the operator finds out from a "
-        "red build")
-    assert "docs/adr/ — leave alone" in runbook, (
-        "and say what must NOT be rewritten, or someone tidies the history")
+    # The fact survived the rewrite, the phrasing did not: `adopt-device` now
+    # follows the serial itself, so the runbook explains WHY it bothers rather
+    # than warning the operator to do it by hand.
+    assert "which are what break CI" in runbook, (
+        "tests and guides carry the serial; the runbook must say why the "
+        "command follows them, or someone will scope it to the catalog")
+    assert "docs/adr/ and evidence/ are never rewritten" in runbook, (
+        "say what must NOT be rewritten, or someone tidies the history — the "
+        "command enforces this, and the guide has to explain why")
 
 
 def test_the_runbook_warns_that_a_new_firewall_fails_to_commit_first():
@@ -578,14 +582,30 @@ def test_the_guides_tell_you_to_use_adopt_device():
             f"{doc.name} still describes the manual edits — {why}")
 
 
-def test_the_runbook_says_what_adopt_device_will_not_do():
-    """The command is honest about its edges and the guide has to be too. It does
-    not scaffold the Terraform root, remove the old one, or delete state — those
-    print as next steps because destroying a root and its state is not something
-    a command should do on someone's behalf. A reader who assumes it is complete
-    leaves an orphaned root and a state file nothing reconciles."""
+def test_the_runbook_names_the_one_step_that_stays_manual():
+    """This asserted the OPPOSITE until `adopt-device` grew: that the command
+    printed the Terraform steps rather than running them. It runs them now, so
+    the pin asserts the new limit rather than being deleted to go green — a stale
+    pin quietly passing is how a guide starts contradicting the tool.
+
+    Deleting Terraform state is the exception, and the reason has to stay
+    attached: irreversible and REMOTE. Without the reason it reads as an
+    oversight, and someone helpfully finishes the job."""
     runbook = _flat(DOCS / "operator-runbook.md")
-    assert "it does not run them" in runbook, (
-        "say plainly that the Terraform steps are still yours")
-    assert "scaffold-root" in runbook and "terraform.tfstate" in runbook, (
-        "and name them, including the state object that otherwise lingers")
+    assert "still yours to delete" in runbook, (
+        "name the one step that is not automatic")
+    assert "irreversible" in runbook and "--prune-state" in runbook, (
+        "say why, and how to opt in — otherwise it looks unfinished")
+    assert "terraform.tfstate" in runbook, (
+        "and name the object, which otherwise lingers describing a firewall "
+        "that no longer exists")
+
+
+def test_the_runbook_stops_claiming_the_root_work_is_manual():
+    """`adopt-device` covers four of the five steps that were left to the
+    operator. A runbook that still walks them contradicts the tool, and the
+    runbook is the one people follow."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "The Terraform roots and the supporting files are done for you" in runbook
+    assert "never rewritten" in runbook, (
+        "keep the exclusion — an ADR and an evidence bundle are history")
