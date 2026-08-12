@@ -5,6 +5,55 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Added — `fwgitops adopt-device`, because seventeen hand edits is a typo waiting
+
+Adopting a firewall — first build or replacement — was seventeen manual edits
+across two catalogs, three intents, a directory name and a Terraform root. The
+operator who walked it: *"too many manual task to edit i.e. folders, device scope
+and rules which is prone to error and typo."*
+
+Every one of those edits transcribed something **SCM already knew** — the folder,
+the display name, and the physical port behind each interface role. They are now
+read:
+
+```
+$ fwgitops adopt-device 007955000901881 --folder prod-edge --check
+SCM says: 007955000901881 in 'prod-edge', display name 'fw-prod-edge-1881'
+  dmz        -> ethernet1/3
+  internet   -> ethernet1/2
+  local      -> ethernet1/1
+nothing to change — the repository already matches SCM
+```
+
+**It closes a gap as well as saving typing.** Nothing compared
+`catalog/interfaces.yaml` to the live tenant, so a wrong port configured the
+wrong interface with no error at any stage. A value read from SCM cannot
+disagree with SCM — and re-running against the *same* serial is how a drifted
+catalog gets corrected.
+
+**The split is the design.** Which logical roles exist is the repository's to
+declare; the port each resolves to is SCM's to say.
+
+**It refuses rather than guesses:** a device SCM has not placed, a device in a
+different folder (exit 3, naming the folder it actually found), and a role whose
+variable SCM cannot resolve — reported unmapped, because a role with no port is
+not a role with a default port.
+
+**It edits YAML as text**, deliberately. `catalog/interfaces.yaml` is mostly
+comments explaining which ENI sits behind which port and why a role is
+site-specific; round-tripping it through a parser would delete all of it.
+
+Verified live against the pilot, including both refusals and the no-op. The first
+live run found a bug the unit tests had not: a matching catalog still reported a
+file to write, because the entry regex swallowed the newline and the edit was
+deleting two blank lines. A tool that silently reformats what it edits is one
+people stop trusting.
+
+Not automatic, and it says so: scaffolding the Terraform root, removing the old
+one, and following the serial into `tests/` and the guides are printed as next
+steps.
+
+
 ### Changed — the evidence pull request merges itself
 
 An audit record that waits for a click is not in the source of truth. One sat
