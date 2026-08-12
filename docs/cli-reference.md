@@ -1,11 +1,11 @@
 # `fwgitops` — command reference
 
-Every subcommand, what it answers, and what its exit code means. **Audience:
+All 21 subcommands, what each answers, and what its exit code means. **Audience:
 platform team.** If you want a firewall rule, you want
 [`requesting-rules.md`](requesting-rules.md) — none of this is needed to ask for
 one.
 
-Generated against v2.1.1. A test asserts this page lists every registered
+Generated against v2.2.0. A test asserts this page lists every registered
 subcommand, so a new command cannot ship undocumented.
 
 ---

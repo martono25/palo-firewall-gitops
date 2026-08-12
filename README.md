@@ -4,7 +4,7 @@ GitOps-driven firewall automation for Palo Alto (Strata Cloud Manager / Panorama
 covering **Day-1 provisioning + onboarding** through **Day-2 rule changes**, automated as far
 as is safe.
 
-> **Status: v2.1.1.** The Day-2 loop (`intent → tags ensure → compile → classify
+> **Status: v2.2.0.** The Day-2 loop (`intent → tags ensure → compile → classify
 > (the tier picks the approver) → terraform apply → enrich → push → tags sweep`)
 > and the **Day-1 chain**
 > (`InterfaceRequest → ZoneRequest → RouteRequest`) are both implemented, tested, and
@@ -35,7 +35,7 @@ matters: [`operator-runbook.md` § Replacing a firewall](docs/operator-runbook.m
 | **Provision a firewall** (stand up a VM-Series) | [`docs/provisioning.md`](docs/provisioning.md) | platform operator |
 | **Stand up a folder** (the Day-1 chain, end to end) | [`docs/building-a-folder.md`](docs/building-a-folder.md) | platform operator |
 | **Operate it day to day** (a run is held, drift fired, break-glass) | [`docs/operator-runbook.md`](docs/operator-runbook.md) | platform operator |
-| **Look up a command** (all 20, with exit codes) | [`docs/cli-reference.md`](docs/cli-reference.md) | platform operator |
+| **Look up a command** (all 21, with exit codes) | [`docs/cli-reference.md`](docs/cli-reference.md) | platform operator |
 | **Audit it** (what the evidence proves, and what it does not) | [`docs/assessor-guide.md`](docs/assessor-guide.md) | assessor / incident responder |
 | Wire up CI (OIDC, secrets, environments) | [`docs/GITHUB-SETUP.md`](docs/GITHUB-SETUP.md) | platform operator |
 | What each rule field maps to on the firewall | [`docs/adr/0003-security-rule-component-model.md`](docs/adr/0003-security-rule-component-model.md) | — |
@@ -95,7 +95,7 @@ pip install -e '.[dev]'
 fwgitops compile intent --env-map catalog/environments.yaml --out terraform
 fwgitops compile intent --check      # validate only, write nothing
 
-pytest -q                            # 820 tests
+pytest -q                            # 859 tests
 ```
 
 Fail-closed and all-or-nothing: if any intent is invalid, the compiler prints an
