@@ -1,0 +1,141 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31605311758"
+  },
+  "approval": {
+    "approvers": [],
+    "gate": null,
+    "merge_commit": "7be4b5a9daf26a652888a9928e86e7f80844f08f",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/166"
+  },
+  "compiled": {
+    "compiler_version": "1.0.0",
+    "object": {
+      "address_objects": [
+        {
+          "name": "addr-19a41c9ee9",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.100.3.40/32"
+        },
+        {
+          "name": "addr-fefab6374c",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.100.1.60/32"
+        }
+      ],
+      "rule": {
+        "action": "allow",
+        "application": [
+          "any"
+        ],
+        "category": [
+          "any"
+        ],
+        "description": null,
+        "destinations": [
+          "addr-fefab6374c"
+        ],
+        "from_zones": [
+          "local"
+        ],
+        "log_end": true,
+        "log_setting": null,
+        "log_start": false,
+        "name": "REQ-2026-165",
+        "negate_destination": false,
+        "negate_source": false,
+        "profile_group": null,
+        "relative_position": null,
+        "rulebase": "pre",
+        "services": [
+          "svc-bc61e2fbeb"
+        ],
+        "source_user": [
+          "any"
+        ],
+        "sources": [
+          "addr-19a41c9ee9"
+        ],
+        "tags": [
+          "gitops:managed",
+          "gitops:req:REQ-2026-165",
+          "gitops:section:specific-allow",
+          "gitops:ticket:JIRA-9301"
+        ],
+        "target_rule": null,
+        "to_zones": [
+          "internet"
+        ]
+      },
+      "service_objects": [
+        {
+          "name": "svc-bc61e2fbeb",
+          "port": "6514",
+          "protocol": "tcp",
+          "tags": [
+            "gitops:managed"
+          ]
+        }
+      ]
+    },
+    "object_sha256": "d2c921bb62d705a307e1b5f101b612c606aff34726193d357d0d1b3e9a5b9fc0",
+    "scope": {
+      "kind": "folder",
+      "value": "prod-edge"
+    },
+    "tfvars_file": "rules.auto.tfvars.json",
+    "tfvars_sha256": "85fcc1a4194bec27f88668db3b16a58a98f85a2d8bba84604b124605b38b58c1"
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7"
+  ],
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-12T14:12:14Z",
+  "kind": "AccessRequest",
+  "push": {
+    "admin_count": 1,
+    "all_admins": false,
+    "folder": "prod-edge",
+    "job_id": "212",
+    "status": "success"
+  },
+  "req_id": "REQ-2026-165",
+  "request": {
+    "intent_file": "intent/prod/platform-metrics/REQ-2026-165.yaml",
+    "intent_sha256": "e82272270f7edddb9426bb94ef42faa2e1acd0387034536440ccde65fc0346d0",
+    "justification": "Retest of the day-2 path on the rebuilt firewall 007955000902404. The metrics collector on the local segment needs to reach the syslog receiver in the DMZ.",
+    "requested": "2026-08-12",
+    "requester": "martono25",
+    "ticket": "JIRA-9301"
+  },
+  "risk": {
+    "checks_fired": [
+      {
+        "check": "allow_without_inspection",
+        "reason": "allow rule has no security profile group \u2014 traffic is permitted without threat inspection",
+        "tier": "LOW"
+      }
+    ],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "applied"
+}
