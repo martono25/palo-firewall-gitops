@@ -481,9 +481,19 @@ recording it rather than the identity.
 
 Git and SCM agree, the run was green, the device does not have it.
 
-**A successful push does not mean the device has the change.** Measured
-2026-08-06: a route disappeared from the device about **40 seconds after the
-push reported success**. Anything asserting "it is live" has to poll the device.
+**A successful push does not mean the device has the change.** Measured twice,
+both times by deleting the default route and polling the device:
+
+| Date | Push reported success | Route gone from the forwarding table |
+|---|---|---|
+| 2026-08-06 | — | about **40 s** later |
+| 2026-08-12 | 15:00:10 | still present at 15:00:19, gone by 15:00:58 — **between 9 s and 48 s** |
+
+Treat this as *tens of seconds*, not as a number you can wait out. The second
+run polled over SSH and each poll took long enough to leave a 39-second gap, so
+it is a second sample of the same order of magnitude rather than a confirmation
+of "40". Anything asserting "it is live" has to poll the device — that is the
+point of the range, not a caveat on it.
 
 ```bash
 fwgitops device-sync

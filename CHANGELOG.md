@@ -5,6 +5,34 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — three claims the rebuild retest measured and found wrong
+
+All three were found by deleting real objects from a real firewall on
+2026-08-12, and all three failed in the direction that reassures.
+
+**Zones are not derived from your addresses, and nobody said so.** A request for
+`10.100.3.40/32 → 10.100.1.60/32` was created as `local → internet` — the zone
+pair configured for the environment — while the destination sat on an interface
+in `dmz`. It compiled, applied, pushed and went green, and it cannot match the
+traffic it was asked for. Per-IP zone inference is Phase 2; until it lands, the
+only control is disclosure, so both requester-facing surfaces now carry it: the
+guide, and the Issue Form, whose whole promise is that a requester needs no
+PAN-OS knowledge and therefore cannot be assumed to read the guide.
+
+**A zone bound only to an interface deletes without complaint.** The
+`zone_removed` reason led with "SCM refuses the delete while a rule still
+references it". A rule does produce that 409 — but the binding in the way was an
+interface, and SCM removed the zone in two seconds and reported success, leaving
+ethernet1/3 addressed, unzoned, and dropping traffic. The reason text now leads
+with the quiet outcome and keeps the loud one as the exception.
+
+**The push-to-device lag was one sample presented as a number.** "About 40
+seconds", measured once on 2026-08-06, is now a table of two runs — the second
+bounded only to between 9 s and 48 s, because the SSH poll left a 39-second gap.
+The test pinned the literal string "40 seconds", so re-measuring it more
+honestly FAILED the suite; the pin now anchors on the claim ("a successful push
+does not mean the device has the change") rather than the figure.
+
 ### Fixed — the runbook claimed every removal is HIGH
 
 It is not, and the difference matters in the direction that hurts.

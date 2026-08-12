@@ -135,7 +135,13 @@ def test_the_runbook_covers_the_operations_that_have_actually_failed():
                                           "removal deletes silently"),
         ("AUTOMATION_PR_TOKEN", "an expired token stops evidence landing, quietly"),
         ("all_admins", "break-glass must be visible in the record"),
-        ("40 seconds", "a successful push does not mean the device has it"),
+        # Anchored on the CLAIM, not the number. It was pinned to the literal
+        # "40 seconds" — a single 2026-08-06 sample — so re-measuring it
+        # (2026-08-12: between 9 s and 48 s) failed the test for being MORE
+        # accurate. A pin that punishes better data is pinning the wrong thing.
+        ("A successful push does not mean the device has the change",
+         "a successful push does not mean the device has it"),
+        ("poll the device", "so the runbook must say what to do instead"),
     ):
         assert topic in runbook, f"the runbook must still cover: {why}"
 
@@ -659,3 +665,33 @@ def test_the_runbook_states_the_REAL_removal_tiers():
 
     assert tier_for("SomethingNobodyWired") == "CRITICAL"
     assert "CRITICAL" in runbook, "and the runbook must say an unknown kind fails closed"
+
+
+def test_the_requester_surfaces_disclose_that_ZONES_COME_FROM_THE_ENVIRONMENT():
+    """The gap that produces a green run and a rule that never matches.
+
+    A requester types two addresses. The zones are NOT derived from them — every
+    rule lands on the environment's configured pair (`local -> internet` for
+    prod) because per-IP zone inference is Phase 2. Measured 2026-08-12:
+    `10.100.3.40/32 -> 10.100.1.60/32` was created as `local -> internet` while
+    the destination sat on an interface in `dmz`. It applied, it pushed, every
+    check was green, and it cannot match the traffic it was asked for.
+
+    Nothing in the pipeline detects this, so DISCLOSURE is the whole control —
+    which makes it exactly the kind of sentence that gets tidied away. Both
+    requester-facing surfaces are pinned: the guide and the Issue Form, because
+    a requester who uses the form may never open the guide.
+    """
+    guide = _flat(DOCS / "requesting-rules.md")
+    assert "not" in guide and "derived from the addresses you type" in guide, (
+        "the requester guide must say zones are not derived from the addresses")
+    assert "will never match your traffic" in guide, (
+        "and must state the consequence in the requester's terms — a rule that "
+        "looks applied and does nothing")
+
+    form = re.sub(r"\s+", " ", (REPO_ROOT / ".github" / "ISSUE_TEMPLATE"
+                                / "rule-request.yml").read_text()).replace("*", "")
+    assert "Zones come from the environment, not from your addresses" in form, (
+        "the Issue Form must disclose it too — its whole promise is that a "
+        "requester needs no PAN-OS knowledge, so it cannot rely on them "
+        "reading the guide")
