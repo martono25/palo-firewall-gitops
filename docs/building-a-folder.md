@@ -54,7 +54,14 @@ grep -rn 'device:' intent/ | grep -v '#'
 fwgitops verify-catalog          # catalog vs SCM's real hierarchy
 ```
 
-If those serials are not the firewall you have, stop and do
+If those serials are not the firewall you have, the one-command fix is:
+
+```sh
+fwgitops adopt-device <serial> --folder <folder> --replacing <old-serial>
+```
+
+For the full sequence around it — the Terraform root, the old state, the serial
+in `tests/` — stop and do
 [`operator-runbook.md` § Replacing a firewall, steps 4-8](operator-runbook.md#replacing-a-firewall-new-serial)
 first. `compile` will reject an intent naming a firewall the catalog does not
 declare, so you cannot get far with the serial alone wrong — but the interface

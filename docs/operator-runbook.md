@@ -257,74 +257,65 @@ replacing an existing firewall; steps 4-8 apply either way.
    Capture the new serial from `show system info`.
 <a id="step-4"></a>
 
-4. **Update the catalog** — two files, four things. Changing the serial key and
-   stopping is the easy miss:
+4. **Point the repository at the serial — one command.**
 
-   `catalog/folders.yaml`, under the target folder's `devices:`
-   - the **serial key** itself
-   - **`display_name`** — `fwgitops onboard` sets this in SCM, so a catalog left
-     on the old name shows up as a `verify-catalog` note. That note is worded for
-     the dangerous reading (a device reset to `PA-VM` means a re-onboard wiped
-     device-scope config); a stale catalog is the benign one. The check cannot
-     tell which side moved, which is why it makes you look
+   ```sh
+   fwgitops adopt-device <new-serial> --folder prod-edge --check      # read it
+   fwgitops adopt-device <new-serial> --folder prod-edge --replacing <old-serial>
+   ```
 
-   `catalog/interfaces.yaml`
-   - the **per-serial port map** for every role
-   - **`create_in`** for any role this platform creates
+   It reads SCM and writes what SCM says: the folder, the `display_name`, and the
+   **physical port behind every interface role**, plus the serial across both
+   catalogs and every device-scoped intent.
 
-   The last two must move together — they are the pair that puts two zones on one
-   physical port if they disagree, and nothing compares either to SCM.
+   Those values used to be typed. Each one transcribed something SCM already
+   knew, and the port map is the one where a typo does real damage — nothing
+   compared `catalog/interfaces.yaml` to the tenant, so a wrong port configured
+   the wrong interface with no error at any stage. A value read from SCM cannot
+   disagree with SCM.
+
+   **It refuses rather than guesses.** Exit 3 if SCM has not placed the device,
+   or has it in a different folder — naming the folder it actually found. A role
+   whose variable will not resolve is reported unmapped, not defaulted.
+
+   **Re-run it any time.** Against the same serial it is a no-op if the catalog
+   matches, and a correction if it has drifted. That is now the check that
+   never existed.
+
+   <details><summary>What it writes, if you want to read the diff first</summary>
+
+   `catalog/folders.yaml` — the serial key and `display_name`. A stale name is
+   why `verify-catalog` reports a note worded for the *dangerous* cause: a device
+   reset to `PA-VM` means a re-onboard wiped device-scope config. The check
+   cannot tell which side moved, which is why it makes you look.
+
+   `catalog/interfaces.yaml` — the per-serial port map for every role. If you
+   edit this by hand instead, `create_in` must move with it: they are the pair
+   that puts two zones on one physical port when they disagree.
+
+   `intent/**` — `spec.device` on every `InterfaceRequest`. Only that kind
+   carries a serial: an interface address belongs to ONE firewall, while
+   `ZoneRequest` and `RouteRequest` are folder-scoped policy a new firewall
+   inherits. The compiler refuses `device:` on those (ADR-0006).
+
+   </details>
 
    ```sh
    fwgitops verify-catalog     # expect OK; read every NOTE before believing it
    ```
-5. **Update the Day-1 intents that name the device.** Only `InterfaceRequest`
-   does. An interface address belongs to ONE firewall — two cannot share an IP —
-   so it is device-scoped and carries a serial:
 
-   ```yaml
-   spec:
-     device: "<old-serial>"   ->   device: "<new-serial>"
-   ```
+5. **Rename the intent directory if you want to** — `intent/prod/edge-fw-<last4>/`
+   is cosmetic. Nothing reads it; the compiler reads file contents. Rename it to
+   match the new serial or leave it. The only difference is whether it lies.
 
-   ```sh
-   grep -rn '^  device:' intent/          # every line that needs changing
-   ```
-
-   **`ZoneRequest` and `RouteRequest` do not change.** They are folder-scoped
-   policy, shared by every firewall in the folder, and never mention a serial —
-   a new firewall inherits them. If you find yourself editing one, stop: the
-   compiler refuses `device:` on those kinds (ADR-0006).
-
-   Update the trailing comments too (`# fw-prod-edge-4453, PA-VM, connected`),
-   or the file describes a machine that no longer exists.
-
-   The **directory name** (`intent/prod/edge-fw-<last4>/`) is cosmetic — nothing
-   reads it, the compiler only reads file contents. Rename it to match the new
-   serial or leave it; there is no functional difference, only whether it lies.
-
-6. **Replace the Terraform device root.** The old one is named for the old
-   serial and its state describes a machine that is gone:
+6. **Replace the Terraform root.** `adopt-device` prints these; it does not run
+   them, because destroying a root and its state is not something a command
+   should do on your behalf:
 
    ```sh
    fwgitops scaffold-root --device <new-serial> --device-folder prod-edge
    git rm -r terraform/device-<old-serial>
-   ```
-
-   **`git rm` only removes TRACKED files.** The root keeps its gitignored ones —
-   `.terraform/`, `backend.hcl`, any `*.tfplan`, the generated
-   `*.auto.tfvars.json` — so the directory survives on disk and `fwgitops
-   apply-order` still sees a root:
-
-   ```sh
-   rm -rf terraform/device-<old-serial>
-   ```
-
-   Remove the old state object from the backend too, or it lingers describing a
-   firewall that no longer exists:
-
-   ```sh
-   aws s3 ls s3://<state-bucket>/ --recursive | grep device-
+   rm -rf   terraform/device-<old-serial>      # git leaves the gitignored files
    aws s3 rm s3://<state-bucket>/device-<old-serial>/terraform.tfstate
    ```
 

@@ -274,8 +274,8 @@ needed, on a first build). Start at **step 4** and work to **step 10**:
 
 | Step | What |
 |---|---|
-| 4 | catalog: serial, `display_name`, port map, `create_in` |
-| 5 | the Day-1 intents that name the device |
+| 4 | **`fwgitops adopt-device <serial> --folder <f>`** — reads SCM and writes the catalog, the port map and every `spec.device` |
+| 5 | rename the intent directory (cosmetic) |
 | 6 | `scaffold-root` for the new device, remove the old root |
 | 7 | follow the serial through `tests/` and the live guides |
 | 8 | leave the old evidence bundles alone |

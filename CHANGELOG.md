@@ -5,6 +5,28 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed — the guides use `adopt-device` instead of walking you through the edits
+
+Shipping the command and leaving the procedure would give the repository two
+answers to one question, and the guide is the one people follow.
+
+`operator-runbook.md` § Replacing a firewall: steps 4-5 are now one command, with
+what it writes folded into a collapsible block for anyone who wants to read the
+diff first. The facts those steps carried are kept — why `display_name` matters,
+why `create_in` and the port map must move together, why only `InterfaceRequest`
+names a serial — because they explain what the command is doing rather than
+merely instructing.
+
+Step 6 is unchanged and now says explicitly that `adopt-device` **prints** the
+Terraform steps rather than running them: destroying a root and its state is not
+something a command should do on someone's behalf.
+
+`provisioning.md` and `building-a-folder.md` point at it too — the handoff and
+the pre-flight serial check are where a reader meets the problem.
+
+Three doc pins fired on the rewrite, which is what they are for: two facts had
+been reworded and one moved. All three survive, re-anchored on the new text.
+
 ### Added — `fwgitops adopt-device`, because seventeen hand edits is a typo waiting
 
 Adopting a firewall — first build or replacement — was seventeen manual edits
