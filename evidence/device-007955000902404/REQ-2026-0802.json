@@ -1,0 +1,71 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31603523160"
+  },
+  "approval": {
+    "approvers": [],
+    "gate": null,
+    "merge_commit": "79f8a2652dcfd06a3a17ae2518429b2304c32dee",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/163"
+  },
+  "compiled": {
+    "compiler_version": "1.0.0",
+    "object": {
+      "comment": "Outside \u2014 managed by fwgitops",
+      "dhcp": false,
+      "ip": [
+        "10.100.2.142/24"
+      ],
+      "management_profile": null,
+      "mtu": 1500,
+      "name": "ethernet1/2"
+    },
+    "object_sha256": "be52db279b762732a187a24c079a3a4f8584ba0dcc166c758329939529f796f9",
+    "scope": {
+      "kind": "device",
+      "value": "007955000902404"
+    },
+    "tfvars_file": "interfaces.auto.tfvars.json",
+    "tfvars_sha256": "9daff14d12295216503d36567762f3c19214d5f35dac7a872229d5dffa4d7f92"
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7"
+  ],
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-12T13:52:20Z",
+  "kind": "InterfaceRequest",
+  "push": {
+    "admin_count": 1,
+    "all_admins": false,
+    "folder": "007955000902404",
+    "job_id": "206",
+    "status": "success"
+  },
+  "req_id": "REQ-2026-0802",
+  "request": {
+    "intent_file": "intent/prod/edge-fw-2404/REQ-2026-0802.yaml",
+    "intent_sha256": "7aa9d93416e5fd89b894acd09a78d2d820df6c31bf68b1c3d7f053e69ca6f332",
+    "justification": "Day-1 build for edge firewall fw-prod-edge-2404: address the outside interface so the internet zone can carry traffic. Completes the 1 mgmt + 2 dataplane topology.",
+    "requested": "2026-08-12",
+    "requester": "martono@corp",
+    "ticket": "JIRA-9200"
+  },
+  "risk": {
+    "checks_fired": [],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "applied"
+}
