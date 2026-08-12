@@ -3,7 +3,49 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.2.0] — 2026-08-12
+
+The release an operator walked, found twelve gaps in, and one command replaced.
+
+**Highlights**
+
+- **`fwgitops adopt-device`** — adopting a firewall was seventeen hand edits, each
+  transcribing something SCM already knew. Now it reads them.
+- **A file name that disagrees with `metadata.id` is rejected.** One did, live:
+  the rule deployed under an id nobody would guess from the filename, and
+  `fwgitops where` could not find it.
+- **The evidence pull request merges itself.** An audit record waiting on a click
+  is not in the source of truth.
+- **The guides form a path.** Provisioning hands off to the repo re-point, which
+  hands off to Day-1, which hands off to requesting a rule — each naming the next
+  section and step.
+
+### Upgrading
+
+**One new rejection.** `compile`, `classify` and `evidence` now refuse an intent
+whose file name disagrees with `metadata.id`. A repository carrying one goes from
+green to exit 2 — deliberately, because the id is what names the rule in SCM and
+the evidence file while the file name is what a human searches, and a mismatch
+means the rule is unfindable by the id a reader would type.
+
+```sh
+fwgitops compile intent --check     # names the file and both ids
+```
+
+Rename the file to match the id if the rule is already deployed under it;
+otherwise change the id. `*.example.*` files are skipped as before.
+
+**Nothing else requires action.** `adopt-device` is additive, the evidence
+auto-merge needs `allow_auto_merge` on the repository (enabled here), and the
+4-vCPU instance default only affects a firewall you rebuild.
+
+> **On the version.** MINOR under the scope recorded in 2.1.0: semver covers the
+> `fwgitops` CLI, `fw-intent/v1`, `fw-evidence/v2`, the Terraform interface and
+> the catalog formats. Both schemas are unchanged and nothing was removed. The
+> new rejection is a stricter *validation* of input that was already producing a
+> wrong result — a bug fix with a sharp edge, documented above rather than
+> discovered.
+
 
 ### Changed — the guides use `adopt-device` instead of walking you through the edits
 
@@ -336,8 +378,6 @@ record of changes that really happened on a firewall that really existed.
 hierarchy and does not compare the interface port map against SCM. Nothing else
 does either, so a catalog disagreeing with the real `default_value` writes the
 wrong port with no error at any stage.
-
-## [Unreleased]
 
 ### Fixed — `is_first_push_done` was documented as blocking a push. It does not.
 
