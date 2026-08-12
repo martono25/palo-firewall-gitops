@@ -9,6 +9,8 @@ because nothing judged them at all.
 
 from __future__ import annotations
 
+import re
+
 import sys
 from pathlib import Path
 
@@ -20,6 +22,29 @@ from fwgitops.cli import run_classify  # noqa: E402
 from fwgitops.removal import Removal, classify_removal, find_removals  # noqa: E402
 
 ENV = "prod:\n  folder: prod-edge\n  from_zone: local\n  to_zone: internet\n"
+
+
+def _named_for_id(name, body):
+    """The file name a body's `metadata.id` requires.
+
+    Fixtures used short names (`A.yaml`) while their bodies declared ids like
+    `REQ-1`. The product rejects that — the id names the rule in SCM and the
+    evidence file, the file name is what a human searches, and they drifted live
+    on 2026-08-11. A fixture that ignores the rule under test stops modelling
+    reality, so the name is derived and the dict key is only a label.
+
+    PARSED, NOT PATTERN-MATCHED. The first version used a regex for `^  id:` and
+    silently returned the original name for every fixture writing `metadata:
+    {id: …}` in flow style — which was most of them, so 42 tests stayed red and
+    looked like the product was wrong.
+    """
+    import yaml as _yaml
+    try:
+        doc = _yaml.safe_load(body) or {}
+        rid = (doc.get("metadata") or {}).get("id")
+    except Exception:  # noqa: BLE001 - a deliberately malformed fixture keeps its name
+        return name
+    return f"{rid}.yaml" if rid else name
 
 
 def _rule(rid, action="allow"):
@@ -40,7 +65,7 @@ def _rule(rid, action="allow"):
 def _tree(root: Path, files: dict):
     (root / "prod").mkdir(parents=True, exist_ok=True)
     for name, body in files.items():
-        (root / "prod" / name).write_text(body)
+        (root / "prod" / _named_for_id(name, body)).write_text(body)
     return root
 
 

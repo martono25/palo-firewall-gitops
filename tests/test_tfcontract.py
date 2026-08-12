@@ -19,6 +19,23 @@ from pathlib import Path
 
 import pytest
 
+
+
+def _write_intent(directory, body, **_ignored):
+    """Write an intent under the name its `metadata.id` requires.
+
+    The product rejects a file whose name disagrees with its id (found live
+    2026-08-11: `REQ-2026-0813.yaml` declared `REQ-2026-0812`, applied, and left
+    the rule unfindable by the id a human would type). Fixtures used short names
+    like `ZONE.yaml` for readability, which the rule now forbids — so the name is
+    derived and callers stop choosing one.
+    """
+    import yaml as _y
+    doc = _y.safe_load(body) or {}
+    rid = (doc.get("metadata") or {}).get("id")
+    p = directory / ((str(rid) + ".yaml") if rid else "REQ.yaml")
+    p.write_text(body)
+    return p
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fwgitops.cli import main  # noqa: E402
@@ -158,7 +175,7 @@ def test_compile_refuses_to_write_orphan_tfvars(tmp_path, capsys, module_body, e
     """
     intent_dir = tmp_path / "intent" / "prod"
     intent_dir.mkdir(parents=True)
-    (intent_dir / "ZONE.yaml").write_text(ZONE_INTENT, encoding="utf-8")
+    _write_intent(intent_dir, ZONE_INTENT, encoding="utf-8")
 
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP, encoding="utf-8")
@@ -182,7 +199,7 @@ def test_compile_succeeds_when_the_module_consumes_zones(tmp_path):
     """Same intent, module wired correctly -> writes normally."""
     intent_dir = tmp_path / "intent" / "prod"
     intent_dir.mkdir(parents=True)
-    (intent_dir / "ZONE.yaml").write_text(ZONE_INTENT, encoding="utf-8")
+    _write_intent(intent_dir, ZONE_INTENT, encoding="utf-8")
 
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP, encoding="utf-8")
@@ -410,7 +427,7 @@ def test_a_bad_folder_blocks_the_good_folders_write(tmp_path, capsys):
     for env, folder, zone in (("prod", "good-folder", "dmz"), ("stage", "bad-folder", "dmz2")):
         d = tmp_path / "intent" / env
         d.mkdir(parents=True)
-        (d / "ZONE.yaml").write_text(
+        _write_intent(d, 
             "apiVersion: fw-intent/v1\nkind: ZoneRequest\n"
             f"metadata: {{id: Z-{env}, requester: m@corp, ticket: J-1,"
             " justification: x, requested: 2026-07-27}\n"
@@ -458,7 +475,7 @@ def test_compile_rejects_a_folder_with_no_terraform_root(tmp_path, capsys):
     """
     intent_dir = tmp_path / "intent" / "prod"
     intent_dir.mkdir(parents=True)
-    (intent_dir / "ZONE.yaml").write_text(ZONE_INTENT, encoding="utf-8")
+    _write_intent(intent_dir, ZONE_INTENT, encoding="utf-8")
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP, encoding="utf-8")
 
@@ -477,7 +494,7 @@ def test_allow_missing_root_opts_out_explicitly(tmp_path):
     """Scratch/scaffold use stays possible, but only when asked for by name."""
     intent_dir = tmp_path / "intent" / "prod"
     intent_dir.mkdir(parents=True)
-    (intent_dir / "ZONE.yaml").write_text(ZONE_INTENT, encoding="utf-8")
+    _write_intent(intent_dir, ZONE_INTENT, encoding="utf-8")
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP, encoding="utf-8")
 
@@ -599,7 +616,7 @@ def test_compile_rejects_a_root_whose_object_type_drops_emitted_attributes(tmp_p
     """End-to-end: HOLE 3 must fail the compile, not just the helper."""
     intent_dir = tmp_path / "intent" / "prod"
     intent_dir.mkdir(parents=True)
-    (intent_dir / "ZONE.yaml").write_text(ZONE_INTENT, encoding="utf-8")
+    _write_intent(intent_dir, ZONE_INTENT, encoding="utf-8")
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP, encoding="utf-8")
 

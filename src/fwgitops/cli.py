@@ -111,6 +111,10 @@ def run_compile(
             continue
         try:
             req = load_intent(doc, env_map=env_map, **cats)
+            mismatch = _id_matches_filename(path, req)
+            if mismatch:
+                problems.append(f"{rel}: {mismatch}")
+                continue
             compiled.append(compile_any(req, env_map))
         except IntentError as e:
             problems.append(f"{rel}:\n" + "\n".join(f"    {p}" for p in e.problems))
@@ -776,6 +780,10 @@ def run_classify(
             continue
         try:
             _ar = load_intent(doc, env_map=env_map, **cats)
+            mismatch = _id_matches_filename(path, _ar)
+            if mismatch:
+                problems.append(f"{rel}: {mismatch}")
+                continue
             c = compile_any(_ar, env_map)
             req_id_of[id(c)] = _ar.metadata.id
             current_ids.add(_ar.metadata.id)
@@ -1028,6 +1036,34 @@ def _load_changeset(baseline_root: Path, intent_root: Path, env_map, cats, err,
     return find_removals(base, current.keys()), find_modifications(base, current), 0
 
 
+def _id_matches_filename(path, request) -> Optional[str]:
+    """A problem string when the file name and `metadata.id` disagree, else None.
+
+    THE ID IS THE IDENTITY EVERYWHERE DOWNSTREAM: it names the rule in SCM, it is
+    the evidence path (`evidence/<scope>/<id>.json`), and it is what
+    `fwgitops where` searches. The FILE NAME is what a human looks under.
+
+    They drifted once, live: `REQ-2026-0813.yaml` declared `id: REQ-2026-0812`
+    and nothing rejected it. The rule applied and pushed as REQ-2026-0812, its
+    evidence landed at `REQ-2026-0812.json`, and `fwgitops where REQ-2026-0813`
+    — the id a human would type, having read the filename — returned nothing.
+    The incident-response command cannot find a rule this repository authorised.
+
+    Two files could also silently claim one id, so the later one overwrites the
+    earlier one's evidence. Discovery skips `*.example.*`, so documentation files
+    never reach this.
+    """
+    stem = Path(path).stem
+    got = request.metadata.id
+    if stem == got:
+        return None
+    return (f"metadata.id is {got!r} but the file is named {stem!r}. They must "
+            f"match: the id names the rule in SCM and the evidence file, while "
+            f"the file name is what a human searches. Rename the file to "
+            f"{got}.yaml, or change metadata.id to {stem!r} — whichever is the "
+            f"one you meant.")
+
+
 def _compile_intents(intent_root, env_map_path, cats, err):
     """Shared load+compile for classify/evidence/drift. Returns (items, code).
 
@@ -1057,6 +1093,10 @@ def _compile_intents(intent_root, env_map_path, cats, err):
             continue
         try:
             ar = load_intent(doc, env_map=env_map, **cats)
+            mismatch = _id_matches_filename(path, ar)
+            if mismatch:
+                problems.append(f"{rel}: {mismatch}")
+                continue
             ch = compile_any(ar, env_map)
             # EVERY kind, not just AccessRequest. This used to keep rules only,
             # which is right for evidence (bundles are rules-only) and WRONG for
