@@ -700,4 +700,22 @@ jobs:
               exit 1
             }
           fi
-          echo "evidence PR: $(gh pr view "$branch" --json url -q .url)"
+          url=$(gh pr view "$branch" --json url -q .url)
+          echo "evidence PR: $url"
+
+          # AUTO-MERGE IT. Nothing here is a judgement call: the diff is
+          # machine-written JSON recording an apply that ALREADY HAPPENED, and a
+          # human "reviewing" sha256 hashes is not reviewing anything. Left to a
+          # click, the audit record sits outside the source of truth until
+          # someone notices — which is the artifact-with-a-TTL problem the
+          # committed bundle exists to solve, in a new shape. One sat open for a
+          # day before an operator asked why.
+          #
+          # This BYPASSES NOTHING. `--auto` merges only once the required checks
+          # pass, and the ruleset still applies — `main` takes no direct push.
+          # A conflict (two runs disagreeing about one bundle) blocks the merge
+          # and leaves the PR open for a human, which is what that case deserves.
+          if ! gh pr merge "$branch" --squash --auto --delete-branch 2>/tmp/ev-merge.txt; then
+            cat /tmp/ev-merge.txt
+            echo "::warning::could not enable auto-merge on $url — the evidence is committed and the PR is open, but it will wait for a human. Check that the repository allows auto-merge."
+          fi

@@ -119,12 +119,25 @@ alert gets ignored. A manual dispatch always runs.
 
 ## The evidence PR is sitting open
 
-Every apply that changes something opens `evidence: bundles for <sha>`. **Merge
-it.** The apply already happened; the PR is what puts the record in the source
-of truth.
+It should not be. Every apply that changes something opens
+`evidence: bundles for <sha>` **with auto-merge enabled**, so it lands on its own
+once the required checks pass. If one is still open, something stopped it:
 
-If its checks are stuck at `action_required`, `AUTOMATION_PR_TOKEN` is missing
-or expired — see below. The run warns when it is absent.
+| Cause | Sign |
+|---|---|
+| checks stuck at `action_required` | `AUTOMATION_PR_TOKEN` missing or expired — see below; the run warns |
+| auto-merge could not be enabled | `::warning::could not enable auto-merge` in the run log; check the repository allows it |
+| a **conflict** with another run's bundle | the PR shows `CONFLICTING` |
+
+The last one is deliberate: two runs disagreeing about the same bundle is worth a
+human, not an auto-resolve that silently drops one change's record. Resolve it by
+hand and merge.
+
+**Auto-merge bypasses nothing.** `--auto` waits for the required checks, and the
+ruleset still applies — `main` takes no direct push from anyone. What it removes
+is a click on a diff of sha256 hashes that nobody was reviewing, and an audit
+record sitting outside the source of truth until somebody noticed. One waited a
+day before an operator asked why.
 
 ---
 

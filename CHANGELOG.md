@@ -5,6 +5,24 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed — the evidence pull request merges itself
+
+An audit record that waits for a click is not in the source of truth. One sat
+open for a day before an operator asked why, and nothing in it is a judgement
+call: the diff is machine-written JSON recording an apply that **already
+happened**, and a human "reviewing" sha256 hashes is not reviewing anything.
+Meanwhile the record the committed bundle exists to preserve is outside `main` —
+the artifact-with-a-TTL problem in a new shape.
+
+`--auto` rather than a plain merge, so it **bypasses nothing**: the required
+checks still gate it and the ruleset still applies. A conflict — two runs
+disagreeing about one bundle — blocks the merge and leaves the PR for a human,
+which is what that case has always deserved. If auto-merge cannot be enabled the
+run warns rather than leaving the PR quietly open.
+
+Requires `allow_auto_merge` on the repository, now enabled.
+
+
 ### Fixed — a file name that disagrees with `metadata.id` is now rejected
 
 Found live 2026-08-11. `intent/prod/payments/REQ-2026-0813.yaml` declared
