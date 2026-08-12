@@ -574,8 +574,13 @@ def test_the_guides_tell_you_to_use_adopt_device():
     # several places, so asserting the name stayed satisfied when the actual
     # command line in step 4 was removed — the mutation caught it.
     runbook = _flat(DOCS / "operator-runbook.md")
-    assert "fwgitops adopt-device <new-serial> --folder prod-edge --replacing" in runbook, (
+    # Split across two assertions: the invocation is wrapped in the doc, and a
+    # single long literal breaks every time someone re-wraps a line.
+    assert "fwgitops adopt-device <new-serial> --folder prod-edge" in runbook, (
         "step 4 must BE the command, not a mention of it")
+    assert "--replacing <old-serial> --ticket" in runbook, (
+        "and carry --ticket, without which the adoption writes a pull request "
+        "that cannot merge")
     for doc, why in ((DOCS / "provisioning.md", "the handoff into it"),
                      (DOCS / "building-a-folder.md", "the pre-flight serial check")):
         assert "fwgitops adopt-device" in _flat(doc), (

@@ -307,3 +307,41 @@ def test_the_root_work_does_not_depend_on_the_catalog_changing():
         "the early return must consider the roots, not only the catalog")
     assert "if not new_root.exists():" in src, (
         "scaffold-root refuses an existing root; ask before calling it")
+
+
+def test_a_replacement_re_tickets_the_intents_it_changes():
+    """FOUND BY USING THE COMMAND. It wrote twenty-two files correctly and
+    produced a pull request that could not merge — failing the stale-ticket gate
+    its own edit had triggered.
+
+    A `spec` that changed while `metadata.ticket` did not is rejected, because
+    the evidence bundle would otherwise name the request that authorised the
+    PREVIOUS version. A replacement changes `spec.device` on every device-scoped
+    intent, so an adoption trips that gate on every file it touches.
+
+    Automating the edit and leaving the authorisation is half an answer."""
+    body = ('apiVersion: fw-intent/v1\nkind: InterfaceRequest\nmetadata:\n'
+            '  id: REQ-1\n  ticket: JIRA-OLD\n  requested: "2026-01-01"\n'
+            'spec:\n  device: "OLD-1"\n')
+    out = apply_adoption(_adoption(), folders_text=FOLDERS,
+                         interfaces_text=INTERFACES,
+                         intent_files={"intent/prod/f/REQ-1.yaml": body},
+                         replacing="OLD-1", ticket="JIRA-NEW", today="2026-08-12")
+    got = out["intent/prod/f/REQ-1.yaml"]
+    assert "ticket: JIRA-NEW" in got and "JIRA-OLD" not in got
+    assert 'requested: "2026-08-12"' in got, (
+        "the date must move with the ticket — `requested` describes THIS change")
+    assert '"NEW-2"' in got, "and the serial still changes"
+
+
+def test_without_a_ticket_the_intents_are_left_alone():
+    """`--ticket` is optional, because an adoption that replaces nothing changes
+    no `spec` and needs no new authorisation. Re-ticketing regardless would
+    rewrite a ticket for a change that did not happen."""
+    body = ('metadata:\n  id: REQ-1\n  ticket: JIRA-OLD\n  requested: "2026-01-01"\n'
+            'spec:\n  device: "OLD-1"\n')
+    out = apply_adoption(_adoption(), folders_text=FOLDERS,
+                         interfaces_text=INTERFACES,
+                         intent_files={"intent/prod/f/REQ-1.yaml": body},
+                         replacing="OLD-1")
+    assert "ticket: JIRA-OLD" in out["intent/prod/f/REQ-1.yaml"]

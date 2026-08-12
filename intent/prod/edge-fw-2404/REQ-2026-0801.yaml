@@ -26,12 +26,12 @@ kind: InterfaceRequest
 metadata:
   id: REQ-2026-0801
   requester: martono@corp
-  ticket: JIRA-909
+  ticket: JIRA-9200
   justification: >-
     Day-1 build for edge firewall fw-prod-edge-2404: give the internal interface
     its address so the local zone can carry traffic. First GitOps-managed
     data-plane change on hardware.
-  requested: "2026-08-11"
+  requested: "2026-08-12"
 
 spec:
   device: "007955000902404"     # fw-prod-edge-2404, PA-VM, connected

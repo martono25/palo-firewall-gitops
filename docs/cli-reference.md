@@ -329,6 +329,7 @@ fwgitops adopt-device 007955000902404 --folder prod-edge --replacing 00795500089
 |---|---|
 | `--folder` | the folder SCM must **already** place the device in. Adoption refuses if SCM disagrees — writing the folder you meant would make the catalog assert a placement that is not real, and every later check trusts the catalog |
 | `--replacing OLD` | rewrites the old serial across both catalogs and every device-scoped intent. A **partial** rename is the failure this exists to remove |
+| `--ticket TICKET` | the change ticket authorising **this** adoption. A replacement changes `spec.device`, and a changed spec carrying the previous ticket is rejected — so without this the command writes a pull request that cannot merge, failing a gate its own edit triggered |
 | `--check` | print the plan, write nothing — the same code path minus the write |
 
 **Why it exists.** Adopting a firewall was seventeen hand edits across two

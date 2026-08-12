@@ -3,6 +3,25 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed — `adopt-device` re-tickets the intents it changes
+
+Found by using it. The command wrote twenty-two files correctly and produced a
+pull request that **could not merge**, failing the stale-ticket gate its own edit
+had triggered.
+
+A `spec` that changed while `metadata.ticket` did not is rejected — the evidence
+bundle would otherwise name the request that authorised the *previous* version.
+A replacement changes `spec.device` on every device-scoped intent, so an adoption
+trips that gate on every file it touches.
+
+`--ticket` supplies the authorisation, and moves `requested` with it. Optional,
+because an adoption that replaces nothing changes no `spec` and needs no new
+ticket — re-writing one there would credit a change that did not happen.
+
+Automating the edit and leaving the authorisation was half an answer.
+
 ## [2.3.0] — 2026-08-12
 
 `adopt-device` finishes what v2.2.0 started. Adopting a firewall was seventeen
