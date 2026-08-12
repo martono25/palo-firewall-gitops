@@ -27,7 +27,13 @@ ethernet1/3 addressed, unzoned, and dropping traffic. The reason text now leads
 with the quiet outcome and keeps the loud one as the exception.
 
 **The push-to-device lag was one sample presented as a number.** "About 40
-seconds", measured once on 2026-08-06, is now a table of two runs — the second
+seconds", measured once on 2026-08-06, is now a table of three runs — and the
+third, taken while restoring the Day-1 chain an hour after the first two, took
+**between 1 m 20 s and 3 m 25 s**, which is why the guidance reads "seconds to
+minutes" rather than "tens of seconds". An operator who polls for a minute and
+concludes the push failed would dispatch a fix for a change still in flight,
+which is how a duplicate or a silent deletion gets made. Originally a table of
+two runs — the second
 bounded only to between 9 s and 48 s, because the SSH poll left a 39-second gap.
 The test pinned the literal string "40 seconds", so re-measuring it more
 honestly FAILED the suite; the pin now anchors on the claim ("a successful push
