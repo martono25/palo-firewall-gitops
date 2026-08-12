@@ -614,3 +614,48 @@ def test_the_runbook_stops_claiming_the_root_work_is_manual():
     assert "The Terraform roots and the supporting files are done for you" in runbook
     assert "never rewritten" in runbook, (
         "keep the exclusion — an ADR and an evidence bundle are history")
+
+
+def test_the_runbook_states_the_REAL_removal_tiers():
+    """The runbook said every removal is HIGH. It is not.
+
+    Measured 2026-08-12 on the rebuild retest: removing an allow rule
+    classified LOW and auto-applied with no hold, which is what
+    `classify_removal` intends — withdrawing access opens nothing. An operator
+    told to expect a reviewer would have read a green run as evidence a human
+    had looked at it.
+
+    THE TIERS ARE DERIVED FROM THE CLASSIFIER, not typed in here, so the table
+    cannot drift from the code the way the prose did. Typing them in would only
+    pin the runbook to this test's opinion of the tiers, which is the same
+    mistake one level down.
+    """
+    from types import SimpleNamespace
+
+    from fwgitops.removal import Removal, classify_removal
+
+    runbook = _flat(DOCS / "operator-runbook.md").replace("`", "")
+
+    def tier_for(kind, **spec):
+        r = Removal(kind=kind, req_id="REQ-0000",
+                    request=SimpleNamespace(spec=SimpleNamespace(**spec)))
+        return classify_removal(r).tier
+
+    rows = {
+        "an allow rule": tier_for("AccessRequest", action="allow"),
+        "a deny rule": tier_for("AccessRequest", action="deny"),
+        "a RouteRequest": tier_for("RouteRequest"),
+        "a ZoneRequest": tier_for("ZoneRequest"),
+        "an InterfaceRequest": tier_for("InterfaceRequest"),
+    }
+    # The asymmetry is the whole point: if these two ever match, the table has
+    # stopped saying anything and this test should be re-read, not re-passed.
+    assert rows["an allow rule"] != rows["a deny rule"]
+
+    for label, tier in rows.items():
+        assert f"{label} | {tier}" in runbook, (
+            f"the runbook must state that removing {label} is {tier} — "
+            f"classify_removal says {tier}")
+
+    assert tier_for("SomethingNobodyWired") == "CRITICAL"
+    assert "CRITICAL" in runbook, "and the runbook must say an unknown kind fails closed"
