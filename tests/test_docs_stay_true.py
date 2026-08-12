@@ -149,7 +149,8 @@ def test_the_runbook_covers_the_operations_that_have_actually_failed():
 def test_every_new_doc_is_reachable_from_the_README():
     """An undiscoverable document is an unread one."""
     readme = (REPO_ROOT / "README.md").read_text()
-    for name in ("cli-reference.md", "operator-runbook.md", "assessor-guide.md"):
+    for name in ("cli-reference.md", "operator-runbook.md", "assessor-guide.md",
+                 "removing-things.md"):
         assert name in readme, f"docs/{name} must be linked from README.md"
 
 
@@ -695,3 +696,68 @@ def test_the_requester_surfaces_disclose_that_ZONES_COME_FROM_THE_ENVIRONMENT():
         "the Issue Form must disclose it too — its whole promise is that a "
         "requester needs no PAN-OS knowledge, so it cannot rely on them "
         "reading the guide")
+
+
+def test_the_removal_guide_stays_walkable_by_someone_who_has_never_used_this():
+    """`removing-things.md` exists because the runbook's removal section was
+    written for people who already knew the system: it said "delete the intent
+    file" without saying how to find it, and explained tiers in terms of
+    `classify_removal`.
+
+    These pin the parts a newcomer cannot recover on their own — each one cost a
+    real person real time on 2026-08-12.
+    """
+    guide = _flat(DOCS / "removing-things.md")
+
+    # 1. How to FIND the file. The whole flow starts here and the runbook never
+    #    mentioned the command that answers it.
+    assert "fwgitops where" in guide, (
+        "the guide must show how to find the file, not assume you know it")
+    assert "intent :" in guide, (
+        "and must name the output line that carries the path")
+
+    # 2. The squash-merge trap: the trailer has to be in the PR BODY.
+    assert "must be in the pull request BODY" in guide.replace("*", ""), (
+        "a Removes: trailer only in the commit message is silently discarded "
+        "by squash merge, and the removal is rejected")
+
+    # 3. The approval gate. This is the one that actually cost twenty minutes:
+    #    approving the PULL REQUEST does not release the deployment.
+    assert "Approving the pull request is not the same thing" in guide.replace("*", ""), (
+        "the guide must say plainly that approving the PR does not release the "
+        "deployment gate")
+    assert "pending_deployments" in guide, (
+        "and must give the command that says whether an approval registered, "
+        "because from the PR page a stuck run looks finished")
+
+    # 4. A HIGH removal that nobody approves never happens, and nothing chases
+    #    it. An operator who walks away believing it applied is the failure.
+    assert "wait forever" in guide, (
+        "the guide must say an unapproved removal waits indefinitely")
+
+
+def test_the_removal_guide_grades_match_the_classifier():
+    """Same discipline as the runbook's table: DERIVED, not restated. A guide
+    for beginners is exactly where a wrong tier does the most damage, because
+    its reader has no way to notice."""
+    from types import SimpleNamespace
+
+    from fwgitops.removal import Removal, classify_removal
+
+    guide = _flat(DOCS / "removing-things.md").replace("`", "")
+
+    def tier_for(kind, **spec):
+        return classify_removal(Removal(kind=kind, req_id="REQ-0000",
+                                        request=SimpleNamespace(
+                                            spec=SimpleNamespace(**spec)))).tier
+
+    for label, kind, spec in (
+        ("an allow rule", "AccessRequest", {"action": "allow"}),
+        ("a deny rule", "AccessRequest", {"action": "deny"}),
+        ("a route", "RouteRequest", {}),
+        ("a zone", "ZoneRequest", {}),
+        ("an interface address", "InterfaceRequest", {}),
+    ):
+        assert f"{label} | {tier_for(kind, **spec)} |" in guide, (
+            f"the removal guide must grade {label} as "
+            f"{tier_for(kind, **spec)}, matching classify_removal")

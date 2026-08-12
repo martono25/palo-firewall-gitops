@@ -50,6 +50,12 @@ That prints the per-change grade and the checks that fired.
 
 ## Removing a rule
 
+> **If you have not done this before, use
+> [`removing-things.md`](removing-things.md) instead** — it walks the whole
+> operation end to end, from finding the file to confirming the firewall
+> changed, and assumes no knowledge of PAN-OS or of this repository. What
+> follows is the operator-level summary and the failure modes.
+
 A removal is the operation most likely to surprise you, and the one that broke
 twice on 2026-08-10.
 
@@ -99,8 +105,8 @@ summary is worth having in your head:
 | Kind | On removal |
 |---|---|
 | `AccessRequest` | rule destroyed, then swept tags |
-| `ZoneRequest` | **SCM refuses** while any rule references it (409 `NON_ZERO_REFS`) |
-| `RouteRequest` | **nothing refuses it, at any layer.** Off-subnet traffic black-holed ~40s after the push reports success |
+| `ZoneRequest` | a **rule** still referencing it refuses the delete (409 `NON_ZERO_REFS`); an **interface** bound to it does NOT — that deletes clean and leaves the port addressed and unzoned, which PAN-OS drops traffic on. Measured 2026-08-12 |
+| `RouteRequest` | **nothing refuses it, at any layer.** Off-subnet traffic black-holed seconds to minutes after the push reports success (see the lag table below) |
 | `InterfaceRequest` | reverts to the inherited object, which carries no addressing — the firewall loses the IP |
 
 ---

@@ -25,6 +25,10 @@ provisioning.md  ->  building-a-folder.md  ->  requesting-rules.md  ->  operator
                       zones, routes)
 ```
 
+**Taking something back off a firewall** — a rule, a route, a zone, an interface
+address — is its own walkthrough, written for someone who has never used this
+system: [`removing-things.md`](docs/removing-things.md).
+
 **Replacing a firewall that already exists** starts somewhere else — the serial
 is threaded through the catalog, the intents and a Terraform root, and the order
 matters: [`operator-runbook.md` § Replacing a firewall](docs/operator-runbook.md#replacing-a-firewall-new-serial).
@@ -32,6 +36,7 @@ matters: [`operator-runbook.md` § Replacing a firewall](docs/operator-runbook.m
 | I want to… | Guide | Who |
 |---|---|---|
 | **Request a firewall rule** (write intent → PR) | [`docs/requesting-rules.md`](docs/requesting-rules.md) | any engineer |
+| **Remove a rule, route, zone or address** (step by step) | [`docs/removing-things.md`](docs/removing-things.md) | any engineer |
 | **Provision a firewall** (stand up a VM-Series) | [`docs/provisioning.md`](docs/provisioning.md) | platform operator |
 | **Stand up a folder** (the Day-1 chain, end to end) | [`docs/building-a-folder.md`](docs/building-a-folder.md) | platform operator |
 | **Operate it day to day** (a run is held, drift fired, break-glass) | [`docs/operator-runbook.md`](docs/operator-runbook.md) | platform operator |

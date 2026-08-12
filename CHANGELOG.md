@@ -5,6 +5,43 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Added — `removing-things.md`, a removal guide for people who do not know this system
+
+The runbook's removal section was written by someone who already knew the
+answers. It opened with which dates it broke on, said "delete the intent file"
+without saying how to find which file, and explained the risk grades in terms of
+`classify_removal`, `NON_ZERO_REFS` and device-scope overrides. Everything in it
+was true and none of it was usable by a newcomer.
+
+The new guide walks the whole operation as it was actually performed on
+2026-08-12 — four real removals on a real firewall — and quotes that run's real
+output. It starts by finding the file (`fwgitops where`, which the runbook never
+mentioned, though it prints the exact path), and ends by confirming the change
+reached the hardware.
+
+It leads on the three things that cost time on the day rather than the three
+that are most interesting:
+
+- **Approving the pull request does not release the deployment.** The gate is on
+  the *run* page, and a run stuck there looks finished from the PR. This cost
+  twenty minutes on 2026-08-12. The guide gives the one-line check that says
+  whether an approval actually registered.
+- **An unapproved HIGH removal waits forever** — no timeout, no reminder, and
+  the firewall quietly keeps running the thing you believe you deleted.
+- **The `Removes:` trailer must be in the PR body**, because squash merge
+  discards commit messages.
+
+Grades are DERIVED from `classify_removal` in the test rather than restated. A
+beginner's guide is where a wrong tier does the most damage, since its reader
+has no way to notice.
+
+### Fixed — two stale claims in the runbook's per-kind removal table
+
+The table still said a zone delete is refused while *anything* references it,
+and that a removed route black-holes traffic "~40s" after the push. Both were
+corrected elsewhere earlier the same day and missed here: only a **rule**
+refuses the delete, and the lag is seconds to minutes.
+
 ### Fixed — three claims the rebuild retest measured and found wrong
 
 All three were found by deleting real objects from a real firewall on

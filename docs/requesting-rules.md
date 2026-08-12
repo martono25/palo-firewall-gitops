@@ -27,7 +27,9 @@ is rejected. Without it, the audit record for your change would name the request
 that authorised the previous version — a different person, a different date, and
 a justification for a different rule.
 
-**To remove a rule**, delete its file **and put a `Removes:` line in your PR
+**To remove a rule**, there is a step-by-step guide for it:
+[`removing-things.md`](removing-things.md). The short version: delete its file
+**and put a `Removes:` line in your PR
 description**:
 
 ```
