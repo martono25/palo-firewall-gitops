@@ -391,11 +391,12 @@ def test_the_serial_update_says_which_kinds_carry_one():
     the compiler refuses, so the cost is confusion rather than damage — which is
     exactly the kind of thing a runbook should remove."""
     runbook = _flat(DOCS / "operator-runbook.md")
-    assert "Only InterfaceRequest does" in runbook, (
+    assert "Only that kind carries a serial" in runbook, (
         "name the kind that carries a serial, do not imply all of them do")
-    assert "ZoneRequest and RouteRequest do not change" in runbook, (
-        "and say explicitly which ones to leave alone")
-    assert "two cannot share an IP" in runbook, (
+    assert "are folder-scoped policy a new firewall inherits" in runbook, (
+        "and say explicitly why the other kinds are left alone — a new firewall "
+        "inherits them, so editing one is the wrong instinct")
+    assert "an interface address belongs to ONE firewall" in runbook, (
         "the reason, so the reader can generalise to a kind added later")
 
 
@@ -429,8 +430,9 @@ def test_the_replacement_covers_everywhere_the_serial_is_written():
     ADRs stay as written — an ADR records a decision made at a time, and
     rewriting it is revisionism."""
     runbook = _flat(DOCS / "operator-runbook.md")
-    assert "git rm only removes TRACKED files" in runbook, (
-        "the old root survives on disk otherwise")
+    assert "git leaves the gitignored files" in runbook, (
+        "the old root survives on disk otherwise — `git rm` drops only tracked "
+        "files, so the directory and its state config remain")
     assert "will not pass CI until they follow" in runbook, (
         "tests carry the serial; say so before the operator finds out from a "
         "red build")
@@ -553,3 +555,37 @@ def test_the_apply_sequence_says_which_starting_state_it_assumes():
         "and cover the state an operator arriving from the runbook is in")
     assert "you would fork the branch you are on" in guide, (
         "say what goes wrong, not just what to do instead")
+
+
+def test_the_guides_tell_you_to_use_adopt_device():
+    """A command that collapses seventeen hand edits is worth nothing if the
+    procedure still walks the reader through the seventeen. Shipping the tool and
+    leaving the guide is how a repository ends up with two answers to one
+    question — and the guide is the one people follow.
+
+    Checked in all three places a reader meets the problem: the runbook that
+    performs the replacement, the provisioning page that hands off to it, and the
+    Day-1 guide's pre-flight check."""
+    # The INVOCATION, not the word. `adopt-device` is mentioned in prose in
+    # several places, so asserting the name stayed satisfied when the actual
+    # command line in step 4 was removed — the mutation caught it.
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "fwgitops adopt-device <new-serial> --folder prod-edge --replacing" in runbook, (
+        "step 4 must BE the command, not a mention of it")
+    for doc, why in ((DOCS / "provisioning.md", "the handoff into it"),
+                     (DOCS / "building-a-folder.md", "the pre-flight serial check")):
+        assert "fwgitops adopt-device" in _flat(doc), (
+            f"{doc.name} still describes the manual edits — {why}")
+
+
+def test_the_runbook_says_what_adopt_device_will_not_do():
+    """The command is honest about its edges and the guide has to be too. It does
+    not scaffold the Terraform root, remove the old one, or delete state — those
+    print as next steps because destroying a root and its state is not something
+    a command should do on someone's behalf. A reader who assumes it is complete
+    leaves an orphaned root and a state file nothing reconciles."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "it does not run them" in runbook, (
+        "say plainly that the Terraform steps are still yours")
+    assert "scaffold-root" in runbook and "terraform.tfstate" in runbook, (
+        "and name them, including the state object that otherwise lingers")
