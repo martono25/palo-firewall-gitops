@@ -1,0 +1,54 @@
+# The first ZoneRequest ever to reach a firewall (ADR-0001 kind #2).
+#
+# WHY THIS INTENT EXISTS AT ALL. `ZoneRequest` has been built since v1.2.0 and
+# every green apply since has proven the CHAIN, not the KIND: the zones this
+# tenant uses (`local`, `internet`) are pre-defined in `ngfw-shared` and
+# self-attach by inheritance, so nothing was ever waiting on a zone this
+# platform created. `dmz` is a name that exists nowhere on the tenant, so if it
+# turns up in the device's running config, GitOps put it there.
+#
+# TARGETS A FOLDER, NOT THE FIREWALL — for the same reason RouteRequest does,
+# and verified the same way. SCM refuses a zone at device scope
+# (spike/zone-device-scope): `device=` returns the misleading "Device
+# 007955000894453 doesn't exist", while the identical device-scope write of an
+# ethernet interface on the SAME firewall succeeds. The provider documents
+# `device` for scm_zone; the API disagrees. So this lands in `prod-edge` and the
+# firewall inherits it.
+#
+# INTERFACES ARE NAMED AT FOLDER SCOPE, and that is not cosmetic. A folder-scope
+# zone can only bind an object that exists at that scope. Probed live: binding
+# the literal port `ethernet1/2` is REFUSED —
+#
+#   zone -> network -> layer3 'ethernet1/2' is not a valid reference
+#
+# — so `$eth-dmz` is the only form that works here. Note the asymmetry with
+# REQ-2026-0805 above, which names the ROLE `dmz` and lets the catalog resolve
+# it: `spec.interfaces` on a ZoneRequest is still a raw string list, so this
+# intent hardcodes a scope-specific name that ADR-0005 exists to avoid. Recorded
+# in TODOS rather than fixed here, so the hardware result is not entangled with
+# a schema change.
+apiVersion: fw-intent/v1
+kind: ZoneRequest
+
+metadata:
+  id: REQ-2026-0806
+  requester: martono@corp
+  ticket: JIRA-9322
+  justification: >-
+    Declare the dmz zone on the edge firewall folder and bind it to the DMZ
+    interface addressed by REQ-2026-0805. Proves kind #2 end to end on real
+    hardware — the last Day-1 kind never verified on a device.
+  requested: "2026-08-12"
+
+spec:
+  folder: prod-edge
+  zone: dmz
+  type: layer3
+  interfaces:
+    - $eth-dmz                  # created by terraform/bootstrap-scm-folder
+  protection_profile: best-practice
+  log_forwarding: log-best
+  # user_id stays OFF deliberately: nothing on this segment sources User-ID
+  # mappings, and enabling it would be posture theatre. The classifier still
+  # reports `user_id_disabled_on_zone`, which is correct — it is a real fact
+  # about the zone, and HIGH is approvable rather than blocking.
