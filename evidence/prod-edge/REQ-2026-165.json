@@ -1,13 +1,13 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31605311758"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31605883025"
   },
   "approval": {
     "approvers": [],
     "gate": null,
-    "merge_commit": "7be4b5a9daf26a652888a9928e86e7f80844f08f",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/166"
+    "merge_commit": "5373cd01d219e563c6560224f8a73a2aa1245e1c",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/168"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -85,13 +85,14 @@
         }
       ]
     },
+    "object_is": "the LAST APPLIED state, from the baseline tree",
     "object_sha256": "d2c921bb62d705a307e1b5f101b612c606aff34726193d357d0d1b3e9a5b9fc0",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "85fcc1a4194bec27f88668db3b16a58a98f85a2d8bba84604b124605b38b58c1"
+    "tfvars_sha256": null
   },
   "controls": [
     "AC-4",
@@ -106,14 +107,19 @@
       "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
     }
   ],
-  "generated_at": "2026-08-12T14:12:14Z",
+  "generated_at": "2026-08-12T14:18:49Z",
   "kind": "AccessRequest",
   "push": {
     "admin_count": 1,
     "all_admins": false,
     "folder": "prod-edge",
-    "job_id": "212",
+    "job_id": "215",
     "status": "success"
+  },
+  "removal": {
+    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
+    "commit": "5373cd01d219e563c6560224f8a73a2aa1245e1c",
+    "ticket": "JIRA-9310"
   },
   "req_id": "REQ-2026-165",
   "request": {
@@ -127,15 +133,15 @@
   "risk": {
     "checks_fired": [
       {
-        "check": "allow_without_inspection",
-        "reason": "allow rule has no security profile group \u2014 traffic is permitted without threat inspection",
+        "check": "allow_rule_removed",
+        "reason": "removes an allow rule (REQ-2026-165) \u2014 withdraws access. It can break whatever depended on it, but it opens nothing.",
         "tier": "LOW"
       }
     ],
-    "classifier_version": "1.0",
-    "thresholds_version": "2026-07-26",
+    "classifier_version": "1.0.0",
+    "thresholds_version": null,
     "tier": "LOW"
   },
   "schema": "fw-evidence/v2",
-  "status": "applied"
+  "status": "removed"
 }
