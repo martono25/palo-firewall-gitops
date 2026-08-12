@@ -566,10 +566,15 @@ def test_the_guides_tell_you_to_use_adopt_device():
     Checked in all three places a reader meets the problem: the runbook that
     performs the replacement, the provisioning page that hands off to it, and the
     Day-1 guide's pre-flight check."""
-    for doc, why in ((DOCS / "operator-runbook.md", "the procedure itself"),
-                     (DOCS / "provisioning.md", "the handoff into it"),
+    # The INVOCATION, not the word. `adopt-device` is mentioned in prose in
+    # several places, so asserting the name stayed satisfied when the actual
+    # command line in step 4 was removed — the mutation caught it.
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "fwgitops adopt-device <new-serial> --folder prod-edge --replacing" in runbook, (
+        "step 4 must BE the command, not a mention of it")
+    for doc, why in ((DOCS / "provisioning.md", "the handoff into it"),
                      (DOCS / "building-a-folder.md", "the pre-flight serial check")):
-        assert "adopt-device" in _flat(doc), (
+        assert "fwgitops adopt-device" in _flat(doc), (
             f"{doc.name} still describes the manual edits — {why}")
 
 
