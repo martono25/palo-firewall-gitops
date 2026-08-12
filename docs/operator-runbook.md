@@ -64,9 +64,23 @@ twice on 2026-08-10.
    A removal needs **its own ticket**. The intent's `metadata.ticket` authorised
    *creating* the object, and the file it lived in is gone, so there is nowhere
    left to update it.
-3. **Expect HIGH.** Deleting a rule is not the inverse of adding one — the
-   classifier cannot know whether a deny rule was load-bearing, so it refuses to
-   auto-apply the deletion and routes to a reviewer.
+3. **Expect the tier to follow the DIRECTION of the change**, which for a
+   removal is not the direction you might assume:
+
+   | You remove | Tier | Why |
+   |---|---|---|
+   | an `allow` rule | LOW | Withdraws access. It can break whatever depended on it, but it opens nothing. Auto-applies. |
+   | a `deny` rule | HIGH | Traffic it blocked may now match a permissive rule below it — a removal that INCREASES effective access. |
+   | a `RouteRequest` | HIGH | Traffic that used it stops forwarding or falls to a different next hop. |
+   | a `ZoneRequest` | HIGH | Interfaces bound to it lose their zone, and PAN-OS drops traffic on an unzoned interface. |
+   | an `InterfaceRequest` | HIGH | The device-scope override reverts to the inherited object, which carries no addressing — the firewall loses the IP. |
+   | a kind with no rule | CRITICAL | Fail-closed. A default that permits is how a class of change goes unassessed. |
+
+   **This section used to say "expect HIGH" for every removal.** Measured on
+   2026-08-12: removing an allow rule classified LOW and auto-applied with no
+   hold, exactly as `classify_removal` intends. An operator who had been told to
+   expect a review, and who therefore treated a green run as evidence a reviewer
+   had seen it, would have been wrong.
 
 **Do not fix a failed removal by dispatching an apply.** A dispatch baselines
 against `HEAD^`, where the file is already gone, so the deletion does not

@@ -5,6 +5,31 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — the runbook claimed every removal is HIGH
+
+It is not, and the difference matters in the direction that hurts.
+
+Measured on the rebuild retest: removing an `allow` rule classified **LOW** and
+auto-applied with no hold. That is what `classify_removal` intends — withdrawing
+access can break what depended on it, but it opens nothing. Only a removal that
+can INCREASE effective access (a `deny` rule, a route, a zone, an interface)
+is HIGH.
+
+The runbook said "expect HIGH" for all of them. An operator who had been told to
+expect a reviewer, and who therefore read a green run as evidence that a human
+had seen the change, would have been wrong. Replaced with a per-kind table whose
+tiers the test suite DERIVES from the classifier, so the prose cannot drift from
+the code again.
+
+### Fixed — a documentation guard was enforced against deployed state
+
+Removing the last `ZoneRequest` — the operation ADR-0008 exists to define — broke
+three tests and produced an unmergeable pull request. "This repo demonstrates
+every registered kind" is a property of the repository, not of the firewall;
+it now lives on permanent `*.example.yaml` fixtures that the real validator
+loads. The 2026-08-08 evidence regression the old assertion was written for is
+still caught, verified by reintroducing it.
+
 ### Fixed — `adopt-device` re-tickets the intents it changes
 
 Found by using it. The command wrote twenty-two files correctly and produced a
