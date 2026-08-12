@@ -709,3 +709,31 @@ def test_the_workflow_archives_the_catalog_with_the_baseline():
     ev = [s["run"] for s in _steps() if "fwgitops evidence" in str(s.get("run", ""))][0]
     assert "--baseline-catalog" in ev, (
         "and so must evidence — a removal is only visible if the baseline parses")
+
+
+def test_the_evidence_pr_merges_itself():
+    """AN AUDIT RECORD THAT WAITS FOR A CLICK IS NOT IN THE SOURCE OF TRUTH.
+
+    One sat open for a day before the operator asked why. Nothing in it is a
+    judgement call: the diff is machine-written JSON recording an apply that
+    already happened, and a human "reviewing" sha256 hashes is not reviewing
+    anything. Meanwhile the record the bundle exists to preserve is sitting
+    outside `main` — the artifact-with-a-TTL problem in a new shape.
+
+    `--auto` rather than a plain merge, so it BYPASSES NOTHING: the required
+    checks still gate it and the ruleset still applies. A conflict — two runs
+    disagreeing about one bundle — blocks the merge and leaves the PR for a
+    human, which is what that case has always deserved."""
+    step = [s for s in _steps()
+            if "pull request" in str(s.get("name", "")).lower()
+            and "evidence" in str(s.get("name", "")).lower()][0]["run"]
+    code = "\n".join(l for l in step.splitlines() if not l.lstrip().startswith("#"))
+    assert "gh pr merge" in code and "--auto" in code, (
+        "the evidence PR must merge itself once its checks pass")
+    assert "--squash" in code
+    # The AUTO-MERGE warning specifically. This step also warns about a missing
+    # AUTOMATION_PR_TOKEN, so a bare "::warning::" check stayed satisfied when
+    # the auto-merge one was deleted — the mutation caught it.
+    assert "could not enable auto-merge" in code, (
+        "if auto-merge cannot be enabled the run must say so — silently leaving "
+        "the PR open is how the record goes missing")
