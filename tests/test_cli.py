@@ -279,7 +279,7 @@ def test_evidence_covers_EVERY_intent_in_the_shipped_tree(tmp_path):
     """
     from pathlib import Path
 
-    from fwgitops.io import discover_intents
+    from fwgitops.io import discover_intents, read_yaml
     from fwgitops.kinds import REGISTRY
 
     repo = Path(__file__).resolve().parents[1]
@@ -295,8 +295,20 @@ def test_evidence_covers_EVERY_intent_in_the_shipped_tree(tmp_path):
         f"{len(intents)} intents produced {len(bundles)} bundles — a change with "
         f"no evidence is a change with no audit record")
 
+    # EVERY KIND PRESENT IN THE TREE, not every kind in the registry. The
+    # regression above is caught either way — `run_evidence` filtering to
+    # AccessRequest leaves the RouteRequests in this tree without bundles, and
+    # this fails. Demanding the full registry additionally required the
+    # OPERATIONAL tree to hold one of every kind, which made a legitimate
+    # deletion break the suite: removing the last ZoneRequest is exactly the
+    # operation ADR-0008 defines a contract for, and it produced an unmergeable
+    # pull request. "The repo demonstrates every kind" is a documentation
+    # property; it is pinned on the examples, in
+    # tests/test_intent.py::test_the_repo_demonstrates_every_registered_kind.
+    present = {d["kind"] for d in (read_yaml(p) for p in intents)}
     kinds = {json.loads(p.read_text())["kind"] for p in bundles}
-    assert kinds == set(REGISTRY), f"no bundle for kind(s) {set(REGISTRY) - kinds}"
+    assert kinds == present, f"no bundle for kind(s) {present - kinds}"
+    assert kinds <= set(REGISTRY), f"bundle for unregistered kind(s) {kinds - set(REGISTRY)}"
     for p in bundles:
         b = json.loads(p.read_text())
         assert b["compiled"]["object"], f"{p.name}: empty compiled object"

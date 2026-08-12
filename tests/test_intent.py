@@ -861,7 +861,15 @@ def test_every_example_in_the_folder_guide_LOADS_and_matches_the_real_intents():
         # from the intent it claims to reconstruct is worse than one that
         # invented an example, because it reads as evidence.
         rid = doc["metadata"]["id"]
-        real = list((root / "intent").rglob(f"{rid}.yaml"))
+        # `*.example.yaml` counts. The guide used to be pinned to the OPERATIONAL
+        # intents, which coupled a documentation guarantee to deployed state:
+        # removing the last ZoneRequest — a legitimate operation the deletion
+        # contract exists to support — failed this assertion, so an operator
+        # deleting their last zone got an unmergeable pull request. The examples
+        # are permanent, so the guide stays pinned to something that cannot be
+        # deleted by an ordinary change.
+        real = (list((root / "intent").rglob(f"{rid}.yaml"))
+                + list((root / "intent").rglob(f"{rid}.example.yaml")))
         assert real, f"{rid} is cited but no longer exists in intent/"
         actual = _yaml.safe_load(real[0].read_text())
         assert doc["spec"] == actual["spec"], (
@@ -869,3 +877,55 @@ def test_every_example_in_the_folder_guide_LOADS_and_matches_the_real_intents():
 
     assert seen == {"InterfaceRequest", "ZoneRequest", "RouteRequest"}, (
         f"the folder guide must walk the whole Day-1 chain; it shows {sorted(seen)}")
+
+
+def test_the_repo_demonstrates_every_registered_kind():
+    """One `*.example.yaml` per kind, and every one of them loads.
+
+    THIS IS THE GUARD THAT USED TO LIVE ON THE OPERATIONAL TREE, and it was in
+    the wrong place. `tests/test_cli.py` asserted the shipped `intent/` tree
+    contained one of every kind, which is a documentation property enforced
+    against deployed state. Deleting the last ZoneRequest — the exact operation
+    ADR-0008 defines a contract for — broke three tests, so the deletion
+    contract could not be exercised on the last instance of a kind.
+
+    Examples cannot be deleted by an ordinary change, so the property holds
+    here without constraining what is deployed. They also load through the real
+    validator: an example that drifts from the schema is a lie a reader copies.
+    """
+    from pathlib import Path
+
+    import yaml as _yaml
+
+    from fwgitops.catalog import (
+        FolderHierarchy, InterfaceCatalog, RouterCatalog, ServiceCatalog,
+    )
+    from fwgitops.kinds import REGISTRY
+    from fwgitops.resolve import EnvMap
+
+    root = Path(__file__).resolve().parents[1]
+    examples = sorted((root / "intent").rglob("*.example.yaml"))
+    assert examples, "the repo must ship example intents"
+
+    def _cat(cls, name):
+        f = root / "catalog" / name
+        return cls.from_dict(_yaml.safe_load(f.read_text())) if f.is_file() else None
+
+    kw = dict(
+        env_map=EnvMap.from_dict(
+            _yaml.safe_load((root / "catalog" / "environments.yaml").read_text())),
+        folder_hierarchy=_cat(FolderHierarchy, "folders.yaml"),
+        interface_catalog=_cat(InterfaceCatalog, "interfaces.yaml"),
+        router_catalog=_cat(RouterCatalog, "routers.yaml"),
+        service_catalog=_cat(ServiceCatalog, "services.yaml"),
+    )
+    by_kind = {}
+    for f in examples:
+        doc = _yaml.safe_load(f.read_text())
+        load_intent(doc, **kw)          # must validate like any other intent
+        by_kind.setdefault(doc["kind"], []).append(f.name)
+
+    missing = set(REGISTRY) - set(by_kind)
+    assert not missing, (
+        f"no *.example.yaml demonstrates kind(s) {sorted(missing)} — the repo "
+        f"stops documenting a kind it still supports")
