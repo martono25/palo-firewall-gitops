@@ -5,7 +5,7 @@ platform team.** If you want a firewall rule, you want
 [`requesting-rules.md`](requesting-rules.md) — none of this is needed to ask for
 one.
 
-Generated against v2.2.0. A test asserts this page lists every registered
+Generated against v2.3.0. A test asserts this page lists every registered
 subcommand, so a new command cannot ship undocumented.
 
 ---

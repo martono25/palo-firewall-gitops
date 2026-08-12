@@ -4,7 +4,7 @@ GitOps-driven firewall automation for Palo Alto (Strata Cloud Manager / Panorama
 covering **Day-1 provisioning + onboarding** through **Day-2 rule changes**, automated as far
 as is safe.
 
-> **Status: v2.2.0.** The Day-2 loop (`intent → tags ensure → compile → classify
+> **Status: v2.3.0.** The Day-2 loop (`intent → tags ensure → compile → classify
 > (the tier picks the approver) → terraform apply → enrich → push → tags sweep`)
 > and the **Day-1 chain**
 > (`InterfaceRequest → ZoneRequest → RouteRequest`) are both implemented, tested, and
@@ -95,7 +95,7 @@ pip install -e '.[dev]'
 fwgitops compile intent --env-map catalog/environments.yaml --out terraform
 fwgitops compile intent --check      # validate only, write nothing
 
-pytest -q                            # 859 tests
+pytest -q                            # 865 tests
 ```
 
 Fail-closed and all-or-nothing: if any intent is invalid, the compiler prints an

@@ -3,7 +3,36 @@
 All notable changes to `fwgitops` are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.3.0] — 2026-08-12
+
+`adopt-device` finishes what v2.2.0 started. Adopting a firewall was seventeen
+hand edits; it is now one command and one deliberate confirmation.
+
+**Highlights**
+
+- The new Terraform root is **scaffolded**, the old one **removed** — including
+  the gitignored files `git rm` leaves behind, which is why the directory
+  survived a "complete" replacement before.
+- The serial is **followed through `tests/` and the guides**: seventy-six
+  references across seventeen files here. They change no behaviour and break CI
+  anyway.
+- `--prune-state` opts in to deleting the replaced device's Terraform state.
+
+### Upgrading
+
+**`adopt-device` now writes more than it did.** In v2.2.0 it touched the catalogs
+and the intents; it now also creates and removes Terraform roots and rewrites
+files under `tests/` and `docs/`. If you scripted it expecting catalogs only,
+run `--check` first — it prints every path, including the roots.
+
+**Nothing else changes.** `--prune-state` is opt-in and off by default, both
+schemas are untouched, and no exit code moved.
+
+> **On the version.** MINOR under the scope recorded in 2.1.0: a new flag and a
+> command that does more, with nothing removed and no schema touched. The
+> behaviour change is real, which is why it is under Upgrading rather than in a
+> footnote.
+
 
 ### Changed — `adopt-device` finishes the job: four of the five manual steps are gone
 
