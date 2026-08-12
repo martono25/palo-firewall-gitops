@@ -314,6 +314,43 @@ from the tree would be circular.
 
 ---
 
+## Adopting a firewall
+
+### `adopt-device`
+
+Point the repository at a firewall, reading SCM for every value.
+
+```sh
+fwgitops adopt-device 007955000901881 --folder prod-edge --check
+fwgitops adopt-device 007955000901881 --folder prod-edge --replacing 007955000894453
+```
+
+| Flag | Effect |
+|---|---|
+| `--folder` | the folder SCM must **already** place the device in. Adoption refuses if SCM disagrees — writing the folder you meant would make the catalog assert a placement that is not real, and every later check trusts the catalog |
+| `--replacing OLD` | rewrites the old serial across both catalogs and every device-scoped intent. A **partial** rename is the failure this exists to remove |
+| `--check` | print the plan, write nothing — the same code path minus the write |
+
+**Why it exists.** Adopting a firewall was seventeen hand edits across two
+catalogs, three intents, a directory name and a Terraform root, and every one
+transcribed something SCM already knew: the folder, the display name, and the
+physical port behind each interface role. Those are now read.
+
+**It closes a gap as well as saving typing.** Nothing compared
+`catalog/interfaces.yaml` to the live tenant, so a wrong port there configured
+the wrong interface with no error at any stage. A value read from SCM cannot
+disagree with SCM — and re-running against the *same* serial is how a drifted
+catalog gets corrected.
+
+**What it refuses.** A device SCM has not placed, a device in a different folder,
+and a role whose variable SCM cannot resolve — reported as unmapped rather than
+guessed, because a role with no port is not a role with a default port. Exit 3 is
+SCM refusing the adoption; the message says which folder it actually found.
+
+**What it does not do:** scaffold the Terraform root, remove the old one, or
+follow the serial into `tests/` and the guides. It prints those as next steps
+rather than pretending to be complete.
+
 ## Device lifecycle
 
 | Command | What it does |

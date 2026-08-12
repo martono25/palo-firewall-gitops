@@ -2419,6 +2419,111 @@ def run_onboard(
     return 0
 
 
+def run_adopt_device(
+    serial: str,
+    *,
+    folder: str,
+    replacing: Optional[str] = None,
+    check: bool = False,
+    intent_root: Path = Path("intent"),
+    catalog_dir: Path = Path("catalog"),
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Point the repository at a firewall, reading SCM for every value.
+
+    Adopting a firewall was seventeen hand edits across two catalogs, three
+    intents and a Terraform root — each one transcribing something SCM already
+    knew. This reads them instead.
+
+    Exit codes:  0 ok · 1 config/auth/IO · 3 SCM refused the adoption.
+
+    `--check` prints the same plan and writes nothing; it is the same code path
+    minus the write, not a second implementation.
+    """
+    from fwgitops.adopt import AdoptError, apply_adoption, plan_adoption
+    from fwgitops.clients import ScmDeviceClient
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+
+    ifaces_path = catalog_dir / "interfaces.yaml"
+    folders_path = catalog_dir / "folders.yaml"
+    for p in (ifaces_path, folders_path):
+        if not p.is_file():
+            print(f"error: {p} not found", file=err)
+            return 1
+
+    # The roles this platform uses are the repository's to declare; the PORT each
+    # resolves to is SCM's to say. That split is the whole design.
+    try:
+        from fwgitops.catalog import InterfaceCatalog
+        catalog = InterfaceCatalog.from_dict(read_yaml(ifaces_path))
+        roles = {role: catalog.resolve(role, device=None) for role in catalog.roles()}
+    except Exception as e:  # noqa: BLE001
+        print(f"error: cannot read interface roles from {ifaces_path}: {e}", file=err)
+        return 1
+
+    if session is None:
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except ScmConfigError as e:
+            print(f"error: {e}", file=err)
+            return 1
+
+    try:
+        adoption = plan_adoption(ScmDeviceClient(session), serial,
+                                 folder=folder, roles=roles)
+    except AdoptError as e:
+        print(f"ADOPTION REFUSED: {e}", file=err)
+        return 3
+    except ScmApiError as e:
+        print(f"error: SCM read failed: {e}", file=err)
+        return 1
+
+    print(f"SCM says: {serial} in {adoption.folder!r}"
+          + (f", display name {adoption.display_name!r}" if adoption.display_name else ""),
+          file=out)
+    for role, port in sorted(adoption.ports.items()):
+        print(f"  {role:10} -> {port}", file=out)
+    for role in adoption.unresolved:
+        # NOT an error: a DMZ port is a property of one site's wiring, and a
+        # firewall without one is normal. Reported so a partial adoption is
+        # visible rather than mistaken for a complete one.
+        print(f"  {role:10} -> (no variable in SCM — role left unmapped)", file=out)
+
+    intent_files = {_display_path(p): p.read_text()
+                    for p in discover_intents(intent_root)}
+    changes = apply_adoption(adoption, folders_text=folders_path.read_text(),
+                             interfaces_text=ifaces_path.read_text(),
+                             intent_files=intent_files, replacing=replacing)
+    if not changes:
+        print("nothing to change — the repository already matches SCM", file=out)
+        return 0
+
+    verb = "would write" if check else "wrote"
+    print(f"{verb} {len(changes)} file(s):", file=out)
+    for rel in sorted(changes):
+        print(f"  - {rel}", file=out)
+    if check:
+        return 0
+    for rel, text in changes.items():
+        Path(rel).write_text(text)
+
+    print("", file=out)
+    print("NEXT, and none of it is automatic:", file=out)
+    print(f"  1. fwgitops scaffold-root --device {serial} --device-folder {folder}", file=out)
+    if replacing and replacing != serial:
+        print(f"  2. git rm -r terraform/device-{replacing}   "
+              f"# then `rm -rf` it — git leaves the gitignored files", file=out)
+        print(f"  3. grep -rln {replacing} tests/ docs/        "
+              f"# they carry the serial too; CI fails until they follow", file=out)
+    print("  4. fwgitops verify-catalog && fwgitops compile intent --check", file=out)
+    return 0
+
+
 def run_deregister(serial: str, *, session=None, out=None, err=None) -> int:
     """Remove a device's SCM registration (teardown; destroy does NOT do this).
 
@@ -2788,6 +2893,23 @@ def build_parser() -> argparse.ArgumentParser:
                     help="preview what would be set (no SCM calls) — for PR validation")
 
     o = sub.add_parser("onboard", help="finalize onboarding: verify placement + set display name")
+    ad = sub.add_parser("adopt-device",
+                        help="point the repository at a firewall, reading SCM for every value")
+    ad.add_argument("serial", help="device serial number (from ssh 'show system info')")
+    ad.add_argument("--folder", required=True,
+                    help="the SCM folder the device must ALREADY be in. Adoption "
+                         "refuses if SCM disagrees — writing the folder you meant "
+                         "would make the catalog assert a placement that is not real.")
+    ad.add_argument("--replacing", default=None, metavar="OLD_SERIAL",
+                    help="the serial this one replaces. Rewrites it across both "
+                         "catalogs and every device-scoped intent, which is the "
+                         "partial-rename failure this command exists to remove.")
+    ad.add_argument("--check", action="store_true",
+                    help="print the plan and write nothing — the same code path "
+                         "minus the write")
+    ad.add_argument("--intent-root", default=Path("intent"), type=Path)
+    ad.add_argument("--catalog", dest="catalog_dir", default=Path("catalog"), type=Path)
+
     o.add_argument("serial", help="device serial number (from ssh 'show system info')")
     o.add_argument("--folder", required=True,
                    help="SCM folder the device should have auto-placed into")
@@ -2961,6 +3083,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_onboard(args.serial, folder=args.folder, name=args.name)
     if args.command == "rules":
         return run_rules(args.folder, contains=args.contains)
+    if args.command == "adopt-device":
+        return run_adopt_device(args.serial, folder=args.folder,
+                                replacing=args.replacing, check=args.check,
+                                intent_root=args.intent_root,
+                                catalog_dir=args.catalog_dir)
     if args.command == "deregister":
         return run_deregister(args.serial)
     if args.command == "set-admin-password":

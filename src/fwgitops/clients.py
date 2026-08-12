@@ -206,6 +206,45 @@ class ScmDeviceClient:
     def deregister(self, serial: str) -> None:
         self.session.request("DELETE", self.DEVICE_PATH.format(serial=serial))
 
+    # ── reads for `fwgitops adopt-device` ─────────────────────────────────
+    INTERFACES_PATH = "/config/network/v1/ethernet-interfaces"
+
+    def device_display_name(self, serial: str) -> Optional[str]:
+        """The label SCM shows in its inventory, or None if it has never been set.
+
+        `verify-catalog` compares this, because a re-onboard RESETS it to `PA-VM`
+        and that reset is the only reliable symptom of a re-registration — which
+        silently wipes device-scope config.
+        """
+        payload = self.session.request("GET", self.DEVICE_PATH.format(serial=serial))
+        if not isinstance(payload, dict):
+            return None
+        name = payload.get("display_name")
+        return str(name) if name else None
+
+    def folder_interface_variables(self, folder: str) -> Dict[str, str]:
+        """`$eth-name -> default_value` at a folder, inherited entries included.
+
+        This is the mapping `catalog/interfaces.yaml` restates. SCM owns it: the
+        variables are defined in `ngfw-shared` and inherited, so a firewall's
+        physical port for a role is whatever the variable resolves to — not
+        something this platform chooses. Reading it is what makes an adopted
+        catalog agree with the tenant by construction.
+
+        Objects without a `default_value` are omitted rather than mapped to an
+        empty string; the caller reports them as unresolved.
+        """
+        payload = self.session.request(
+            "GET", self.INTERFACES_PATH, params={"folder": folder, "limit": 200})
+        out: Dict[str, str] = {}
+        for obj in (payload or {}).get("data", []) or []:
+            if not isinstance(obj, dict):
+                continue
+            name, default = obj.get("name"), obj.get("default_value")
+            if name and default:
+                out[str(name)] = str(default)
+        return out
+
 
 class ScmRuleClient:
     """RuleClient over the SCM REST API — the enrich step (ADR-0003).

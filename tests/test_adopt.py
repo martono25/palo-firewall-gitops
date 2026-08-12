@@ -1,0 +1,218 @@
+"""Adopting a firewall reads SCM; it does not ask you to type what SCM knows.
+
+Seventeen hand edits across two catalogs, three intents, a directory name and a
+Terraform root — every one transcribing a value SCM already held. The operator
+who walked it: "too many manual task to edit i.e. folders, device scope and rules
+which is prone to error and typo."
+
+These tests are about the READ and the REFUSALS. A value read from SCM cannot
+disagree with SCM, which is also why this closes the gap where nothing compared
+`catalog/interfaces.yaml` to the live tenant.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from fwgitops.adopt import AdoptError, plan_adoption
+
+ROLES = {"local": "$eth-local", "internet": "$eth-internet", "dmz": "$eth-dmz"}
+
+
+class FakeScm:
+    def __init__(self, folder="prod-edge", name="fw-prod-edge-1881", variables=None):
+        self._folder, self._name = folder, name
+        self._vars = variables if variables is not None else {
+            "$eth-local": "ethernet1/1",
+            "$eth-internet": "ethernet1/2",
+            "$eth-dmz": "ethernet1/3",
+        }
+
+    def device_folder(self, serial):
+        return self._folder
+
+    def device_display_name(self, serial):
+        return self._name
+
+    def folder_interface_variables(self, folder):
+        return dict(self._vars)
+
+
+def test_the_port_map_comes_from_SCM_not_from_typing():
+    """The whole point. `catalog/interfaces.yaml` is a mirror, and nothing ever
+    compared it to the tenant — a wrong port compiled clean and configured the
+    wrong interface. Reading it removes both the typo and the drift."""
+    a = plan_adoption(FakeScm(), "007955000901881", folder="prod-edge", roles=ROLES)
+    assert a.ports == {"local": "ethernet1/1", "internet": "ethernet1/2",
+                       "dmz": "ethernet1/3"}
+    assert a.display_name == "fw-prod-edge-1881"
+    assert a.unresolved == []
+
+
+def test_a_device_in_a_different_folder_is_refused():
+    """Writing the folder you MEANT would make the catalog assert a placement
+    that is not real — and every later check, `verify-catalog` included, trusts
+    the catalog. The failure names both folders so the operator can tell which
+    one is wrong."""
+    with pytest.raises(AdoptError, match="is in folder 'ngfw-shared', not 'prod-edge'"):
+        plan_adoption(FakeScm(folder="ngfw-shared"), "0079", folder="prod-edge",
+                      roles=ROLES)
+
+
+def test_an_unregistered_device_is_refused_with_where_to_look():
+    """A serial SCM has never seen is the common case when someone adopts too
+    early — the firewall is still booting, or the onboarding rule did not match.
+    Both are actionable, so the message says both."""
+    with pytest.raises(AdoptError, match="did not match it"):
+        plan_adoption(FakeScm(folder=None), "0079", folder="prod-edge", roles=ROLES)
+
+
+def test_a_role_with_no_variable_is_reported_not_guessed():
+    """A role SCM has no variable for is a role with no port. Defaulting it would
+    write a plausible wrong answer into the one file nothing validates."""
+    a = plan_adoption(FakeScm(variables={"$eth-local": "ethernet1/1"}),
+                      "0079", folder="prod-edge", roles=ROLES)
+    assert a.ports == {"local": "ethernet1/1"}
+    assert a.unresolved == ["dmz", "internet"], (
+        "the roles that did not resolve must be reported, so the operator sees "
+        "a partial adoption rather than assuming a complete one")
+
+
+def test_no_resolvable_role_at_all_is_a_hard_failure():
+    """A port map with nothing in it cannot compile any intent naming a role, so
+    writing the catalog would produce a repository that looks adopted and is
+    not."""
+    with pytest.raises(AdoptError, match="nothing useful to write"):
+        plan_adoption(FakeScm(variables={}), "0079", folder="prod-edge", roles=ROLES)
+
+
+def test_planning_touches_nothing():
+    """`plan_adoption` is a read. The writer is separate and takes this result,
+    so `--check` is the same code path as the real thing minus the write —
+    rather than a second implementation that can disagree with it."""
+    import inspect
+    from fwgitops import adopt
+    src = inspect.getsource(adopt)
+    for forbidden in ("write_text(", "open(", "PUT", "POST", "DELETE"):
+        assert forbidden not in src, (
+            f"the planner must not {forbidden} — it reads SCM and returns a plan")
+
+
+# ── applying the plan ──────────────────────────────────────────────────────
+from fwgitops.adopt import Adoption, apply_adoption   # noqa: E402
+
+INTERFACES = '''# A long comment explaining WHY this mapping is what it is.
+interfaces:
+  local:
+    description: Inside.
+    folder: $eth-local
+    # No `create_in`: an SCM default. NOT ours.
+    devices:
+      "OLD-1": ethernet1/4
+
+  internet:
+    folder: $eth-internet
+    devices:
+      "OLD-1": ethernet1/3
+'''
+
+FOLDERS = '''folders:
+  prod-edge:
+    devices:
+      "OLD-1":
+        # A comment that must survive.
+        display_name: fw-prod-edge-old
+        model: PA-VM
+        targetable: true
+'''
+
+
+def _adoption(**kw):
+    base = dict(serial="NEW-2", folder="prod-edge", display_name="fw-prod-edge-new",
+                ports={"local": "ethernet1/1", "internet": "ethernet1/2"},
+                unresolved=[])
+    return Adoption(**{**base, **kw})
+
+
+def test_the_serial_is_replaced_everywhere_it_appears():
+    """The seventeen edits, in one operation. A PARTIAL rename is the failure
+    this command exists to remove — the catalog updated and an intent left
+    behind is a tree that compiles and targets a device that does not exist."""
+    out = apply_adoption(_adoption(), folders_text=FOLDERS, interfaces_text=INTERFACES,
+                         intent_files={"intent/prod/f/REQ-1.yaml": 'spec:\n  device: "OLD-1"\n'},
+                         replacing="OLD-1")
+    assert "NEW-2" in out["intent/prod/f/REQ-1.yaml"]
+    assert "OLD-1" not in out["intent/prod/f/REQ-1.yaml"]
+    assert "OLD-1" not in out["catalog/folders.yaml"]
+
+
+def test_the_comments_survive():
+    """`catalog/interfaces.yaml` is mostly comments explaining which ENI sits
+    behind which port and why a role is site-specific. Round-tripping it through
+    a YAML parser would delete all of it, and those comments are the only reason
+    the file is followable."""
+    out = apply_adoption(_adoption(), folders_text=FOLDERS, interfaces_text=INTERFACES,
+                         intent_files={}, replacing="OLD-1")
+    assert "explaining WHY this mapping" in out["catalog/interfaces.yaml"]
+    assert "an SCM default. NOT ours." in out["catalog/interfaces.yaml"]
+    assert "A comment that must survive." in out["catalog/folders.yaml"]
+
+
+def test_the_ports_are_set_per_role_not_globally():
+    """Every role has a `devices:` map. A global replace would rewrite them all
+    to one port — which is exactly the silent wrong-interface bug the catalog
+    read exists to prevent, reintroduced by the writer."""
+    out = apply_adoption(_adoption(), folders_text=FOLDERS, interfaces_text=INTERFACES,
+                         intent_files={}, replacing="OLD-1")
+    text = out["catalog/interfaces.yaml"]
+    assert '"NEW-2": ethernet1/1' in text, "local"
+    assert '"NEW-2": ethernet1/2' in text, "internet"
+    assert text.count("ethernet1/1") == 1 and text.count("ethernet1/2") == 1
+
+
+def test_the_display_name_follows_SCM():
+    """A stale one makes `verify-catalog` report a note worded for the DANGEROUS
+    cause — a re-onboard that wipes device-scope config — when the truth is an
+    un-updated catalog. Reading it removes the ambiguity at the source."""
+    out = apply_adoption(_adoption(), folders_text=FOLDERS, interfaces_text=INTERFACES,
+                         intent_files={}, replacing="OLD-1")
+    assert "display_name: fw-prod-edge-new" in out["catalog/folders.yaml"]
+
+
+def test_a_re_run_with_no_serial_change_still_corrects_a_drifted_port():
+    """Adoption is not only for a new serial. The port map is authoritative from
+    SCM, so re-running against the SAME device is how a catalog that has drifted
+    from the tenant gets corrected — the gap where nothing compared the two."""
+    drifted = INTERFACES.replace('"OLD-1": ethernet1/4', '"OLD-1": ethernet1/9')
+    out = apply_adoption(_adoption(serial="OLD-1"), folders_text=FOLDERS,
+                         interfaces_text=drifted, intent_files={})
+    assert '"OLD-1": ethernet1/1' in out["catalog/interfaces.yaml"]
+    assert "ethernet1/9" not in out["catalog/interfaces.yaml"]
+
+
+def test_an_adoption_that_changes_nothing_writes_nothing():
+    """FOUND ON THE FIRST LIVE RUN. The catalog already matched SCM exactly, and
+    the command still reported a file to write — it was deleting two blank lines
+    and nothing else, because the entry regex swallowed the newline after the
+    value.
+
+    A tool that silently reformats the file it edits is one people stop trusting,
+    and it makes a real change impossible to see in the diff. `--check` reporting
+    a no-op change also destroys the only signal it exists to give."""
+    already = INTERFACES.replace('"OLD-1": ethernet1/4', '"OLD-1": ethernet1/1') \
+                        .replace('"OLD-1": ethernet1/3', '"OLD-1": ethernet1/2')
+    out = apply_adoption(_adoption(serial="OLD-1", display_name=None),
+                         folders_text=FOLDERS, interfaces_text=already,
+                         intent_files={})
+    assert out == {}, f"a matching catalog must produce no changes, got {list(out)}"
+
+
+def test_the_blank_lines_between_roles_survive():
+    """The same bug, asserted on the shape rather than the outcome — the file is
+    readable because its roles are separated, and an edit that closes them up
+    degrades it a little on every run."""
+    out = apply_adoption(_adoption(serial="OLD-1"), folders_text=FOLDERS,
+                         interfaces_text=INTERFACES, intent_files={})
+    text = out["catalog/interfaces.yaml"]
+    assert text.count("\n\n") == INTERFACES.count("\n\n"), (
+        "the blank lines separating roles must be preserved exactly")
