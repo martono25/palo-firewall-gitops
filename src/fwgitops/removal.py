@@ -110,11 +110,18 @@ def classify_removal(removal: Removal) -> RiskVerdict:
                     f"forwarding or falls to a different next hop. Nothing refuses this: "
                     f"unlike a zone, a router with one fewer route is still a valid object.")
     elif kind == "ZoneRequest":
+        # MEASURED 2026-08-12, and it is the QUIET outcome that happens. An
+        # interface binding does NOT refuse the delete: SCM removed a zone bound
+        # to ethernet1/3 in two seconds and reported success, leaving the
+        # interface addressed and unzoned. Only a RULE still naming the zone
+        # produces the 409. This reason used to lead with the refusal, which is
+        # the reassuring half of the truth.
         tier = fire("HIGH", "zone_removed",
                     f"removes a zone ({removal.req_id}). Interfaces bound to it lose their "
-                    f"zone; PAN-OS drops traffic on an unzoned interface. SCM refuses the "
-                    f"delete while a rule still references it, so the likely outcomes are a "
-                    f"failed apply or silently dropped traffic.")
+                    f"zone and PAN-OS drops traffic on an unzoned interface — the apply "
+                    f"SUCCEEDS and says nothing, because an interface binding does not "
+                    f"refuse the delete. A rule still referencing the zone does: SCM returns "
+                    f"409 NON_ZERO_REFS and the apply fails loudly instead.")
     elif kind == "InterfaceRequest":
         tier = fire("HIGH", "interface_config_removed",
                     f"removes interface configuration ({removal.req_id}). A device-scope "

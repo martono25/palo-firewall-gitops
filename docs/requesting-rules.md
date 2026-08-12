@@ -70,7 +70,26 @@ Fill in the form — ticket, why, source, destination, service — and submit. T
 platform generates the intent YAML and opens a pull request with it, then
 comments on your issue with the link.
 
-You never write YAML, and you never need to know what a zone or a folder is.
+You never write YAML, and you never need to know what a folder is.
+
+> **One thing the form does not work out: the zones.** Every rule is placed on
+> the zone pair configured for its ENVIRONMENT — for `prod` that is
+> `local → internet` (see `catalog/environments.yaml`). The zones are **not**
+> derived from the addresses you type. Per-IP zone inference is a Phase-2
+> feature that does not exist yet.
+>
+> Most traffic crosses that pair and this never matters. But if your source or
+> destination sits on a segment in a different zone — the DMZ, say — the rule
+> is still created on `local → internet`, it still applies cleanly, every check
+> stays green, and **it will never match your traffic**. Nothing in the pipeline
+> can currently tell you that, because from its point of view nothing is wrong.
+>
+> Measured on 2026-08-12: a request for `10.100.3.40/32 → 10.100.1.60/32` was
+> created as `local → internet`, while `10.100.1.60` lives on an interface in
+> the `dmz` zone.
+>
+> If you are not sure which zone your addresses are in, say so in the
+> justification and the platform team will check before approving.
 
 If something in the form cannot be read, **the issue gets a comment naming the
 field and what to write instead** — edit the issue and it tries again. No need to
