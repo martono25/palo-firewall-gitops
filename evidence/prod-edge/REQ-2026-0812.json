@@ -1,0 +1,136 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31554402420"
+  },
+  "approval": {
+    "approvers": [],
+    "gate": null,
+    "merge_commit": "0be8224f3ab6253d86e3437f5113a8c83db9566c",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/154"
+  },
+  "compiled": {
+    "compiler_version": "1.0.0",
+    "object": {
+      "address_objects": [
+        {
+          "name": "addr-85c1076cfe",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.20.1.0/24"
+        },
+        {
+          "name": "addr-8a365913f6",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "fqdn",
+          "value": "payments.internal"
+        }
+      ],
+      "rule": {
+        "action": "allow",
+        "application": [
+          "ssl",
+          "web-browsing"
+        ],
+        "category": [
+          "any"
+        ],
+        "description": null,
+        "destinations": [
+          "addr-8a365913f6"
+        ],
+        "from_zones": [
+          "local"
+        ],
+        "log_end": true,
+        "log_setting": "log-best",
+        "log_start": false,
+        "name": "REQ-2026-0812",
+        "negate_destination": false,
+        "negate_source": false,
+        "profile_group": "best-practice",
+        "relative_position": null,
+        "rulebase": "pre",
+        "services": [
+          "svc-fd64e1b89a"
+        ],
+        "source_user": [
+          "any"
+        ],
+        "sources": [
+          "addr-85c1076cfe"
+        ],
+        "tags": [
+          "gitops:managed",
+          "gitops:req:REQ-2026-0812",
+          "gitops:section:specific-allow",
+          "gitops:ticket:JIRA-9020"
+        ],
+        "target_rule": null,
+        "to_zones": [
+          "internet"
+        ]
+      },
+      "service_objects": [
+        {
+          "name": "svc-fd64e1b89a",
+          "port": "443",
+          "protocol": "tcp",
+          "tags": [
+            "gitops:managed"
+          ]
+        }
+      ]
+    },
+    "object_sha256": "79f9e780d5002a7096f8f4042f0f4fa2ac3f47644b03632be8d9a7ff09c7db5d",
+    "scope": {
+      "kind": "folder",
+      "value": "prod-edge"
+    },
+    "tfvars_file": "rules.auto.tfvars.json",
+    "tfvars_sha256": "0414e5f9c25a3ce96519cd7d7d94bc2f8af21d074890acf5ffe70300e5efd27c"
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7"
+  ],
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-12T01:43:03Z",
+  "kind": "AccessRequest",
+  "push": {
+    "admin_count": 1,
+    "all_admins": false,
+    "folder": "prod-edge",
+    "job_id": "204",
+    "status": "success"
+  },
+  "req_id": "REQ-2026-0812",
+  "request": {
+    "intent_file": "intent/prod/payments/REQ-2026-0813.yaml",
+    "intent_sha256": "096652b57d4407e5ad602df53e610f9be0dc228783c7b518584479b7c693ca66",
+    "justification": "Web tier to payments API, HTTPS only, inspected",
+    "requested": "2026-08-12",
+    "requester": "martono@corp.com",
+    "ticket": "JIRA-9020"
+  },
+  "risk": {
+    "checks_fired": [],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "applied"
+}
