@@ -39,8 +39,12 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Which estate. See catalog/environments.yaml for the full list.
-      options: ["prod"]
+      description: |
+        Which estate, and which DIRECTION the traffic goes. `prod` is outbound
+        (your estate reaching out); `prod-ingress` is inbound (something on the
+        internet reaching in). Inbound requests are scrutinised harder — that is
+        the point of having them separate.
+      options: ["prod", "prod-ingress"]
     validations:
       required: true
 

@@ -287,7 +287,6 @@ def classify(
         # A deny rule reduces attack surface; the risky-open checks are for allow.
         allow = rule.action.lower() == "allow"
         from_internet = any(z.lower() in INTERNET_ZONES for z in rule.from_zones)
-        to_internet = any(z.lower() in INTERNET_ZONES for z in rule.to_zones)
 
         srcs = [_resolve_addr(by_name, n) for n in rule.sources]
         dsts = [_resolve_addr(by_name, n) for n in rule.destinations]
@@ -303,9 +302,22 @@ def classify(
                      "allows any source (0.0.0.0/0) inbound from an internet/untrust zone")
 
             # ── HIGH ──
+            # `is_any` IS the broadest prefix, not an exception to breadth.
+            #
+            # This carried `not c.is_any` until 2026-08-13, which excluded the
+            # broadest possible value from the breadth test. Measured on a live
+            # rule: destination /16 and /8 fired `broad_destination` and held
+            # for a reviewer, while destination 0.0.0.0/0 — everywhere — graded
+            # LOW and auto-applied. Widening a rule PAST the threshold raised
+            # its tier; widening it all the way dropped the tier back.
+            #
+            # `any_any_allow` above did not cover it either: that needs BOTH
+            # sides any, so a one-sided /0 fell through the gap between the two
+            # checks. `0.0.0.0/0` has prefix 0, so simply dropping the guard
+            # catches it with no special case.
             for tag, cidrs in (("source", srcs), ("destination", dsts)):
                 for c in cidrs:
-                    if c is not None and not c.is_any and c.prefix <= thresholds.broad_prefix_max:
+                    if c is not None and c.prefix <= thresholds.broad_prefix_max:
                         fire("HIGH", f"broad_{tag}",
                              f"{tag} /{c.prefix} is broader than /{thresholds.broad_prefix_max}")
             for svc in change.service_objects:

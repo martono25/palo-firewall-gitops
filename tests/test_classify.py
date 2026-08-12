@@ -23,6 +23,14 @@ def _change(*, srcs, dsts, services, from_zones=("local",), to_zones=("internet"
     def add(items):
         names = []
         for name, typ, val in items:
+            if name in addr and (addr[name].type, addr[name].value) != (typ, val):
+                # Silently overwriting here makes the source and the destination
+                # the SAME object, so a test reads as exercising two sides while
+                # exercising one. That produced a spurious CRITICAL on
+                # 2026-08-13 and cost a real debugging detour.
+                raise AssertionError(
+                    f"two different address objects share the name {name!r}: "
+                    f"{addr[name].value} vs {val} — give them distinct names")
             addr[name] = AddressObject(name=name, type=typ, value=val, folder="f", tags=[])
             names.append(name)
         return names
@@ -90,6 +98,53 @@ def test_broad_destination_is_high():
         services=[HTTPS],
     ))
     assert v.tier == "HIGH" and "broad_destination" in _fired(v)
+
+
+def test_one_sided_any_is_broad_on_BOTH_sides():
+    """0.0.0.0/0 on ONE side auto-applied until 2026-08-13.
+
+    The breadth check was guarded by `not c.is_any`, which excluded the
+    broadest possible value from the breadth test, and `any_any_allow` needs
+    BOTH sides any — so a one-sided /0 fell through the gap between them.
+
+    Measured on a live rule before the fix: destination /16 and /8 fired
+    `broad_destination` and held for a reviewer, while destination 0.0.0.0/0
+    graded LOW and applied with nobody asked. Widening a rule past the
+    threshold raised its tier; widening it the whole way dropped it back.
+    """
+    v = classify(_change(srcs=[HOST], dsts=[("anywhere", "ip-netmask", "0.0.0.0/0")],
+                         services=[HTTPS]))
+    assert v.tier == "HIGH", "host -> anywhere must not auto-apply"
+    assert "broad_destination" in _fired(v)
+
+    v = classify(_change(srcs=[("anywhere", "ip-netmask", "0.0.0.0/0")], dsts=[HOST],
+                         services=[HTTPS]))
+    assert v.tier == "HIGH", "anywhere -> host must not auto-apply"
+    assert "broad_source" in _fired(v)
+
+
+def test_widening_a_rule_never_LOWERS_its_tier():
+    """The property the /0 hole violated, stated directly.
+
+    Tiers are ordered, and each of these destinations strictly contains the one
+    before it. Grading must be monotonic across that chain: no rule may become
+    cheaper to approve by being made broader. Asserting the property rather
+    than five specific tiers means a future threshold change stays honest
+    without editing this test.
+    """
+    order = {"LOW": 0, "HIGH": 1, "CRITICAL": 2}
+    widening = ["10.20.1.0/24", "10.20.0.0/16", "10.0.0.0/8", "0.0.0.0/0"]
+
+    tiers = [
+        classify(_change(srcs=[HOST],
+                         dsts=[("target", "ip-netmask", cidr)],
+                         services=[HTTPS])).tier
+        for cidr in widening
+    ]
+    for (narrow, nt), (wide, wt) in zip(zip(widening, tiers), zip(widening[1:], tiers[1:])):
+        assert order[wt] >= order[nt], (
+            f"{wide} contains {narrow} but grades {wt} where {narrow} grades "
+            f"{nt} — broadening a rule made it cheaper to approve")
 
 
 def test_wide_port_range_is_high():
@@ -510,3 +565,71 @@ def test_interfaces_are_counted_across_every_layer_type():
     z = _zone(interfaces=["$eth-local"], protection_profile="p", user_id=True)
     cur = {("prod-edge", "dmz"): {"network": {"layer2": ["$eth-x"], "layer3": []}}}
     assert classify_zone(z, current=cur).checks_fired == ()
+
+
+# ── Reachability ────────────────────────────────────────────────────────────
+#
+# A risk check that cannot fire is worse than one that does not exist: it is
+# listed in the docs, it is counted as a control, and it is silent.
+
+
+def _declared_environments():
+    """The real catalog, not a fixture. The question is whether the checks can
+    fire on THIS deployment, which a fixture cannot answer."""
+    import pathlib
+
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    return yaml.safe_load((root / "catalog" / "environments.yaml").read_text())
+
+
+def test_the_internet_facing_checks_are_REACHABLE_on_this_deployment():
+    """`inbound_any_from_internet` (CRITICAL) and `risky_port_from_internet`
+    (HIGH) both require the rule's FROM zone to be an internet/untrust zone.
+
+    Found 2026-08-13: no declared environment had one. `prod` is fixed at
+    `local -> internet`, requesters cannot override zones (zones come from the
+    environment, not from the addresses), so `from_zones` was always
+    `['local']` and neither check could fire for any rule this platform can
+    express — while `requesting-rules.md` told requesters that exposing risky
+    ports from the internet is what gets held for approval.
+
+    This asserts the property that makes them live: some environment must put
+    an internet zone on the FROM side. It is deliberately a test and not a
+    comment, because the failure mode is silence.
+    """
+    from fwgitops.classify import INTERNET_ZONES
+
+    envs = _declared_environments()
+    inbound = {
+        name: cfg for name, cfg in envs.items()
+        if isinstance(cfg, dict)
+        and str(cfg.get("from_zone", "")).lower() in INTERNET_ZONES
+    }
+    assert inbound, (
+        "no environment in catalog/environments.yaml has an internet zone as "
+        "its from_zone, so inbound_any_from_internet and "
+        "risky_port_from_internet can never fire for any rule this platform "
+        "can express. Either declare an inbound environment or stop listing "
+        "those checks as controls."
+    )
+
+
+def test_every_check_the_classifier_can_fire_is_covered_by_a_test():
+    """The /0 hole survived because nothing exercised it. This does not prove
+    each check is CORRECT — it proves none is entirely unexamined, which is the
+    condition that let `broad_destination` be wrong at exactly one value for
+    however long it had been there."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    src = (root / "src" / "fwgitops" / "classify.py").read_text()
+    declared = set(re.findall(r'fire\(\s*"[A-Z]+",\s*"([a-z_]+)"', src))
+
+    tests = pathlib.Path(__file__).read_text()
+    unexercised = {c for c in declared if c not in tests}
+    assert not unexercised, (
+        f"these risk checks are never named in this file, so nothing asserts "
+        f"what they do: {sorted(unexercised)}")

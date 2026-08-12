@@ -22,3 +22,27 @@ prod:
     - zone-to-branch
     - zone-to-pa-hub
     - proxy
+
+# ── Inbound ────────────────────────────────────────────────────────────────
+#
+# The SAME folder and the SAME firewall as `prod`, with the zone pair REVERSED:
+# traffic arriving FROM the internet TO the local estate.
+#
+# Added 2026-08-13 because two risk checks were unreachable without it.
+# `inbound_any_from_internet` (CRITICAL) and `risky_port_from_internet` (HIGH)
+# both test the rule's FROM zone against the internet-zone set. Every
+# environment declared here put `local` on the from side, requesters cannot
+# override zones, and so neither check could fire for any rule this platform
+# was able to express — while the requester guide named exposing risky ports
+# from the internet as a reason a change is held for approval.
+#
+# A rule that genuinely faces the internet must be REQUESTABLE for those checks
+# to mean anything. `tests/test_classify.py` now fails if no environment puts an
+# internet zone on the from side, so this cannot quietly regress.
+prod-ingress:
+  folder: prod-edge
+  from_zone: internet   # SCM/NGFW default zone (exists on the device)
+  to_zone: local        # SCM/NGFW default zone (exists on the device)
+
+  baseline_zones:
+    - zone-internal
