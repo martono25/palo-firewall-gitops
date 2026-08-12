@@ -1,7 +1,7 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31610326417"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31611888283"
   },
   "approval": {
     "approvers": [
@@ -11,8 +11,8 @@
       }
     ],
     "gate": null,
-    "merge_commit": "864679ed998a196a7212c1a973c66f5270ed17e0",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/176"
+    "merge_commit": "36e845e6b3e96ddec5c7a62936bbeb1543f59cc8",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/179"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -26,14 +26,13 @@
       "mtu": 1500,
       "name": "ethernet1/3"
     },
-    "object_is": "the LAST APPLIED state, from the baseline tree",
     "object_sha256": "8a0446b141a559088fd9acdb4c768e1d26f50796c2e54bb2fc521267c67bdb1e",
     "scope": {
       "kind": "device",
       "value": "007955000902404"
     },
     "tfvars_file": "interfaces.auto.tfvars.json",
-    "tfvars_sha256": null
+    "tfvars_sha256": "9daff14d12295216503d36567762f3c19214d5f35dac7a872229d5dffa4d7f92"
   },
   "controls": [
     "AC-4",
@@ -44,41 +43,30 @@
     "CM-5"
   ],
   "controls_not_evidenced": [],
-  "generated_at": "2026-08-12T15:10:05Z",
+  "generated_at": "2026-08-12T15:25:59Z",
   "kind": "InterfaceRequest",
   "push": {
     "admin_count": 1,
     "all_admins": false,
     "folder": "007955000902404",
-    "job_id": "224",
+    "job_id": "226",
     "status": "success"
-  },
-  "removal": {
-    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
-    "commit": "864679ed998a196a7212c1a973c66f5270ed17e0",
-    "ticket": "JIRA-9313"
   },
   "req_id": "REQ-2026-0805",
   "request": {
     "intent_file": "intent/prod/edge-fw-2404/REQ-2026-0805.yaml",
-    "intent_sha256": "d274145002bdae35b3bf75a9523c4ac70fd0706070bb9eede48ab11d717a0015",
+    "intent_sha256": "7263782f760287a01c896c3f132f6bd73b24eb6dd1824ddabc85ecf89c2c87cf",
     "justification": "Address the DMZ interface on fw-prod-edge-2404 so the dmz zone declared by REQ-2026-0806 binds a real, addressed port. Closes the last Day-1 kind that had never been verified on hardware.",
     "requested": "2026-08-12",
     "requester": "martono@corp",
-    "ticket": "JIRA-9200"
+    "ticket": "JIRA-9321"
   },
   "risk": {
-    "checks_fired": [
-      {
-        "check": "interface_config_removed",
-        "reason": "removes interface configuration (REQ-2026-0805). A device-scope override reverts to the inherited object, which carries no addressing \u2014 the firewall loses the IP on that interface.",
-        "tier": "HIGH"
-      }
-    ],
-    "classifier_version": "1.0.0",
-    "thresholds_version": null,
-    "tier": "HIGH"
+    "checks_fired": [],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
   },
   "schema": "fw-evidence/v2",
-  "status": "removed"
+  "status": "applied"
 }
