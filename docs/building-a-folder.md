@@ -154,15 +154,24 @@ creates itself.
 
 ## Part 1 — InterfaceRequest: address the ports
 
-Real file: [`intent/prod/edge-fw-2404/REQ-2026-0801.yaml`](../intent/prod/edge-fw-2404/REQ-2026-0801.yaml)
+Reference file: [`intent/prod/edge-example/REQ-2026-0418.example.yaml`](../intent/prod/edge-example/REQ-2026-0418.example.yaml)
+
+> These three parts cite `*.example.yaml` files rather than the intents
+> currently deployed. That is deliberate: the guide used to be pinned to the
+> live tree, which meant **deleting your last zone broke the build** — the
+> deletion contract in [ADR-0008](adr/0008-deletion-contract.md) could not be
+> exercised on the last instance of a kind. The examples are permanent and are
+> loaded by the real validator in the test suite, so they cannot drift from the
+> schema; what they no longer promise is that a firewall is running exactly
+> this. For what is deployed, read `intent/` directly.
 
 ```yaml
 apiVersion: fw-intent/v1
 kind: InterfaceRequest
 metadata:
-  id: REQ-2026-0801
-  requester: martono@corp
-  ticket: JIRA-901
+  id: REQ-2026-0418
+  requester: jane.doe@corp
+  ticket: JIRA-12346
   justification: "Day-1 build: address the internal interface"
   requested: 2026-08-04
 spec:
@@ -197,15 +206,15 @@ The pilot took three: `local`, `internet` (REQ-2026-0802) and `dmz`
 
 ## Part 2 — ZoneRequest: declare the zone, bind the interface
 
-Real file: [`intent/prod/edge-fw-2404/REQ-2026-0806.yaml`](../intent/prod/edge-fw-2404/REQ-2026-0806.yaml)
+Reference file: [`intent/prod/edge-example/REQ-2026-0419.example.yaml`](../intent/prod/edge-example/REQ-2026-0419.example.yaml)
 
 ```yaml
 apiVersion: fw-intent/v1
 kind: ZoneRequest
 metadata:
-  id: REQ-2026-0806
-  requester: martono@corp
-  ticket: JIRA-906
+  id: REQ-2026-0419
+  requester: jane.doe@corp
+  ticket: JIRA-12347
   justification: "Declare the dmz zone and bind it to the DMZ interface"
   requested: 2026-08-05
 spec:
@@ -239,15 +248,15 @@ approvable.
 
 ## Part 3 — RouteRequest: the most dangerous link
 
-Real file: [`intent/prod/edge-fw-2404/REQ-2026-0803.yaml`](../intent/prod/edge-fw-2404/REQ-2026-0803.yaml)
+Reference file: [`intent/prod/edge-example/REQ-2026-0420.example.yaml`](../intent/prod/edge-example/REQ-2026-0420.example.yaml)
 
 ```yaml
 apiVersion: fw-intent/v1
 kind: RouteRequest
 metadata:
-  id: REQ-2026-0803
-  requester: martono@corp
-  ticket: JIRA-904
+  id: REQ-2026-0420
+  requester: jane.doe@corp
+  ticket: JIRA-12348
   justification: "Default route out the untrust interface"
   requested: 2026-08-04
 spec:

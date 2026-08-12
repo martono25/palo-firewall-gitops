@@ -1,0 +1,21 @@
+# EXAMPLE intent — the third and last link in the ADR-0002 Day-1 chain.
+#
+# NOT OPERATIONAL; see REQ-2026-0418.example.yaml for why these files exist.
+#
+# A default route is tiered HIGH by `default_route` and never auto-applies:
+# it decides where every unmatched packet goes.
+apiVersion: fw-intent/v1
+kind: RouteRequest
+metadata:
+  id: REQ-2026-0420
+  requester: jane.doe@corp
+  ticket: JIRA-12348
+  justification: >-
+    Default route out the untrust interface so the firewall can forward
+    unmatched traffic. Completes the Day-1 chain.
+  requested: "2026-08-13"
+spec:
+  folder: prod-edge
+  destination: 0.0.0.0/0
+  nexthop: 10.100.2.1           # subnet router for 10.100.2.0/24
+  metric: 10

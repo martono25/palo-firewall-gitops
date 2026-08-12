@@ -1,0 +1,29 @@
+# EXAMPLE intent — the second link in the ADR-0002 Day-1 chain.
+#
+# NOT OPERATIONAL; see REQ-2026-0418.example.yaml for why these files exist.
+#
+# A zone is declared on the FOLDER, never at device scope: SCM refuses a zone
+# with `device=` and returns the misleading "Device not found", so the zone
+# lands in the folder and the device inherits it.
+apiVersion: fw-intent/v1
+kind: ZoneRequest
+metadata:
+  id: REQ-2026-0419
+  requester: jane.doe@corp
+  ticket: JIRA-12347
+  justification: >-
+    Declare the dmz zone on the edge firewall folder and bind it to the DMZ
+    interface.
+  requested: "2026-08-13"
+spec:
+  folder: prod-edge
+  zone: dmz
+  type: layer3
+  interfaces:
+    - $eth-dmz                  # created by terraform/bootstrap-scm-folder
+  protection_profile: best-practice
+  log_forwarding: log-best
+  # user_id stays OFF deliberately: nothing on this segment sources User-ID
+  # mappings, and enabling it would be posture theatre. The classifier still
+  # reports `user_id_disabled_on_zone`, which is correct — it is a real fact
+  # about the zone, and HIGH is approvable rather than blocking.

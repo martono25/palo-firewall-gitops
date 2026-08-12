@@ -1,0 +1,28 @@
+# EXAMPLE intent — the first link in the ADR-0002 Day-1 chain.
+#
+# NOT OPERATIONAL. `discover_intents` skips `*.example.*`, so nothing here
+# compiles, applies or reaches a firewall. These files exist so the repository
+# demonstrates every registered kind INDEPENDENTLY of what happens to be
+# deployed — deleting your last real zone should not make the repo stop
+# documenting what a ZoneRequest looks like.
+#
+# `docs/building-a-folder.md` is pinned to these files, and
+# tests/test_intent.py loads every one of them through the real validator, so
+# an example that drifts from the schema fails the suite like any other intent.
+apiVersion: fw-intent/v1
+kind: InterfaceRequest
+metadata:
+  id: REQ-2026-0418
+  requester: jane.doe@corp
+  ticket: JIRA-12346
+  justification: >-
+    Day-1 build for an edge firewall: give the internal interface its address
+    so the local zone can carry traffic.
+  requested: "2026-08-12"
+spec:
+  device: "007955000902404"     # the serial of the firewall being built
+  interface: local              # role — resolved via catalog/interfaces.yaml
+  ip:
+    - 10.100.3.125/24
+  mtu: 1500
+  comment: "Internal — managed by fwgitops"
