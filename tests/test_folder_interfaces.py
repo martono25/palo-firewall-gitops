@@ -33,7 +33,7 @@ folders:
     children: []
     targetable: true
     devices:
-      "007955000901881":
+      "007955000902404":
         display_name: fw-a
         model: PA-VM
         targetable: true
@@ -44,14 +44,14 @@ interfaces:
   local:
     folder: $eth-local
     devices:
-      "007955000901881": ethernet1/4
+      "007955000902404": ethernet1/4
   dmz:
     folder: $eth-dmz
     site_specific: true
     create_in:
       prod-edge: ethernet1/2
     devices:
-      "007955000901881": ethernet1/2
+      "007955000902404": ethernet1/2
 """
 
 
@@ -181,7 +181,7 @@ interfaces:
     create_in:
       prod-edge: ethernet1/2
     devices:
-      "007955000901881": ethernet1/2
+      "007955000902404": ethernet1/2
 """)
     (tmp_path / "folders.yaml").write_text(FOLDERS)
     out = tmp_path / "terraform"

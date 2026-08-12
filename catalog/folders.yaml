@@ -19,13 +19,13 @@
 # GET /config/setup/v1/folders returns TWO kinds of entry, told apart by `type`:
 #
 #   {"name": "prod-edge",       "type": "container"}          <- a real folder
-#   {"name": "007955000901881", "type": "on-prem",
-#    "serial_number": "007955000901881", "model": "PA-VM"}    <- a DEVICE
+#   {"name": "007955000902404", "type": "on-prem",
+#    "serial_number": "007955000902404", "model": "PA-VM"}    <- a DEVICE
 #
 # In SCM the FIREWALL IS THE LAST LEVEL OF THE HIERARCHY, and config inherits
 # all the way down to it:
 #
-#   All -> ngfw-shared -> prod-edge -> <firewall 007955000901881>
+#   All -> ngfw-shared -> prod-edge -> <firewall 007955000902404>
 #
 # So a firewall belongs in this file — a change to `prod-edge` really does reach
 # every firewall beneath it. What a firewall is NOT is a `folder=` you can
@@ -76,14 +76,14 @@ folders:
     targetable: true
     devices:
       # Addressed as `device: <serial>` in an intent, NEVER `folder:`.
-      "007955000901881":
+      "007955000902404":
         # The label SCM shows in its inventory — NOT the firewall's hostname
         # (that is ip-10-100-0-51, DHCP-assigned, undeclared). A re-onboard
         # RESETS it: this went to `PA-VM` on 2026-08-05 and nothing noticed.
         # `fwgitops verify-catalog` now compares it, because the reset is
         # cosmetic but is a reliable symptom of a re-registration — and a
         # re-registration wipes device-scope config.
-        display_name: fw-prod-edge-1881
+        display_name: fw-prod-edge-2404
         model: PA-VM
         # CONNECTED 2026-08-02. A push can commit to it.
         targetable: true

@@ -22,13 +22,13 @@ metadata:
   requester: martono@corp
   ticket: JIRA-911
   justification: >-
-    Address the DMZ interface on fw-prod-edge-1881 so the dmz zone declared by
+    Address the DMZ interface on fw-prod-edge-2404 so the dmz zone declared by
     REQ-2026-0806 binds a real, addressed port. Closes the last Day-1 kind that
     had never been verified on hardware.
   requested: "2026-08-13"
 
 spec:
-  device: "007955000901881"     # fw-prod-edge-4453, PA-VM, connected
+  device: "007955000902404"     # fw-prod-edge-4453, PA-VM, connected
   interface: dmz                # role — $eth-dmz / ethernet1/3
   ip:
     - 10.100.1.110/24

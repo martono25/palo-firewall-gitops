@@ -161,7 +161,7 @@ Commit a scope's staged config in SCM.
 
 ```sh
 fwgitops push --scope-dir prod-edge --record push-prod-edge.json
-fwgitops push --device 007955000901881
+fwgitops push --device 007955000902404
 ```
 
 | Flag | Effect |
@@ -289,7 +289,7 @@ Create a Terraform root for a scope, or verify existing ones.
 
 ```sh
 fwgitops scaffold-root --folder prod-edge
-fwgitops scaffold-root --device 007955000901881 --device-folder prod-edge
+fwgitops scaffold-root --device 007955000902404 --device-folder prod-edge
 fwgitops scaffold-root --check     # CI runs this
 fwgitops scaffold-root --sync      # regenerate after a module change
 ```
@@ -321,8 +321,8 @@ from the tree would be circular.
 Point the repository at a firewall, reading SCM for every value.
 
 ```sh
-fwgitops adopt-device 007955000901881 --folder prod-edge --check
-fwgitops adopt-device 007955000901881 --folder prod-edge --replacing 007955000894453
+fwgitops adopt-device 007955000902404 --folder prod-edge --check
+fwgitops adopt-device 007955000902404 --folder prod-edge --replacing 007955000894453
 ```
 
 | Flag | Effect |

@@ -144,14 +144,14 @@ def test_a_firewall_is_pushed_as_a_device_not_via_its_folder():
     than the one change intended. pan.dev documents `devices` on the push body:
     "The target devices for the configuration push"."""
     c = FakeClient()
-    r = push_folder(c, device="007955000901881", admins=[US])
+    r = push_folder(c, device="007955000902404", admins=[US])
     assert r.status == "success"
-    assert c.scopes == [("device", "007955000901881")]
-    assert c.pushes == [("007955000901881", [US])]
+    assert c.scopes == [("device", "007955000902404")]
+    assert c.pushes == [("007955000902404", [US])]
 
 
 def test_push_needs_exactly_one_scope():
-    for kwargs in ({}, {"folder": "prod-edge", "device": "007955000901881"}):
+    for kwargs in ({}, {"folder": "prod-edge", "device": "007955000902404"}):
         with pytest.raises(ValueError, match="exactly one"):
             push_folder(FakeClient(), admins=[US], **kwargs)
 
@@ -168,7 +168,7 @@ def test_the_device_push_body_uses_the_documented_key():
             return {"job_id": "job-9"}
 
     from fwgitops.clients import ScmPushClient
-    ScmPushClient(Session()).push(device="007955000901881", admins=[US])
-    assert sent["body"]["devices"] == ["007955000901881"]
+    ScmPushClient(Session()).push(device="007955000902404", admins=[US])
+    assert sent["body"]["devices"] == ["007955000902404"]
     assert "folders" not in sent["body"]
     assert sent["body"]["admin"] == [US]

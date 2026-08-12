@@ -215,7 +215,7 @@ replacement, skip to [step 4](#step-4); that is the bridge between
 
 ```yaml
 spec:
-  device: "007955000901881"     # this firewall, not that one
+  device: "007955000902404"     # this firewall, not that one
 ```
 
 Until that says the serial you actually have, the Day-1 apply targets a device

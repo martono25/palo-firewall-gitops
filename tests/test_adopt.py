@@ -42,7 +42,7 @@ def test_the_port_map_comes_from_SCM_not_from_typing():
     """The whole point. `catalog/interfaces.yaml` is a mirror, and nothing ever
     compared it to the tenant — a wrong port compiled clean and configured the
     wrong interface. Reading it removes both the typo and the drift."""
-    a = plan_adoption(FakeScm(), "007955000901881", folder="prod-edge", roles=ROLES)
+    a = plan_adoption(FakeScm(), "007955000902404", folder="prod-edge", roles=ROLES)
     assert a.ports == {"local": "ethernet1/1", "internet": "ethernet1/2",
                        "dmz": "ethernet1/3"}
     assert a.display_name == "fw-prod-edge-1881"

@@ -80,14 +80,14 @@ interfaces:
     # Name at DEVICE scope, per firewall. A firewall absent here cannot be
     # targeted for this role: fail closed rather than guess a port.
     devices:
-      "007955000901881": ethernet1/1
+      "007955000902404": ethernet1/1
 
   internet:
     description: Outside / untrust segment.
     folder: $eth-internet
     # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
     devices:
-      "007955000901881": ethernet1/2
+      "007955000902404": ethernet1/2
 
   dmz:
     description: >-
@@ -124,4 +124,4 @@ interfaces:
       # ethernet1/2 = ENI device index 2, 10.100.1.110/24. A firewall absent
       # from this map cannot be targeted for this role — fail closed rather than
       # guess a port that may have no ENI behind it.
-      "007955000901881": ethernet1/3
+      "007955000902404": ethernet1/3
