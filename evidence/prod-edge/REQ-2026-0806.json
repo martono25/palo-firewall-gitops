@@ -1,13 +1,18 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31506938255"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31607465825"
   },
   "approval": {
-    "approvers": [],
+    "approvers": [
+      {
+        "login": "martono25",
+        "via": "deployment_gate"
+      }
+    ],
     "gate": null,
-    "merge_commit": "627acb3ea7dbb48d5cf52a59e234520bd0bc3b71",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/149"
+    "merge_commit": "82354e34da5936499eb4da83c218c71f5224b1dc",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/170"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -26,33 +31,41 @@
       "user_id": null,
       "zone_type": "layer3"
     },
+    "object_is": "the LAST APPLIED state, from the baseline tree",
     "object_sha256": "d835a7a3fce15c526fb96bea4581042106d2d9a7f3d5127f2844644a30f9e4b5",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "zones.auto.tfvars.json",
-    "tfvars_sha256": "59bba52d716155376c081cb1d0381ccb4be2c8af027413b2e2dd192f5cb0ae4b"
+    "tfvars_sha256": null
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7"
+    "SC-7",
+    "CM-5"
   ],
-  "controls_not_evidenced": [
-    {
-      "control": "CM-5",
-      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
-    }
-  ],
-  "generated_at": "2026-08-11T15:27:36Z",
+  "controls_not_evidenced": [],
+  "generated_at": "2026-08-12T14:53:45Z",
   "kind": "ZoneRequest",
-  "push": null,
+  "push": {
+    "admin_count": 1,
+    "all_admins": false,
+    "folder": "prod-edge",
+    "job_id": "218",
+    "status": "success"
+  },
+  "removal": {
+    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
+    "commit": "82354e34da5936499eb4da83c218c71f5224b1dc",
+    "ticket": "JIRA-9311"
+  },
   "req_id": "REQ-2026-0806",
   "request": {
-    "intent_file": "intent/prod/edge-fw-1881/REQ-2026-0806.yaml",
+    "intent_file": "intent/prod/edge-fw-2404/REQ-2026-0806.yaml",
     "intent_sha256": "e1022a6465ba4bcb690fe420925e0bd3d1685a5a6a35b715dec7aeb8f4c8a0a4",
     "justification": "Declare the dmz zone on the edge firewall folder and bind it to the DMZ interface addressed by REQ-2026-0805. Proves kind #2 end to end on real hardware \u2014 the last Day-1 kind never verified on a device.",
     "requested": "2026-08-13",
@@ -62,15 +75,15 @@
   "risk": {
     "checks_fired": [
       {
-        "check": "user_id_disabled_on_zone",
-        "reason": "User-ID is not enabled on zone 'dmz'; any rule matching on source_user will silently never match traffic here",
-        "tier": "LOW"
+        "check": "zone_removed",
+        "reason": "removes a zone (REQ-2026-0806). Interfaces bound to it lose their zone; PAN-OS drops traffic on an unzoned interface. SCM refuses the delete while a rule still references it, so the likely outcomes are a failed apply or silently dropped traffic.",
+        "tier": "HIGH"
       }
     ],
-    "classifier_version": "1.0",
-    "thresholds_version": "2026-07-26",
-    "tier": "LOW"
+    "classifier_version": "1.0.0",
+    "thresholds_version": null,
+    "tier": "HIGH"
   },
   "schema": "fw-evidence/v2",
-  "status": "applied"
+  "status": "removed"
 }
