@@ -2425,6 +2425,7 @@ def run_adopt_device(
     folder: str,
     replacing: Optional[str] = None,
     check: bool = False,
+    prune_state: bool = False,
     intent_root: Path = Path("intent"),
     catalog_dir: Path = Path("catalog"),
     session=None,
@@ -2499,29 +2500,114 @@ def run_adopt_device(
     changes = apply_adoption(adoption, folders_text=folders_path.read_text(),
                              interfaces_text=ifaces_path.read_text(),
                              intent_files=intent_files, replacing=replacing)
-    if not changes:
+
+    # The supporting files: fixtures and prose that do not change behaviour but
+    # DO break CI. Skipped when nothing is being replaced — there is no old
+    # serial to follow.
+    if replacing and replacing != serial:
+        from fwgitops.adopt import FOLLOW_DIRS, follow_serial
+        supporting = {}
+        for d in FOLLOW_DIRS:
+            for f in sorted(Path(d).rglob("*")):
+                if f.is_file() and f.suffix in (".py", ".md", ".yaml", ".yml"):
+                    try:
+                        supporting[str(f)] = f.read_text()
+                    except (OSError, UnicodeDecodeError):
+                        continue
+        changes.update(follow_serial(replacing, serial, supporting))
+    # The Terraform roots are independent of whether the CATALOG changed: a
+    # device can be correctly declared and still have no root, which was the
+    # early-return bug in the first version of this command.
+    new_root = Path("terraform") / f"device-{serial}"
+    old_root = (Path("terraform") / f"device-{replacing}"
+                if replacing and replacing != serial else None)
+    root_work = (not new_root.exists()) or (old_root is not None and old_root.is_dir())
+
+    if not changes and not root_work:
         print("nothing to change — the repository already matches SCM", file=out)
         return 0
 
     verb = "would write" if check else "wrote"
-    print(f"{verb} {len(changes)} file(s):", file=out)
-    for rel in sorted(changes):
-        print(f"  - {rel}", file=out)
+    if changes:
+        print(f"{verb} {len(changes)} file(s):", file=out)
+        for rel in sorted(changes):
+            print(f"  - {rel}", file=out)
     if check:
+        if not new_root.exists():
+            print(f"would scaffold {new_root}", file=out)
+        if old_root is not None and old_root.is_dir():
+            print(f"would remove {old_root}", file=out)
         return 0
     for rel, text in changes.items():
         Path(rel).write_text(text)
 
+    # ── the Terraform roots ───────────────────────────────────────────────
+    # `scaffold-root` refuses an existing root on purpose — main.tf is written
+    # once — so this asks first rather than treating its error as failure.
+    if not new_root.exists():
+        rc = run_scaffold_root(Path("terraform"), device=serial,
+                               device_folder=folder, out=out, err=err)
+        if rc != 0:
+            print("::warning::scaffold-root failed; the new device root is missing",
+                  file=err)
+            return rc
+
+    if old_root is not None and old_root.is_dir():
+        import shutil
+        shutil.rmtree(old_root)
+        print(f"removed {old_root} (including the gitignored files `git rm` "
+              f"leaves behind)", file=out)
+
     print("", file=out)
-    print("NEXT, and none of it is automatic:", file=out)
-    print(f"  1. fwgitops scaffold-root --device {serial} --device-folder {folder}", file=out)
-    if replacing and replacing != serial:
-        print(f"  2. git rm -r terraform/device-{replacing}   "
-              f"# then `rm -rf` it — git leaves the gitignored files", file=out)
-        print(f"  3. grep -rln {replacing} tests/ docs/        "
-              f"# they carry the serial too; CI fails until they follow", file=out)
-    print("  4. fwgitops verify-catalog && fwgitops compile intent --check", file=out)
+    if replacing and replacing != serial and not prune_state:
+        # THE ONE THING LEFT, AND DELIBERATELY. Deleting Terraform state is
+        # irreversible and remote — the difference between "this command edits my
+        # repository" and "this command reaches into my cloud account and
+        # destroys a record". Opt in with --prune-state.
+        print(f"STILL YOURS — the old state object is irreversible, so it is not "
+              f"deleted for you:", file=out)
+        print(f"  aws s3 rm s3://<state-bucket>/device-{replacing}/terraform.tfstate",
+              file=out)
+        print(f"  (or re-run with --prune-state)", file=out)
+        print("", file=out)
+    if replacing and replacing != serial and prune_state:
+        key = f"device-{replacing}/terraform.tfstate"
+        bucket = _state_bucket(err)
+        if not bucket:
+            print(f"::warning::--prune-state: could not read the state bucket from "
+                  f"terraform/*/backend.hcl; delete {key} by hand", file=err)
+        else:
+            import subprocess
+            uri = f"s3://{bucket}/{key}"
+            r = subprocess.run(["aws", "s3", "rm", uri],
+                               capture_output=True, text=True)
+            if r.returncode == 0:
+                print(f"pruned {uri}", file=out)
+            else:
+                # NOT fatal. The repository is already correct; a state object
+                # left behind is inert, and failing here would make the operator
+                # re-run an adoption that has nothing left to do.
+                print(f"::warning::--prune-state: {r.stderr.strip() or 'failed'} "
+                      f"— delete {uri} by hand", file=err)
+
+    print("VERIFY:", file=out)
+    print("  fwgitops verify-catalog && fwgitops compile intent --check", file=out)
     return 0
+
+
+def _state_bucket(err) -> Optional[str]:
+    """The state bucket, read from any root's `backend.hcl`.
+
+    Gitignored and generated by `make-backend.sh`, so it is the only place the
+    bucket is written down locally. Returns None rather than guessing — deleting
+    from the wrong bucket is not a mistake worth risking to save a flag.
+    """
+    import re as _re
+    for f in sorted(Path("terraform").glob("*/backend.hcl")):
+        m = _re.search(r'^\s*bucket\s*=\s*"([^"]+)"', f.read_text(), _re.M)
+        if m:
+            return m.group(1)
+    return None
 
 
 def run_deregister(serial: str, *, session=None, out=None, err=None) -> int:
@@ -2907,6 +2993,12 @@ def build_parser() -> argparse.ArgumentParser:
     ad.add_argument("--check", action="store_true",
                     help="print the plan and write nothing — the same code path "
                          "minus the write")
+    ad.add_argument("--prune-state", action="store_true",
+                    help="also delete the replaced device's Terraform state from "
+                         "the backend. OFF by default because it is irreversible "
+                         "and REMOTE — the difference between editing your "
+                         "repository and reaching into your cloud account. Without "
+                         "it the command prints the one-liner.")
     ad.add_argument("--intent-root", default=Path("intent"), type=Path)
     ad.add_argument("--catalog", dest="catalog_dir", default=Path("catalog"), type=Path)
 
@@ -3086,6 +3178,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "adopt-device":
         return run_adopt_device(args.serial, folder=args.folder,
                                 replacing=args.replacing, check=args.check,
+                                prune_state=args.prune_state,
                                 intent_root=args.intent_root,
                                 catalog_dir=args.catalog_dir)
     if args.command == "deregister":

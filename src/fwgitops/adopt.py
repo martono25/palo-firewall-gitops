@@ -166,6 +166,37 @@ def apply_adoption(adoption: "Adoption", *, folders_text: str, interfaces_text: 
     return out
 
 
+#: Directories the serial is followed into, and the two it is NOT.
+#:
+#: `docs/adr/` records decisions made at a time — rewriting one is revisionism,
+#: the same reason the old evidence bundles stay. `evidence/` is the audit trail
+#: of changes that really happened on a firewall that really existed; a rebuild
+#: does not un-happen them.
+FOLLOW_DIRS = ("tests", "docs")
+NEVER_FOLLOW = ("docs/adr", "evidence")
+
+
+def follow_serial(old_serial: str, new_serial: str,
+                  files: Dict[str, str]) -> Dict[str, str]:
+    """Rewrite the serial through supporting files. `{path: new content}`.
+
+    These do not change BEHAVIOUR — they are fixtures and prose — but they break
+    CI, and an operator who has done everything right still opens a pull request
+    that cannot merge. Seventy-six references across seventeen files on this
+    deployment.
+
+    The caller supplies the file contents, so this stays pure and the exclusions
+    are testable without a filesystem.
+    """
+    out: Dict[str, str] = {}
+    for path, text in files.items():
+        if any(path.startswith(skip) for skip in NEVER_FOLLOW):
+            continue
+        if old_serial in text:
+            out[path] = text.replace(old_serial, new_serial)
+    return out
+
+
 def _set_device_port(text: str, role: str, serial: str, port: str) -> str:
     """Set `<serial>: <port>` inside `interfaces.<role>.devices`, leaving comments.
 

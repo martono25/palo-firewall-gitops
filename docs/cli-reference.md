@@ -347,9 +347,19 @@ and a role whose variable SCM cannot resolve — reported as unmapped rather tha
 guessed, because a role with no port is not a role with a default port. Exit 3 is
 SCM refusing the adoption; the message says which folder it actually found.
 
-**What it does not do:** scaffold the Terraform root, remove the old one, or
-follow the serial into `tests/` and the guides. It prints those as next steps
-rather than pretending to be complete.
+**What it does.** Beyond the catalog and the intents: scaffolds the new device
+Terraform root, removes the old one (including the gitignored files `git rm`
+leaves behind), and follows the serial through `tests/` and the guides — the
+files that change no behaviour and break CI anyway.
+
+`docs/adr/` and `evidence/` are never rewritten. An ADR records a decision made
+at a time; an evidence bundle records a change that really happened.
+
+**The one thing it will not do without asking:** delete the replaced device's
+Terraform state. `--prune-state` opts in. It is off by default because it is
+irreversible and **remote** — the difference between editing your repository and
+reaching into your cloud account to destroy a record. The bucket comes from a
+root's `backend.hcl` rather than a guess.
 
 ## Device lifecycle
 

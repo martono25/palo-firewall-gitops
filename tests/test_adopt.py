@@ -216,3 +216,94 @@ def test_the_blank_lines_between_roles_survive():
     text = out["catalog/interfaces.yaml"]
     assert text.count("\n\n") == INTERFACES.count("\n\n"), (
         "the blank lines separating roles must be preserved exactly")
+
+
+# ── following the serial into the files that only break CI ─────────────────
+from fwgitops.adopt import NEVER_FOLLOW, follow_serial   # noqa: E402
+
+
+def test_the_serial_is_followed_into_tests_and_guides():
+    """Seventy-six references across seventeen files on this deployment. They do
+    not change behaviour — fixtures and prose — but they break CI, so an operator
+    who has done everything else right still opens a pull request that cannot
+    merge. That was the last manual step of the seventeen."""
+    out = follow_serial("OLD-1", "NEW-2", {
+        "tests/test_kinds.py": 'serial = "OLD-1"',
+        "docs/building-a-folder.md": "the pilot OLD-1 was built",
+        "docs/cli-reference.md": "fwgitops push --device OLD-1",
+    })
+    assert set(out) == {"tests/test_kinds.py", "docs/building-a-folder.md",
+                        "docs/cli-reference.md"}
+    assert "NEW-2" in out["tests/test_kinds.py"] and "OLD-1" not in out["tests/test_kinds.py"]
+
+
+def test_ADRs_and_evidence_are_never_rewritten():
+    """An ADR records a decision made at a time; rewriting one is revisionism.
+    An evidence bundle is the audit trail of a change that really happened on a
+    firewall that really existed, and a rebuild does not un-happen it.
+
+    This is the exclusion most likely to be lost to a well-meaning "follow the
+    serial everywhere" refactor, so it is asserted rather than commented."""
+    out = follow_serial("OLD-1", "NEW-2", {
+        "docs/adr/0005-interfacerequest-folder-scope.md": "targeted OLD-1",
+        "evidence/device-OLD-1/REQ-1.json": '{"serial": "OLD-1"}',
+        "tests/test_kinds.py": 'serial = "OLD-1"',
+    })
+    assert set(out) == {"tests/test_kinds.py"}, (
+        f"only supporting files may follow the serial; got {sorted(out)}")
+    for skip in NEVER_FOLLOW:
+        assert not any(p.startswith(skip) for p in out)
+
+
+def test_a_file_without_the_serial_is_left_alone():
+    """Rewriting every file in `tests/` and `docs/` would produce a diff nobody
+    can review, which is how a real change hides."""
+    assert follow_serial("OLD-1", "NEW-2", {"tests/x.py": "nothing here"}) == {}
+
+
+# ── what the command does, and the one thing it refuses to ─────────────────
+def test_state_deletion_is_opt_in_and_everything_else_is_not():
+    """FIVE STEPS WERE LEFT MANUAL; FOUR ARE NOW AUTOMATIC. Scaffolding the new
+    root, removing the old one, and following the serial through `tests/` and the
+    guides are all local, reversible and mechanical — exactly the kind of work a
+    command should absorb.
+
+    DELETING TERRAFORM STATE IS NOT. It is irreversible and REMOTE: the
+    difference between "this command edits my repository" and "this command
+    reaches into my cloud account and destroys a record". So it is `--prune-state`
+    rather than a default, and without the flag the command prints the one-liner.
+
+    The bucket is read from a backend.hcl rather than guessed — deleting from the
+    wrong bucket is not a mistake worth risking to save a flag."""
+    import inspect
+    from fwgitops.cli import run_adopt_device, _state_bucket
+    sig = inspect.signature(run_adopt_device).parameters
+    assert "prune_state" in sig and sig["prune_state"].default is False, (
+        "state deletion must be opt-in")
+
+    src = inspect.getsource(run_adopt_device)
+    assert "run_scaffold_root" in src, "the new Terraform root is scaffolded"
+    assert "shutil.rmtree" in src, "the old root is removed, gitignored files included"
+    assert "follow_serial" in src, "the serial is followed into tests/ and docs/"
+    assert "irreversible" in src, "and the one exception says why it is one"
+
+    assert "return None" in inspect.getsource(_state_bucket), (
+        "an unreadable backend must yield None rather than a guessed bucket")
+
+
+def test_the_root_work_does_not_depend_on_the_catalog_changing():
+    """A device can be correctly declared and still have NO Terraform root —
+    which was the bug in the first version: the command returned "nothing to
+    change" before it ever looked, so adopting a device whose catalog already
+    matched left it without a root.
+
+    `scaffold-root` also refuses an existing root on purpose (main.tf is written
+    once), so this asks whether the root exists rather than calling it and
+    treating the refusal as a failure."""
+    import inspect
+    from fwgitops.cli import run_adopt_device
+    src = inspect.getsource(run_adopt_device)
+    assert "not changes and not root_work" in src, (
+        "the early return must consider the roots, not only the catalog")
+    assert "if not new_root.exists():" in src, (
+        "scaffold-root refuses an existing root; ask before calling it")
