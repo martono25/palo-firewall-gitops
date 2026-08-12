@@ -9,6 +9,8 @@ at 3am with a firewall in front of them.
 
 from __future__ import annotations
 
+import re
+
 import ipaddress
 from pathlib import Path
 
@@ -45,11 +47,42 @@ def _route(rid, dest, nexthop="10.100.2.1"):
     )
 
 
+
+def _named_for_id(name, body):
+    """The file name a body's `metadata.id` requires.
+
+    Fixtures used short names (`A.yaml`) while their bodies declared ids like
+    `REQ-1`. The product rejects that — the id names the rule in SCM and the
+    evidence file, the file name is what a human searches, and they drifted live
+    on 2026-08-11. A fixture that ignores the rule under test stops modelling
+    reality, so the name is derived and the dict key is only a label.
+
+    PARSED, NOT PATTERN-MATCHED. The first version used a regex for `^  id:` and
+    silently returned the original name for every fixture writing `metadata:
+    {id: …}` in flow style — which was most of them, so 42 tests stayed red and
+    looked like the product was wrong.
+    """
+    import yaml as _yaml
+    try:
+        doc = _yaml.safe_load(body) or {}
+        rid = (doc.get("metadata") or {}).get("id")
+    except Exception:  # noqa: BLE001 - a deliberately malformed fixture keeps its name
+        return name
+    return f"{rid}.yaml" if rid else name
+
+
+def _named_write(directory, body):
+    """Write under the name the body's id requires — see `_named_for_id`."""
+    p = directory / _named_for_id("unused.yaml", body)
+    p.write_text(body)
+    return p
+
+
 def _setup(tmp_path, files):
     root = tmp_path / "intent" / "prod"
     root.mkdir(parents=True, exist_ok=True)
     for name, body in files.items():
-        (root / name).write_text(body)
+        (root / _named_for_id(name, body)).write_text(body)
     env = tmp_path / "env.yaml"
     env.write_text(ENV)
     return tmp_path / "intent", env
@@ -64,7 +97,7 @@ def _run(tmp_path, files, query, **kw):
 def test_a_host_inside_a_declared_CIDR_is_found(tmp_path, capsys):
     """What grep cannot do. The intent never contains the string `10.20.1.55`."""
     intent_root, env = _setup(tmp_path, {"A.yaml": _rule("REQ-1")})
-    assert "10.20.1.55" not in (intent_root / "prod" / "A.yaml").read_text(), (
+    assert "10.20.1.55" not in (intent_root / "prod" / "REQ-1.yaml").read_text(), (
         "the fixture must NOT contain the query literally, or this proves nothing")
     assert run_where("10.20.1.55", intent_root, env) == 0
     o = capsys.readouterr().out
@@ -175,7 +208,7 @@ def test_an_app_backed_rule_is_found_by_the_apps_ADDRESS(tmp_path, capsys):
     rule — precisely the indirection the catalog exists to provide."""
     root = tmp_path / "intent" / "prod"
     root.mkdir(parents=True)
-    (root / "A.yaml").write_text(
+    _named_write(root, 
         "apiVersion: fw-intent/v1\n"
         "kind: AccessRequest\n"
         "metadata: {id: REQ-APP, requester: m@corp, ticket: J-1, justification: x,"
@@ -191,7 +224,7 @@ def test_an_app_backed_rule_is_found_by_the_apps_ADDRESS(tmp_path, capsys):
     apps = tmp_path / "apps.yaml"
     apps.write_text("apps:\n  payments: {environment: prod, zone: local, "
                     "addresses: [10.77.3.0/24]}\n")
-    assert "10.77.3" not in (root / "A.yaml").read_text()
+    assert "10.77.3" not in (root / "REQ-APP.yaml").read_text()
 
     rc = run_where("10.77.3.42", tmp_path / "intent", env, app_catalog_path=apps)
     o = capsys.readouterr().out

@@ -5,6 +5,39 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — a file name that disagrees with `metadata.id` is now rejected
+
+Found live 2026-08-11. `intent/prod/payments/REQ-2026-0813.yaml` declared
+`id: REQ-2026-0812`, and **nothing rejected it** — it compiled, tiered LOW,
+auto-applied and pushed as `job=204`.
+
+The id is the identity everywhere downstream: it names the rule in SCM, it is the
+evidence path (`evidence/prod-edge/REQ-2026-0812.json`), and it is what
+`fwgitops where` searches. The file name is what a human looks under. So the rule
+was deployed under an id nobody would guess from the file, and
+`fwgitops where REQ-2026-0813` — the id a reader would type, having read the
+filename — returned nothing. The incident-response command could not find a rule
+this repository had authorised.
+
+Two files could also claim one id, the second silently overwriting the first's
+evidence.
+
+Checked in **all three** load loops — compile, classify, and the shared path
+behind evidence and drift — with a test that asserts the pattern in the source
+rather than exercising three commands and hoping there is no fourth. Fixing one
+call site and leaving another has been this project's most repeated defect.
+
+The live file is renamed to `REQ-2026-0812.yaml`, following the deployed id
+rather than the other way round: the rule exists in SCM under that name and its
+evidence bundle is already on `main`. Renaming the file changes no compiled
+output, so the next apply is a no-op.
+
+**Fixture churn was the real cost.** Around fifty test fixtures wrote intents
+under short names (`A.yaml` holding `id: REQ-1`) — a state the product now
+forbids. They derive the name from the body instead. A fixture that constructs
+an impossible state has stopped modelling the system.
+
+
 ### Changed — the pilot drops to 4 vCPU, and the reason is the interface naming
 
 `m5.xlarge`, 4 vCPU, 4 ENIs. The 16-vCPU instance was never about CPU: an ENI

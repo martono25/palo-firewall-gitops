@@ -4,11 +4,29 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
 from fwgitops.cli import run_compile
 
+
+
+def _write_intent(directory, body, **_ignored):
+    """Write an intent under the name its `metadata.id` requires.
+
+    The product rejects a file whose name disagrees with its id (found live
+    2026-08-11: `REQ-2026-0813.yaml` declared `REQ-2026-0812`, applied, and left
+    the rule unfindable by the id a human would type). Fixtures used short names
+    like `ZONE.yaml` for readability, which the rule now forbids — so the name is
+    derived and callers stop choosing one.
+    """
+    import yaml as _y
+    doc = _y.safe_load(body) or {}
+    rid = (doc.get("metadata") or {}).get("id")
+    p = directory / ((str(rid) + ".yaml") if rid else "REQ.yaml")
+    p.write_text(body)
+    return p
 VALID_INTENT = """\
 apiVersion: fw-intent/v1
 kind: AccessRequest
@@ -34,7 +52,18 @@ spec:
 ENV_MAP = "prod:\n  folder: prod-edge\n  from_zone: trust\n  to_zone: app\n"
 
 
-def _setup(tmp_path: Path, intent_body: str = VALID_INTENT, name: str = "REQ.yaml") -> tuple:
+def _setup(tmp_path: Path, intent_body: str = VALID_INTENT,
+           name: Optional[str] = None) -> tuple:
+    """Write one intent under a temp tree.
+
+    `name` DEFAULTS TO THE ID IN THE BODY, because the file name and
+    `metadata.id` must agree — a fixture that ignores its own product rule is a
+    fixture that stops testing the thing. Pass `name` explicitly only when the
+    disagreement IS the test."""
+    import re as _re
+    if name is None:
+        m = _re.search(r"^  id:\s*(\S+)", intent_body, _re.M)
+        name = f"{m.group(1)}.yaml" if m else "REQ.yaml"
     intent_root = tmp_path / "intent" / "prod"
     intent_root.mkdir(parents=True)
     (intent_root / name).write_text(intent_body)
@@ -82,8 +111,8 @@ def test_unknown_environment_exits_2(tmp_path, capsys):
 
 def test_one_bad_file_blocks_the_whole_run(tmp_path):
     # A valid + an invalid intent: the run rejects, writes nothing (all-or-nothing).
-    intent_root, env_map, out = _setup(tmp_path, name="good.yaml")
-    (intent_root / "prod" / "bad.yaml").write_text(
+    intent_root, env_map, out = _setup(tmp_path)
+    _write_intent(intent_root / "prod", 
         VALID_INTENT.replace("id: REQ-2026-0417", "id: REQ-2026-0500").replace(
             "port: 443", "port: 70000"
         )
@@ -104,7 +133,7 @@ def test_example_files_are_skipped(tmp_path):
 def test_compile_rejects_undeclared_zone(tmp_path, capsys):
     root = tmp_path / "intent" / "prod"
     root.mkdir(parents=True)
-    (root / "REQ.yaml").write_text(
+    _write_intent(root, 
         "apiVersion: fw-intent/v1\n"
         "kind: AccessRequest\n"
         "metadata: {id: REQ-Z, requester: m@corp, ticket: J-1, justification: x, requested: 2026-07-27}\n"
@@ -133,7 +162,7 @@ def test_compile_rejects_undeclared_zone(tmp_path, capsys):
 def test_compile_zone_request_writes_zones_tfvars(tmp_path, capsys):
     root = tmp_path / "intent" / "prod"
     root.mkdir(parents=True)
-    (root / "ZONE.yaml").write_text(
+    _write_intent(root, 
         "apiVersion: fw-intent/v1\n"
         "kind: ZoneRequest\n"
         "metadata: {id: ZONE-1, requester: m@corp, ticket: J-1, justification: dmz, requested: 2026-07-27}\n"
@@ -184,7 +213,7 @@ def _second_intent_same_zone_pair(intent_root):
     # neither rule is a "novel zone-pair" -> both classify on stateless merits.
     body = VALID_INTENT.replace("REQ-2026-0417", "REQ-2026-0999").replace(
         "10.20.1.0/24", "10.20.5.0/24")
-    (intent_root / "prod" / "REQ2.yaml").write_text(body)
+    _write_intent(intent_root / "prod", body)
 
 
 def test_classify_rejects_invalid_intent_exits_2(tmp_path, capsys):
@@ -450,7 +479,7 @@ def test_compile_rejects_a_zone_request_colliding_with_a_baseline_zone(tmp_path,
     call site from run_compile leaves the whole suite green."""
     root = tmp_path / "intent" / "prod"
     root.mkdir(parents=True)
-    (root / "ZONE.yaml").write_text(
+    _write_intent(root, 
         "apiVersion: fw-intent/v1\n"
         "kind: ZoneRequest\n"
         "metadata: {id: ZONE-1, requester: m@corp, ticket: J-1, justification: dup,"
@@ -472,7 +501,7 @@ def test_duplicate_zone_key_reports_and_exits_2_not_a_traceback(tmp_path, capsys
     root = tmp_path / "intent" / "prod"
     root.mkdir(parents=True)
     for n in (1, 2):
-        (root / f"Z{n}.yaml").write_text(
+        _write_intent(root, 
             "apiVersion: fw-intent/v1\nkind: ZoneRequest\n"
             f"metadata: {{id: ZONE-{n}, requester: m@corp, ticket: J-{n},"
             " justification: dup, requested: 2026-07-27}\n"
@@ -491,7 +520,7 @@ ZONE_SEC_ENV = "prod:\n  folder: prod-edge\n  from_zone: local\n  to_zone: inter
 
 
 def _write_zone(root, zid, zone, extra=""):
-    (root / f"{zid}.yaml").write_text(
+    _write_intent(root, 
         "apiVersion: fw-intent/v1\nkind: ZoneRequest\n"
         f"metadata: {{id: {zid}, requester: m@corp, ticket: J-1,"
         " justification: x, requested: 2026-08-02}\n"
@@ -563,7 +592,7 @@ def test_classify_uses_the_zone_snapshot_scope_not_the_defining_folder(tmp_path,
     matches its declaration and the state-aware checks silently never fire."""
     import json
     root = tmp_path / "intent" / "prod"; root.mkdir(parents=True)
-    (root / "Z.yaml").write_text(
+    _write_intent(root, 
         "apiVersion: fw-intent/v1\nkind: ZoneRequest\n"
         "metadata: {id: Z1, requester: m@corp, ticket: J-1, justification: x,"
         " requested: 2026-08-02}\n"
@@ -713,7 +742,7 @@ def test_removing_the_last_intent_of_a_kind_removes_its_tfvars_file(tmp_path):
     """
     intents = tmp_path / "intent" / "prod"
     intents.mkdir(parents=True)
-    (intents / "ZONE.yaml").write_text(_zone_intent())
+    zone_file = _write_intent(intents, _zone_intent())
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP)
     out = tmp_path / "terraform"
@@ -722,8 +751,8 @@ def test_removing_the_last_intent_of_a_kind_removes_its_tfvars_file(tmp_path):
     zones = out / "prod-edge" / "zones.auto.tfvars.json"
     assert zones.exists()
 
-    (intents / "ZONE.yaml").unlink()
-    (intents / "RULE.yaml").write_text(VALID_INTENT)          # keep the folder alive
+    zone_file.unlink()
+    _write_intent(intents, VALID_INTENT)          # keep the folder alive
     assert run_compile(tmp_path / "intent", env_map, out, require_terraform_root=False) == 0
     assert not zones.exists(), "stale zones tfvars survived — the zone would be re-asserted"
 
@@ -734,7 +763,7 @@ def test_a_scope_that_loses_every_intent_is_swept_too(tmp_path):
     so that directory is never visited unless the sweep looks wider."""
     intents = tmp_path / "intent" / "prod"
     intents.mkdir(parents=True)
-    (intents / "ZONE.yaml").write_text(_zone_intent())
+    zone_file = _write_intent(intents, _zone_intent())
     (tmp_path / "other").mkdir()
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP)
@@ -746,10 +775,10 @@ def test_a_scope_that_loses_every_intent_is_swept_too(tmp_path):
 
     # every intent gone for prod-edge, but ANOTHER folder still compiles, so the
     # run does not take the "no intent files" early exit
-    (intents / "ZONE.yaml").unlink()
+    zone_file.unlink()
     other = tmp_path / "intent" / "staging"
     other.mkdir()
-    (other / "ZONE.yaml").write_text(_zone_intent(zone="dmz2").replace(
+    _write_intent(other, _zone_intent(zone="dmz2").replace(
         "environment: prod", "environment: staging"))
     env_map.write_text(ENV_MAP + "staging:\n  folder: staging-edge\n"
                        "  from_zone: local\n  to_zone: internet\n")
@@ -764,7 +793,7 @@ def test_the_sweep_never_deletes_a_file_the_compiler_does_not_own(tmp_path):
     file we did not write is not cleanup, it is data loss."""
     intents = tmp_path / "intent" / "prod"
     intents.mkdir(parents=True)
-    (intents / "RULE.yaml").write_text(VALID_INTENT)
+    _write_intent(intents, VALID_INTENT)
     env_map = tmp_path / "environments.yaml"
     env_map.write_text(ENV_MAP)
     out = tmp_path / "terraform"
@@ -800,7 +829,7 @@ def _compile_into(tmp_path, folder, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     intents = tmp_path / "intent" / "prod"
     intents.mkdir(parents=True)
-    (intents / "R.yaml").write_text(VALID_INTENT)
+    _write_intent(intents, VALID_INTENT)
     env_map = tmp_path / "env.yaml"
     env_map.write_text(f"prod:\n  folder: {folder}\n  from_zone: trust\n  to_zone: app\n")
     rc = run_compile(tmp_path / "intent", env_map, tmp_path / "terraform",
@@ -936,7 +965,7 @@ def test_a_push_record_is_matched_by_SCOPE_not_by_scm_address(tmp_path):
     the same string, so both keyings pass. It takes a device."""
     from fwgitops.cli import run_evidence
     intent_root, env_map, _ = _setup(tmp_path)
-    (intent_root / "prod" / "IF.yaml").write_text(DEVICE_INTENT)
+    _write_intent(intent_root / "prod", DEVICE_INTENT)
 
     rec = tmp_path / "push-device.json"
     rec.write_text(json.dumps({
@@ -1035,7 +1064,7 @@ def test_a_baseline_is_read_with_the_catalog_that_shipped_with_it(tmp_path):
 
     before, after = _catalog_pair(tmp_path)
     base_intent, env_map, _ = _setup(tmp_path / "before")
-    (base_intent / "prod" / "IF.yaml").write_text(DEVICE_INTENT)   # names …894453
+    _write_intent(base_intent / "prod", DEVICE_INTENT)   # names …894453
     cur_intent, _, _ = _setup(tmp_path / "after")                   # the device is gone
 
     msg = tmp_path / "msg.txt"
@@ -1052,3 +1081,47 @@ def test_a_baseline_is_read_with_the_catalog_that_shipped_with_it(tmp_path):
     # WITH it: the baseline is judged by its own catalog and the run proceeds.
     assert run_classify(cur_intent, env_map, baseline_catalog_dir=before, **kw) == 0, (
         "a baseline read with its own catalog must classify cleanly")
+
+
+# ── THE FILE NAME AND THE ID ARE ONE FACT ──────────────────────────────────
+MISMATCHED = VALID_INTENT.replace("id: REQ-2026-0417", "id: REQ-2026-9999")
+
+
+def test_a_filename_that_disagrees_with_the_id_is_rejected(tmp_path, capsys):
+    """FOUND LIVE 2026-08-11. `REQ-2026-0813.yaml` declared `id: REQ-2026-0812`
+    and nothing rejected it — it compiled, tiered LOW, auto-applied and pushed.
+
+    The ID is the identity everywhere downstream: it names the rule in SCM, it is
+    the evidence path, and it is what `fwgitops where` searches. The FILE NAME is
+    what a human looks under. When they disagree, the rule is unfindable by the
+    id a reader would type, and two files can silently claim one id — the second
+    overwriting the first's evidence."""
+    intent_root, env_map, out = _setup(tmp_path, MISMATCHED,
+                                       name="REQ-2026-0417.yaml")   # body says 9999
+    assert run_compile(intent_root, env_map, out, require_terraform_root=False) == 2
+    err = capsys.readouterr().err
+    assert "REQ-2026-9999" in err and "REQ-2026-0417" in err, (
+        "name both sides — the reader has to decide which one was intended")
+    assert not (out / "prod-edge").exists(), "fail closed: nothing written"
+
+
+def test_EVERY_load_loop_checks_the_filename(tmp_path):
+    """Three separate loops read intents — compile, classify and the shared
+    `_compile_intents` behind evidence and drift. Adding the check to the one I
+    happened to be editing is the defect that has recurred all week: tier routing
+    shipped inert, `push --record` had no producer, `pr-validate` never got the
+    baseline catalog.
+
+    So this asserts the PATTERN in the source rather than testing three commands
+    and hoping there is no fourth."""
+    import re
+    from pathlib import Path as _P
+    src = (_P(__file__).resolve().parents[1] / "src" / "fwgitops" / "cli.py").read_text()
+    loads = [m.start() for m in re.finditer(r"= load_intent\(doc, env_map=env_map", src)]
+    assert loads, "expected the intent load sites to be findable"
+    for pos in loads:
+        window = src[pos:pos + 400]
+        assert "_id_matches_filename" in window, (
+            f"a load site at offset {pos} does not check the filename against "
+            f"metadata.id; every one must, or the check depends on which "
+            f"command you happen to run")
