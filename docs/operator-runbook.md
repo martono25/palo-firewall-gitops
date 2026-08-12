@@ -487,13 +487,20 @@ both times by deleting the default route and polling the device:
 | Date | Push reported success | Route gone from the forwarding table |
 |---|---|---|
 | 2026-08-06 | — | about **40 s** later |
-| 2026-08-12 | 15:00:10 | still present at 15:00:19, gone by 15:00:58 — **between 9 s and 48 s** |
+| 2026-08-12 | 15:00:10 | route DELETED: still present at 15:00:19, gone by 15:00:58 — **between 9 s and 48 s** |
+| 2026-08-12 | 15:25:54 | zone + route CREATED: absent at 15:27:15, both present by 15:29:19 — **between 1 m 20 s and 3 m 25 s** |
 
-Treat this as *tens of seconds*, not as a number you can wait out. The second
-run polled over SSH and each poll took long enough to leave a 39-second gap, so
-it is a second sample of the same order of magnitude rather than a confirmation
-of "40". Anything asserting "it is live" has to poll the device — that is the
-point of the range, not a caveat on it.
+**Seconds to minutes, and do not treat the low end as typical.** The third row
+is the one that matters operationally: a restore of two folder-scope objects
+took over a minute to appear and possibly three, so an operator who polls for
+sixty seconds and concludes the push failed would be wrong, and a dispatched
+"fix" for a change that was merely still in flight is how a duplicate or a
+silent deletion gets made.
+
+The ranges are wide because each SSH poll takes ten to twenty seconds; these are
+bounds, not measurements. What all three runs agree on is the only thing worth
+relying on: **a green push does not mean the device has the change, and the only
+way to know is to poll the device until it does.**
 
 ```bash
 fwgitops device-sync
