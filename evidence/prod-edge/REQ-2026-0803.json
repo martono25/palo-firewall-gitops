@@ -1,7 +1,7 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31609625690"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31611888283"
   },
   "approval": {
     "approvers": [
@@ -11,8 +11,8 @@
       }
     ],
     "gate": null,
-    "merge_commit": "e0cc1559061ca567cd4aaf390a2a5ef6296cb34a",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/174"
+    "merge_commit": "36e845e6b3e96ddec5c7a62936bbeb1543f59cc8",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/179"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -30,14 +30,13 @@
         "$eth-internet"
       ]
     },
-    "object_is": "the LAST APPLIED state, from the baseline tree",
     "object_sha256": "a385dd402a8ab8093d3b97239ef7b951967554105dd57373620f759b4dbdef18",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "routers.auto.tfvars.json",
-    "tfvars_sha256": null
+    "tfvars_sha256": "e7a5da73e0222090b4e604d669f8317467138b33a0668bf97bb98131f652e0bd"
   },
   "controls": [
     "AC-4",
@@ -48,41 +47,36 @@
     "CM-5"
   ],
   "controls_not_evidenced": [],
-  "generated_at": "2026-08-12T15:00:17Z",
+  "generated_at": "2026-08-12T15:25:59Z",
   "kind": "RouteRequest",
   "push": {
     "admin_count": 1,
     "all_admins": false,
     "folder": "prod-edge",
-    "job_id": "221",
+    "job_id": "228",
     "status": "success"
-  },
-  "removal": {
-    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
-    "commit": "e0cc1559061ca567cd4aaf390a2a5ef6296cb34a",
-    "ticket": "JIRA-9312"
   },
   "req_id": "REQ-2026-0803",
   "request": {
     "intent_file": "intent/prod/edge-fw-2404/REQ-2026-0803.yaml",
-    "intent_sha256": "7041eeb8f052b41be7aa92c006675de1810ef712be33381cce412e22a65759b1",
+    "intent_sha256": "3ed6ee8ac9a7f3c5935bbaae2c906fc3d0b521147302dcdfbfd019c7dda8acd2",
     "justification": "Day-1 build for edge firewall fw-prod-edge-4453: default route out the untrust interface so the firewall can forward unmatched traffic. Completes the ADR-0002 Day-1 chain (Interface -> Zone -> Route) on hardware.",
-    "requested": "2026-08-13",
+    "requested": "2026-08-12",
     "requester": "martono@corp",
-    "ticket": "JIRA-912"
+    "ticket": "JIRA-9320"
   },
   "risk": {
     "checks_fired": [
       {
-        "check": "route_removed",
-        "reason": "removes a static route (REQ-2026-0803). Traffic that used it stops forwarding or falls to a different next hop. Nothing refuses this: unlike a zone, a router with one fewer route is still a valid object.",
+        "check": "default_route",
+        "reason": "route 'REQ-2026-0803' is a DEFAULT route (0.0.0.0/0) via '10.100.2.1' \u2014 it decides where all unmatched traffic goes",
         "tier": "HIGH"
       }
     ],
-    "classifier_version": "1.0.0",
-    "thresholds_version": null,
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
     "tier": "HIGH"
   },
   "schema": "fw-evidence/v2",
-  "status": "removed"
+  "status": "applied"
 }
