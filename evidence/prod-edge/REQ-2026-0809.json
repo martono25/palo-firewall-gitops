@@ -1,18 +1,13 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31705456924"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31706505608"
   },
   "approval": {
-    "approvers": [
-      {
-        "login": "martono25",
-        "via": "deployment_gate"
-      }
-    ],
+    "approvers": [],
     "gate": null,
-    "merge_commit": "39b715a149e264924970bf81e62d1cd421df0fb6",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/193"
+    "merge_commit": "efd4779434fe8e90790ae0fa79b9f8b130c15b54",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/195"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -27,12 +22,12 @@
           "value": "10.20.20.10/32"
         },
         {
-          "name": "addr-5cbf6964f2",
+          "name": "addr-a102bfc799",
           "tags": [
             "gitops:managed"
           ],
           "type": "ip-netmask",
-          "value": "10.20.0.0/16"
+          "value": "10.20.1.55/32"
         }
       ],
       "rule": {
@@ -45,7 +40,7 @@
         ],
         "description": null,
         "destinations": [
-          "addr-5cbf6964f2"
+          "addr-a102bfc799"
         ],
         "from_zones": [
           "local"
@@ -72,7 +67,7 @@
           "gitops:managed",
           "gitops:req:REQ-2026-0809",
           "gitops:section:specific-allow",
-          "gitops:ticket:JIRA-21010"
+          "gitops:ticket:JIRA-21011"
         ],
         "target_rule": null,
         "to_zones": [
@@ -81,48 +76,47 @@
       },
       "service_objects": []
     },
-    "object_sha256": "3144959d7e0a9091d6b61d8d3dbc90ec1752c3787d4ea355e6c4599e13843761",
+    "object_sha256": "10f35652a835da82561bc86ff4ac0f5cf3a852327d2ea56aeaa450f32d5c9599",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "248b85664b657ab62d02c1f5c13966f5717238917b6628f0d42b4190301807dc"
+    "tfvars_sha256": "91a13fc64470b9197b312757173499ef791471e979d8f8e1cac5a1c04f76fbf1"
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7",
-    "CM-5"
+    "SC-7"
   ],
-  "controls_not_evidenced": [],
-  "generated_at": "2026-08-13T13:35:58Z",
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-13T13:47:19Z",
   "kind": "AccessRequest",
   "push": {
     "admin_count": 1,
     "all_admins": false,
     "folder": "prod-edge",
-    "job_id": "237",
+    "job_id": "240",
     "status": "success"
   },
   "req_id": "REQ-2026-0809",
   "request": {
     "intent_file": "intent/prod/observability/REQ-2026-0809.yaml",
-    "intent_sha256": "1f5c5a982c6d5b73375129c084dc6202dddea70142e73940592c44df1c87eeac",
-    "justification": "Estate-wide availability sweep: the collector must ping every host in 10.20.0.0/16. Same change that failed on 2026-08-13; re-run to prove ADR-0010 fixed it",
+    "intent_sha256": "6dac5263ce091f1b940ee0f6f6ad942200405424d1705f3920d273c6d2f8d223",
+    "justification": "Withdraw the estate-wide sweep. It was widened to prove ADR-0010 fixed the update path; that is proven, and the collector only needs the one host that answers",
     "requested": "2026-08-13",
     "requester": "martono@corp",
-    "ticket": "JIRA-21010"
+    "ticket": "JIRA-21011"
   },
   "risk": {
     "checks_fired": [
-      {
-        "check": "broad_destination",
-        "reason": "destination /16 is broader than /16",
-        "tier": "HIGH"
-      },
       {
         "check": "allow_without_inspection",
         "reason": "allow rule has no security profile group \u2014 traffic is permitted without threat inspection",
@@ -131,7 +125,7 @@
     ],
     "classifier_version": "1.0",
     "thresholds_version": "2026-07-26",
-    "tier": "HIGH"
+    "tier": "LOW"
   },
   "schema": "fw-evidence/v2",
   "status": "applied"
