@@ -1,18 +1,13 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31322822785"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31669392104"
   },
   "approval": {
-    "approvers": [
-      {
-        "login": "martono25",
-        "via": "deployment_gate"
-      }
-    ],
+    "approvers": [],
     "gate": null,
-    "merge_commit": "9ec84849fc66abbdb36eecd8fbb2cc82ee676da6",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/112"
+    "merge_commit": "68ead40469b0a03a16f437158ffd1918500cb2ba",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/185"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -27,12 +22,12 @@
           "value": "10.20.20.10/32"
         },
         {
-          "name": "addr-85c1076cfe",
+          "name": "addr-a102bfc799",
           "tags": [
             "gitops:managed"
           ],
           "type": "ip-netmask",
-          "value": "10.20.1.0/24"
+          "value": "10.20.1.55/32"
         }
       ],
       "rule": {
@@ -45,7 +40,7 @@
         ],
         "description": null,
         "destinations": [
-          "addr-85c1076cfe"
+          "addr-a102bfc799"
         ],
         "from_zones": [
           "local"
@@ -72,7 +67,7 @@
           "gitops:managed",
           "gitops:req:REQ-2026-0809",
           "gitops:section:specific-allow",
-          "gitops:ticket:JIRA-20809"
+          "gitops:ticket:JIRA-21001"
         ],
         "target_rule": null,
         "to_zones": [
@@ -81,34 +76,44 @@
       },
       "service_objects": []
     },
-    "object_sha256": "d68a4178ac82e605022afe5ce08e8814afaebb7d9ab9e7a5fb969fc18abac23e",
+    "object_sha256": "7715b060079ed3ce0ffd610fd2d2feb1dc5472faef62019797c9c396dab72e65",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "d34f2926552e6987a7c867cc5c31ae321e3efe5edbce0d33bcae184b9fd06451"
+    "tfvars_sha256": "35b26f8477eeda054697251fda7cea89e276e009f57142733fe7844b828e2df7"
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7",
-    "CM-5"
+    "SC-7"
   ],
-  "controls_not_evidenced": [],
-  "generated_at": "2026-08-09T16:09:35Z",
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-13T05:12:07Z",
   "kind": "AccessRequest",
-  "push": null,
+  "push": {
+    "admin_count": 1,
+    "all_admins": false,
+    "folder": "prod-edge",
+    "job_id": "231",
+    "status": "success"
+  },
   "req_id": "REQ-2026-0809",
   "request": {
     "intent_file": "intent/prod/observability/REQ-2026-0809.yaml",
-    "intent_sha256": "2c33e88addc8d6d75544b2cc0ce6b896409c428169463384b4be0b5aaf8fa5bc",
-    "justification": "Observability collector must ping the web tier to distinguish a dead host from a dead service",
-    "requested": "2026-08-09",
+    "intent_sha256": "e27004897f376ff1fb8bb514f20c12bff3519ab94bb1b9b192d55754c0539630",
+    "justification": "Narrow the collector ping to the one host that answers it \u2014 the rest of the tier never needed to be reachable",
+    "requested": "2026-08-13",
     "requester": "martono@corp",
-    "ticket": "JIRA-20809"
+    "ticket": "JIRA-21001"
   },
   "risk": {
     "checks_fired": [
