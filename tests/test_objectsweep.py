@@ -233,6 +233,41 @@ def test_referenced_names_reads_every_referrer_collection():
             assert f"seen-{i}" in used, f"{kind} must read all its referrers"
 
 
+#: How each referrer path was shown to exist. A path in REFERRER_PATHS with no
+#: entry here is one somebody inferred.
+PATH_PROVENANCE = {
+    "/config/security/v1/security-rules": "read by the tag sweep on every apply",
+    "/config/objects/v1/address-groups": "read by the tag sweep on every apply",
+    "/config/objects/v1/service-groups": "read by the tag sweep on every apply",
+    "/config/network/v1/nat-rules":
+        "probed against the live tenant 2026-08-13 (run 31708096023): 200 OK, "
+        "while the inferred /config/nat/v1/nat-rules returned 404",
+}
+
+
+def test_every_referrer_path_has_RECORDED_PROVENANCE():
+    """A referrer path that does not exist fails one of two ways, both bad.
+
+    404 makes the sweep raise and never run — which is what
+    `/config/nat/v1/nat-rules`, invented from the shape of the others, did on
+    the first live run. Or a path returns something unexpected, contributes no
+    references, and an object in use gets deleted.
+
+    So every path must have been SHOWN to exist, and how must be written down.
+    The rule this replaces was "only paths the tag sweep already reads", which
+    was right until a genuinely needed path was not one of them — at which point
+    a rule that cannot express "probed, and here is the run" would have been
+    satisfied by inferring one instead.
+    """
+    from fwgitops.objectsweep import REFERRER_PATHS
+
+    used = {p for paths in REFERRER_PATHS.values() for p in paths}
+    undocumented = sorted(used - set(PATH_PROVENANCE))
+    assert not undocumented, (
+        f"these referrer paths have no recorded provenance, so nothing shows "
+        f"they exist: {undocumented}")
+
+
 def test_referrer_paths_are_ONLY_paths_the_tag_sweep_already_proves():
     """A referrer path that does not exist fails one of two ways, both bad.
 
@@ -248,10 +283,11 @@ def test_referrer_paths_are_ONLY_paths_the_tag_sweep_already_proves():
     from fwgitops.objectsweep import REFERRER_PATHS
     from fwgitops.tagsweep import REFERRER_PATHS as PROVEN
 
-    unproven = {p for paths in REFERRER_PATHS.values() for p in paths} - set(PROVEN)
+    unproven = ({p for paths in REFERRER_PATHS.values() for p in paths}
+                - set(PROVEN) - set(PATH_PROVENANCE))
     assert not unproven, (
-        f"these referrer paths are not exercised by the tag sweep, so nothing "
-        f"proves they exist: {sorted(unproven)}")
+        f"these referrer paths are neither exercised by the tag sweep nor "
+        f"documented as probed: {sorted(unproven)}")
 
 
 def test_an_object_collection_is_NOT_a_referrer_for_its_own_kind():

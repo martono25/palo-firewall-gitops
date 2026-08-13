@@ -59,7 +59,11 @@ jobs:
           from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
 
           session = ScmSession(ScmCredentials.from_env())
-          scope = {"folder": os.environ["SCOPE"], "limit": 1}
+          # limit=500, not 1. A limit of 1 answers "does this path exist" but
+          # NOT "what does everything at it reference" — and the second question
+          # is the one that decides whether a sweep is safe. The first run of
+          # this probe reported "1 row" and it was the limit talking.
+          scope = {"folder": os.environ["SCOPE"], "limit": 500}
 
           print(f"{'path':<45} result")
           print("-" * 70)
