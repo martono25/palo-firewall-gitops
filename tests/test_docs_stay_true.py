@@ -150,7 +150,7 @@ def test_every_new_doc_is_reachable_from_the_README():
     """An undiscoverable document is an unread one."""
     readme = (REPO_ROOT / "README.md").read_text()
     for name in ("cli-reference.md", "operator-runbook.md", "assessor-guide.md",
-                 "removing-things.md"):
+                 "removing-things.md", "changing-a-rule.md"):
         assert name in readme, f"docs/{name} must be linked from README.md"
 
 
@@ -780,3 +780,28 @@ def test_every_ADR_is_listed_in_the_ADR_index():
     missing = sorted(f for f in files if f not in index)
     assert not missing, (
         f"these ADRs exist and are not linked from docs/adr/README.md: {missing}")
+
+
+def test_the_change_guide_states_the_THREE_things_an_edit_must_move():
+    """A changed rule that keeps its original ticket is rejected, and a changed
+    `metadata.id` silently creates a SECOND rule while leaving the first in
+    place. Both were hit for real; neither is guessable.
+    """
+    guide = _flat(DOCS / "changing-a-rule.md").replace("*", "")
+
+    assert "NEVER change this" in guide, (
+        "changing metadata.id makes a new rule and leaves the old one live — "
+        "the guide must say so where the reader is editing")
+    assert "A change needs its own change ticket" in guide, (
+        "and must show the stale-ticket error, which is the first thing a "
+        "first-timer hits")
+
+
+def test_the_change_guide_grades_updates_by_DIRECTION():
+    """Measured twice on one rule: narrowing auto-applied at LOW, widening held
+    at HIGH. A reader who assumes 'it is only an edit' merges a widening and
+    walks away from a run that is waiting for them."""
+    guide = _flat(DOCS / "changing-a-rule.md").replace("*", "").replace("`", "")
+    assert "narrowing" in guide and "widening" in guide
+    assert "| LOW |" in guide and "| HIGH |" in guide, (
+        "the guide must state both grades, since only one of them stops")

@@ -25,6 +25,10 @@ provisioning.md  ->  building-a-folder.md  ->  requesting-rules.md  ->  operator
                       zones, routes)
 ```
 
+**Changing a rule that already exists** — a different address, port or range —
+behaves like neither adding nor removing, and has its own walkthrough:
+[`changing-a-rule.md`](docs/changing-a-rule.md).
+
 **Taking something back off a firewall** — a rule, a route, a zone, an interface
 address — is its own walkthrough, written for someone who has never used this
 system: [`removing-things.md`](docs/removing-things.md).
@@ -36,6 +40,7 @@ matters: [`operator-runbook.md` § Replacing a firewall](docs/operator-runbook.m
 | I want to… | Guide | Who |
 |---|---|---|
 | **Request a firewall rule** (write intent → PR) | [`docs/requesting-rules.md`](docs/requesting-rules.md) | any engineer |
+| **Change a rule that already exists** (step by step) | [`docs/changing-a-rule.md`](docs/changing-a-rule.md) | any engineer |
 | **Remove a rule, route, zone or address** (step by step) | [`docs/removing-things.md`](docs/removing-things.md) | any engineer |
 | **Provision a firewall** (stand up a VM-Series) | [`docs/provisioning.md`](docs/provisioning.md) | platform operator |
 | **Stand up a folder** (the Day-1 chain, end to end) | [`docs/building-a-folder.md`](docs/building-a-folder.md) | platform operator |
