@@ -12,8 +12,8 @@ kind: AccessRequest
 metadata:
   id: REQ-2026-0809
   requester: martono@corp
-  ticket: JIRA-21010
-  justification: "Estate-wide availability sweep: the collector must ping every host in 10.20.0.0/16. Same change that failed on 2026-08-13; re-run to prove ADR-0010 fixed it"
+  ticket: JIRA-21011
+  justification: "Withdraw the estate-wide sweep. It was widened to prove ADR-0010 fixed the update path; that is proven, and the collector only needs the one host that answers"
   requested: 2026-08-13
 spec:
   environment: prod
@@ -21,7 +21,7 @@ spec:
   source:
     - cidr: 10.20.20.10/32     # the collector
   destination:
-    - cidr: 10.20.0.0/16       # the whole estate, for the sweep
+    - cidr: 10.20.1.55/32      # the web host, not the whole estate
   service:
     - protocol: icmp
   log: true
