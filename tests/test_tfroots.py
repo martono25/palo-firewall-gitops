@@ -226,12 +226,25 @@ def test_the_tfvars_no_longer_carry_objects_terraform_does_not_manage():
     as a WARNING and discards the value. Emitting objects Terraform no longer
     manages would be exactly the silent discard the contract checks exist to
     prevent."""
-    from fwgitops.compiler import dumps_tfvars
     import json
 
-    payload = json.loads(dumps_tfvars(_compiled_changes()))
+    from fwgitops.compiler import dumps_tfvars
+    from fwgitops.kinds import REGISTRY
+
+    changes = _compiled_changes()
+    payload = json.loads(dumps_tfvars(changes))
     assert set(payload) == {"security_rules"}, (
         f"rules.auto.tfvars.json must carry rules only; got {sorted(payload)}")
+
+    # And the CONTRACT CHECK must validate the same payload the writer writes.
+    # It did not: the registry still pointed at the full aggregation while the
+    # writer emitted rules only, so `compile --check` rejected a file that was
+    # never going to contain what it was complaining about. Caught by CI on
+    # 2026-08-13, not by the suite.
+    registry_payload = REGISTRY["AccessRequest"].tfvars(changes)
+    assert set(registry_payload) == set(payload), (
+        "the registry's tfvars function and the file writer disagree — the "
+        "contract check would validate a payload nobody writes")
 
 
 def test_relative_position_has_NO_default_in_the_module_or_any_root():

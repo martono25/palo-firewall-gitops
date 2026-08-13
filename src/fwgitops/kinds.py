@@ -61,6 +61,7 @@ from fwgitops.compiler import (
     route_tfvars,
     scope_of as scope_of_compiled,
     to_tfvars,
+    to_tfvars_written,
     zone_tfvars,
 )
 from fwgitops.compiler import _compile_interface as _compile_interface_impl
@@ -193,7 +194,7 @@ REGISTRY: Dict[str, KindHandler] = {
         compiled_type=CompiledChange,
         compile=lambda req, env_map: compile_request(req, env_map),
         tfvars_filename="rules.auto.tfvars.json",
-        tfvars=to_tfvars,
+        tfvars=to_tfvars_written,
         scope_of=lambda c: scope_of_compiled(c.rule),
         name_of=lambda c: c.rule.name,
         classify=_rule_classify,

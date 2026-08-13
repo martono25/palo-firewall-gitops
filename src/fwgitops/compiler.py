@@ -467,17 +467,26 @@ def wanted_objects(changes: List[CompiledChange]) -> Dict[str, Dict[str, Dict[st
     return {"address": full["address_objects"], "service": full["service_objects"]}
 
 
-def dumps_tfvars(changes: List[CompiledChange]) -> str:
-    """Byte-stable JSON for `rules.auto.tfvars.json`.
+def to_tfvars_written(changes: List[CompiledChange]) -> Dict[str, Any]:
+    """What actually reaches `rules.auto.tfvars.json`.
 
     RULES ONLY since ADR-0010. Address and service objects left Terraform's
-    management — a root that no longer declares those variables would take a
-    tfvars file still carrying them as a warning and discard it silently, and
-    the whole point of the contract checks is that nothing is discarded
-    silently. `wanted_objects()` is where they go instead.
+    management, and a root that no longer declares those variables would take a
+    tfvars file still carrying them as a WARNING and discard the value — the
+    silent discard the contract checks exist to prevent.
+
+    Separate from `to_tfvars()` on purpose. That one is the aggregation
+    primitive (it is where object dedup happens, and `wanted_objects` needs its
+    output); this one is the contract with Terraform. The registry and the file
+    writer must BOTH use this, or the contract check validates a payload nobody
+    writes — which is exactly how this was caught.
     """
-    payload = to_tfvars(changes)
-    return dumps_payload({"security_rules": payload["security_rules"]})
+    return {"security_rules": to_tfvars(changes)["security_rules"]}
+
+
+def dumps_tfvars(changes: List[CompiledChange]) -> str:
+    """Byte-stable JSON for `rules.auto.tfvars.json`."""
+    return dumps_payload(to_tfvars_written(changes))
 
 
 # ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────
