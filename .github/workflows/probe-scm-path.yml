@@ -1,0 +1,72 @@
+# READ-ONLY probe for an SCM collection path.
+#
+# WHY THIS EXISTS. `objectsweep.REFERRER_PATHS` must list every collection that
+# can reference an address or a service, and a wrong path fails one of two ways,
+# both bad: 404 (the sweep never runs) or a silent miss (an object in use gets
+# deleted). `/config/nat/v1/nat-rules` was inferred from the shape of its
+# neighbours on 2026-08-13 and 404'd in production.
+#
+# The pan.dev reference confirms a `/nat-rules` resource exists but does not
+# publish its base path on that page, so the only way to settle it is to ask the
+# tenant. A second inference would not be an improvement on the first.
+#
+# GET ONLY. It sends no writes, and every candidate is a collection listing.
+# Manual dispatch only — nothing calls it.
+name: probe-scm-path
+
+on:
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: "Comma-separated candidate paths to GET"
+        required: true
+        default: "/config/nat/v1/nat-rules,/config/network/v1/nat-rules,/config/objects/v1/nat-rules,/config/security/v1/nat-rules"
+      scope:
+        description: "folder to query"
+        required: true
+        default: "prod-edge"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      SCM_CLIENT_ID: ${{ secrets.SCM_CLIENT_ID }}
+      SCM_CLIENT_SECRET: ${{ secrets.SCM_CLIENT_SECRET }}
+      SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - name: GET each candidate
+        env:
+          PATHS: ${{ inputs.paths }}
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          python - <<'PY'
+          import os
+
+          from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
+
+          session = ScmSession(ScmCredentials.from_env())
+          scope = {"folder": os.environ["SCOPE"], "limit": 1}
+
+          print(f"{'path':<45} result")
+          print("-" * 70)
+          for path in [p.strip() for p in os.environ["PATHS"].split(",") if p.strip()]:
+              try:
+                  payload = session.request("GET", path, params=scope)
+              except ScmApiError as e:
+                  print(f"{path:<45} HTTP {e.status}")
+                  continue
+              except Exception as e:  # noqa: BLE001
+                  print(f"{path:<45} ERROR {type(e).__name__}: {e}")
+                  continue
+              rows = payload.get("data") if isinstance(payload, dict) else payload
+              n = len(rows) if isinstance(rows, list) else "?"
+              print(f"{path:<45} 200 OK  ({n} row(s) — THIS PATH EXISTS)")
+          PY
