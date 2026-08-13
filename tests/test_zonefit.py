@@ -8,6 +8,8 @@ zone pair its traffic does not use.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fwgitops.zonefit import RoutingView, check_rule
 
 # The pilot, exactly as its intent declares it.
@@ -139,3 +141,18 @@ def test_an_unparseable_address_does_not_crash_the_check():
                      from_zone="local", to_zone="internet", view=v)
     assert [m.address for m in bad] == ["not-an-ip"]
     assert bad[0].routed_zone is None
+
+
+def test_the_module_records_that_PILOT_findings_are_expected():
+    """Decided 2026-08-13: the pilot provisions whatever a valid request asks
+    for, and its addresses are notional. Every rule here therefore reports a
+    mismatch, and that is the environment rather than a defect.
+
+    Pinned because the finding is alarming out of context — "every rule is
+    unmatchable" invites someone to rewrite the intents to silence it, which
+    would change a working pilot to satisfy a report nobody asked to act on.
+    """
+    src = (Path(__file__).resolve().parents[1] / "src" / "fwgitops"
+           / "zonefit.py").read_text()
+    assert "EXPECTED AND NOT DEFECTS" in src
+    assert 'Do not "fix" the intents to satisfy this module' in src

@@ -18,9 +18,22 @@ interface, and takes that interface's zone. So the same is done here: longest
 prefix match over connected subnets and static routes, then interface -> zone.
 Anything else would agree with the firewall by luck.
 
-REPORT ONLY. Nothing here changes a tier or blocks a change: switching every
-existing rule's zones is a policy decision, and a check that silently rewrote
-them would be a worse version of the bug it is reporting.
+REPORT ONLY, AND NOTHING CALLS IT YET. Switching every existing rule's zones is
+a policy decision, and a check that silently rewrote them would be a worse
+version of the bug it reports.
+
+ON THE PILOT, ITS FINDINGS ARE EXPECTED AND NOT DEFECTS (decided 2026-08-13).
+The pilot provisions whatever a valid request asks for; its addresses are
+NOTIONAL and deliberately unrelated to the firewall's real subnets. So every
+rule in this repository reports a mismatch, and that is the environment being
+what it is rather than anything being broken. Do not "fix" the intents to
+satisfy this module, and do not wire it into the classifier on the strength of
+those findings.
+
+WHERE IT EARNS ITS KEEP is an estate whose intents describe real hosts. There, a
+mismatch means a rule that compiled, applied, pushed, went green, and cannot
+match the traffic it was written for — with nothing else in the pipeline able to
+say so.
 """
 
 from __future__ import annotations
