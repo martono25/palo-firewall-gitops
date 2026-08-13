@@ -25,6 +25,10 @@ on:
         description: "folder to query"
         required: true
         default: "prod-edge"
+      show_our_refs:
+        description: "also report which of OUR addr-/svc- objects each path references"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -46,8 +50,10 @@ jobs:
         env:
           PATHS: ${{ inputs.paths }}
           SCOPE: ${{ inputs.scope }}
+          SHOW_OUR_REFS: ${{ inputs.show_our_refs }}
         run: |
           python - <<'PY'
+          import json
           import os
 
           from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
@@ -69,4 +75,15 @@ jobs:
               rows = payload.get("data") if isinstance(payload, dict) else payload
               n = len(rows) if isinstance(rows, list) else "?"
               print(f"{path:<45} 200 OK  ({n} row(s) — THIS PATH EXISTS)")
+              if os.environ.get("SHOW_OUR_REFS", "").lower() == "true":
+                  # ONLY our own content-addressed names are printed. This repo
+                  # is public and someone else's NAT rule is not ours to
+                  # publish, so the whole row is never dumped — just which of
+                  # OUR objects it holds, which is the only thing that decides
+                  # whether the sweep could delete something in use.
+                  import re
+
+                  blob = json.dumps(rows)
+                  ours = sorted(set(re.findall(r"\b(?:addr|svc)-[0-9a-f]{10}\b", blob)))
+                  print(f"{'':<45} references our objects: {ours or 'NONE'}")
           PY
