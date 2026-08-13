@@ -53,7 +53,7 @@ If the reference read fails, sweep nothing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from fwgitops.tags import object_name
 
@@ -63,14 +63,38 @@ KIND_PATHS: Dict[str, str] = {
     "service": "/config/objects/v1/services",
 }
 
-#: Everything that can hold a reference to an address or a service. Read from
-#: SCM, not derived from intent — see the module docstring.
-REFERRER_PATHS = (
-    "/config/security/v1/security-rules",
-    "/config/objects/v1/address-groups",
-    "/config/objects/v1/service-groups",
-    "/config/nat/v1/nat-rules",
-)
+#: What can hold a reference to an object, PER KIND. Not one shared set:
+#:
+#: The tag sweep reads `/config/objects/v1/addresses` because an ADDRESS carries
+#: tags. Reusing that set for addresses is wrong in a way that looks harmless —
+#: the addresses collection contains the address objects themselves, so every
+#: address's own `name` turns up in the walk, every address looks referenced,
+#: and NOTHING is ever swept. Silent, permanent, and indistinguishable from a
+#: tenant that simply has no garbage.
+#:
+#: An address can only be referenced by a rule or an address group; a service by
+#: a rule or a service group.
+#:
+#: Every path here is proven: the tag sweep reads them on every apply. The first
+#: live run (2026-08-13) also carried `/config/nat/v1/nat-rules`, invented from
+#: the shape of the others — SCM returned 404, the read raised, and the sweep
+#: ran on nothing. Fail-closed worked; the guess did not.
+#:
+#: KNOWN LIMIT, recorded rather than papered over: a NAT rule created outside
+#: GitOps referencing one of our addresses would not be seen, so that object
+#: could be swept while in use. Adding the path back requires CONFIRMING it
+#: against the SCM API reference — a wrong one fails either loudly (404, no
+#: sweep) or silently (a deletion of something live).
+REFERRER_PATHS: Dict[str, Tuple[str, ...]] = {
+    "address": (
+        "/config/security/v1/security-rules",
+        "/config/objects/v1/address-groups",
+    ),
+    "service": (
+        "/config/security/v1/security-rules",
+        "/config/objects/v1/service-groups",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -154,8 +178,8 @@ def _strings(node: Any) -> Iterable[str]:
             yield from _strings(v)
 
 
-def referenced_names(session: Any, scope_params: Dict[str, str]) -> Set[str]:
-    """Every string appearing anywhere in any object that could refer to ours.
+def referenced_names(session: Any, kind: str, scope_params: Dict[str, str]) -> Set[str]:
+    """Every string appearing anywhere in anything that could refer to `kind`.
 
     Deliberately blunt. See the module docstring: over-detection leaves an inert
     object behind, under-detection deletes one in use.
@@ -164,7 +188,7 @@ def referenced_names(session: Any, scope_params: Dict[str, str]) -> Set[str]:
     nothing".
     """
     used: Set[str] = set()
-    for path in REFERRER_PATHS:
+    for path in REFERRER_PATHS[kind]:
         payload = session.request("GET", path, params={**scope_params, "limit": 500})
         for row in _rows(payload):
             used.update(_strings(row))
@@ -216,7 +240,7 @@ def sweep_objects(session: Any, kind: str, scope_params: Dict[str, str],
                   wanted: Iterable[str], *, dry_run: bool = False) -> ObjectPlan:
     """Delete objects this platform minted that nothing references."""
     present = existing_objects(session, kind, scope_params)
-    used = referenced_names(session, scope_params)
+    used = referenced_names(session, kind, scope_params)
     plan = plan_objects(kind, wanted, present, used)
     if dry_run:
         return plan

@@ -130,9 +130,8 @@ def test_a_reference_ANYWHERE_in_a_referring_object_protects_it():
     miss entirely — and missing it deletes an object a rule is using."""
     session = FakeSession(
         objects={KIND_PATHS["address"]: [_addr("10.20.1.55/32")]},
-        referrers={"/config/nat/v1/nat-rules": [
-            {"name": "N1", "source_translation": {
-                "static_ip": {"translated_address": ADDR_HOST}}},
+        referrers={"/config/objects/v1/address-groups": [
+            {"name": "G1", "static": {"members": {"nested": [ADDR_HOST]}}},
         ]},
     )
     plan = sweep_objects(session, "address", SCOPE, wanted=[])
@@ -160,7 +159,7 @@ def test_a_failed_reference_read_RAISES_so_the_caller_sweeps_nothing():
     deliberately, which is worse. The read must fail loudly."""
     session = FakeSession(
         objects={KIND_PATHS["address"]: [_addr("10.20.1.55/32")]},
-        fail_on="/config/nat/v1/nat-rules",
+        fail_on="/config/objects/v1/address-groups",
     )
     with pytest.raises(RuntimeError):
         sweep_objects(session, "address", SCOPE, wanted=[])
@@ -217,8 +216,48 @@ def test_referenced_names_reads_every_referrer_collection():
     """A collection nobody reads is a reference nobody sees."""
     from fwgitops.objectsweep import REFERRER_PATHS
 
-    session = FakeSession(referrers={p: [{"n": f"seen-{i}"}]
-                                     for i, p in enumerate(REFERRER_PATHS)})
-    used = referenced_names(session, SCOPE)
-    for i in range(len(REFERRER_PATHS)):
-        assert f"seen-{i}" in used
+    for kind, paths in REFERRER_PATHS.items():
+        session = FakeSession(referrers={p: [{"n": f"seen-{i}"}]
+                                         for i, p in enumerate(paths)})
+        used = referenced_names(session, kind, SCOPE)
+        for i in range(len(paths)):
+            assert f"seen-{i}" in used, f"{kind} must read all its referrers"
+
+
+def test_referrer_paths_are_ONLY_paths_the_tag_sweep_already_proves():
+    """A referrer path that does not exist fails one of two ways, both bad.
+
+    404 makes the sweep raise and never run — which is what a
+    `/config/nat/v1/nat-rules` path, invented from the shape of the others, did
+    on the first live run. Or worse, a path that returns something unexpected
+    silently contributes no references and an object in use gets deleted.
+
+    So this set may not exceed the one the tag sweep exercises on every apply.
+    Widening it means confirming the path against the SCM API reference first,
+    which is the step that was skipped.
+    """
+    from fwgitops.objectsweep import REFERRER_PATHS
+    from fwgitops.tagsweep import REFERRER_PATHS as PROVEN
+
+    unproven = {p for paths in REFERRER_PATHS.values() for p in paths} - set(PROVEN)
+    assert not unproven, (
+        f"these referrer paths are not exercised by the tag sweep, so nothing "
+        f"proves they exist: {sorted(unproven)}")
+
+
+def test_an_object_collection_is_NOT_a_referrer_for_its_own_kind():
+    """The bug this nearly shipped with.
+
+    The tag sweep reads `/config/objects/v1/addresses`, because an address
+    CARRIES tags. Reusing that set for addresses means the addresses collection
+    — which contains the address objects themselves — gets walked for
+    references, so every address's own name turns up and every address looks
+    referenced. Nothing is ever swept, silently and forever, in a way
+    indistinguishable from a tenant with no garbage.
+    """
+    from fwgitops.objectsweep import KIND_PATHS, REFERRER_PATHS
+
+    for kind, paths in REFERRER_PATHS.items():
+        assert KIND_PATHS[kind] not in paths, (
+            f"{kind} objects are being read as referrers of themselves, so "
+            f"every one of them will look referenced and none will ever be swept")
