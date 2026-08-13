@@ -80,27 +80,30 @@ KIND_PATHS: Dict[str, str] = {
 #: the shape of the others — SCM returned 404, the read raised, and the sweep
 #: ran on nothing. Fail-closed worked; the guess did not.
 #:
-#: KNOWN LIMIT, stated precisely because the imprecise version reads worse than
-#: it is. This platform has no NatRequest kind — it never writes a NAT rule — so
-#: nothing GitOps produces is at risk here. The exposure is narrower: someone
-#: hand-creating a NAT rule in the SCM UI and pointing it at one of OUR
-#: `addr-<hash>` objects rather than making their own. That object would then
-#: look unreferenced and could be swept while their rule uses it.
+#: NAT rules are included since 2026-08-13, on a path CONFIRMED against the live
+#: tenant rather than inferred. The probe (`.github/workflows/probe-scm-path.yml`)
+#: answered:
 #:
-#: Narrow, but it is the exact shape of the failure this whole design prevents,
-#: so it stays recorded. Adding the path back requires CONFIRMING it against the
-#: SCM API reference: `/config/nat/v1/nat-rules` was inferred from the shape of
-#: its neighbours and 404'd, and the pan.dev reference confirms a `/nat-rules`
-#: resource exists without giving the base path. A second inference is not an
-#: improvement on the first.
+#:     /config/nat/v1/nat-rules        HTTP 404   <- the original inference
+#:     /config/network/v1/nat-rules    200 OK     <- the real one
+#:     /config/objects/v1/nat-rules    HTTP 403
+#:     /config/security/v1/nat-rules   HTTP 403
+#:
+#: This platform has no NatRequest kind and never writes a NAT rule, so the
+#: exposure was never anything GitOps produces. It was a NAT rule created by
+#: hand in SCM pointed at one of our `addr-<hash>` objects — and prod-edge does
+#: contain a NAT rule, so the gap was real rather than hypothetical. It
+#: references none of our objects today, checked before this path was added.
 REFERRER_PATHS: Dict[str, Tuple[str, ...]] = {
     "address": (
         "/config/security/v1/security-rules",
         "/config/objects/v1/address-groups",
+        "/config/network/v1/nat-rules",
     ),
     "service": (
         "/config/security/v1/security-rules",
         "/config/objects/v1/service-groups",
+        "/config/network/v1/nat-rules",
     ),
 }
 
