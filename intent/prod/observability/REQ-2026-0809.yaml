@@ -12,8 +12,8 @@ kind: AccessRequest
 metadata:
   id: REQ-2026-0809
   requester: martono@corp
-  ticket: JIRA-21003
-  justification: "Revert the estate-wide sweep: its apply failed and the firewall never took it, so the repository must go back to what the device is actually running"
+  ticket: JIRA-21010
+  justification: "Estate-wide availability sweep: the collector must ping every host in 10.20.0.0/16. Same change that failed on 2026-08-13; re-run to prove ADR-0010 fixed it"
   requested: 2026-08-13
 spec:
   environment: prod
@@ -21,7 +21,7 @@ spec:
   source:
     - cidr: 10.20.20.10/32     # the collector
   destination:
-    - cidr: 10.20.1.55/32      # the web host, not the whole tier
+    - cidr: 10.20.0.0/16       # the whole estate, for the sweep
   service:
     - protocol: icmp
   log: true
