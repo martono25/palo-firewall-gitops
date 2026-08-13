@@ -13,6 +13,8 @@ the context, the decision, and its consequences at a point in time.
 | [0006](0006-day1-kinds-target-a-folder.md) | Day-1 kinds name their `folder:`; `AccessRequest` keeps `environment:` | Accepted — built |
 | [0007](0007-rule-targeting.md) | An `AccessRequest` targets an environment, never a folder or a firewall | Accepted |
 | [0008](0008-deletion-contract.md) | What removing an intent means, per kind | Accepted |
+| [0009](0009-tag-object-lifecycle.md) | Tags are created before apply and swept after push, never destroyed by Terraform | Accepted — built |
+| [0010](0010-address-and-service-object-lifecycle.md) | Address and service objects follow the tag lifecycle | Accepted — lifecycle code built, switch pending |
 
 **0001** — the intent-loader registry and `ZoneRequest` are built; the registry
 is otherwise a registry in name only (classify / evidence / drift are still
