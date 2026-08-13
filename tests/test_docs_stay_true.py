@@ -761,3 +761,22 @@ def test_the_removal_guide_grades_match_the_classifier():
         assert f"{label} | {tier_for(kind, **spec)} |" in guide, (
             f"the removal guide must grade {label} as "
             f"{tier_for(kind, **spec)}, matching classify_removal")
+
+
+def test_every_ADR_is_listed_in_the_ADR_index():
+    """An ADR nobody can find is a decision that gets made again.
+
+    Found 2026-08-13: ADR-0009 had been written, accepted and BUILT, and was
+    absent from the index — noticed only because ADR-0010 extends it and the row
+    above it was missing. The decision it records (objects are swept, never
+    destroyed by Terraform) is exactly the one that would otherwise be
+    rediscovered the hard way, which is what happened for addresses.
+    """
+    import re
+
+    adr_dir = DOCS / "adr"
+    index = (adr_dir / "README.md").read_text()
+    files = {p.name for p in adr_dir.glob("[0-9][0-9][0-9][0-9]-*.md")}
+    missing = sorted(f for f in files if f not in index)
+    assert not missing, (
+        f"these ADRs exist and are not linked from docs/adr/README.md: {missing}")
