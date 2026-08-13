@@ -152,7 +152,14 @@ def test_the_module_records_that_PILOT_findings_are_expected():
     unmatchable" invites someone to rewrite the intents to silence it, which
     would change a working pilot to satisfy a report nobody asked to act on.
     """
+    import re
+
     src = (Path(__file__).resolve().parents[1] / "src" / "fwgitops"
            / "zonefit.py").read_text()
-    assert "EXPECTED AND NOT DEFECTS" in src
-    assert 'Do not "fix" the intents to satisfy this module' in src
+    # Whitespace collapsed: the docstring is hard-wrapped, so a phrase worth
+    # asserting on is usually split across two lines. Asserting against the raw
+    # text tests the line wrapping, which nobody cares about — and which is
+    # exactly how this test failed first time round.
+    flat = re.sub(r"\s+", " ", src)
+    assert "EXPECTED AND NOT DEFECTS" in flat
+    assert 'Do not "fix" the intents to satisfy this module' in flat
