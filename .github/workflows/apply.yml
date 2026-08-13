@@ -349,6 +349,15 @@ jobs:
             # released it and 409'd). Idempotent; creates only what is missing.
             fwgitops tags ensure "$folder"
 
+            # ADDRESSES AND SERVICES NEXT, for the SAME reason and with the same
+            # ordering requirement (ADR-0010). The API rejects a rule naming an
+            # object that does not resolve, so this must complete BEFORE apply.
+            # It also replaces the ordering the module used to get for free:
+            # rules referenced `scm_address.this[...]`, which made Terraform
+            # create the object before the rule. Rules now carry plain names, so
+            # this step IS that ordering.
+            fwgitops objects ensure "$folder"
+
             # -parallelism=1 REQUIRED: the scm provider cannot handle concurrent
             # token acquisition (spike 2026-07-19) — serial apply only.
             terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1 \
@@ -461,6 +470,12 @@ jobs:
             # stops working accumulates unnoticed.
             fwgitops tags sweep "$folder" \
               || echo "::warning::$folder: tag sweep failed — unreferenced gitops: tags may remain"
+
+            # Same contract for addresses/services: non-fatal, because by here
+            # the firewall already has the change and an unreferenced object is
+            # inert. The warning is the only signal these leaked.
+            fwgitops objects sweep "$folder" \
+              || echo "::warning::$folder: object sweep failed — unreferenced address/service objects may remain"
             echo "::endgroup::"
           done
 

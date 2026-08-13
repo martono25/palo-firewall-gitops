@@ -15,12 +15,6 @@
 #   * the provider cannot handle concurrent token acquisition; apply must run
 #     with -parallelism=1 (see .github/workflows/apply.yml)
 
-locals {
-  # LITERAL service values — passed through UNRESOLVED, because they name no
-  # object. See the security-rule resource below.
-  literal_services = toset(["application-default", "any"])
-}
-
 # ── Tag objects: CREATED ELSEWHERE, DESTROYED ELSEWHERE (ADR-0009) ────────
 #
 # `scm_tag` used to live here, for_each over every tag any object or rule used.
@@ -57,36 +51,42 @@ removed {
   }
 }
 
-resource "scm_address" "this" {
-  for_each = var.address_objects
+# Address and service objects join the tag lifecycle for the SAME measured
+# reason, four days later and one object class along (ADR-0010). Widening a live
+# rule's destination on 2026-08-13 planned an in-place rule update plus a destroy
+# of the address the old value released, ran the DESTROY FIRST, and SCM refused
+# with 409 NON_ZERO_REFS while the rule still pointed at it.
+#
+# The rule was never being destroyed. Object names are content-addressed
+# (`addr-` + sha256(value)[:10]), so a changed value is a DIFFERENT object rather
+# than an edited one — which is what lets three rules share one `10.20.1.0/24`.
+# Only the garbage collection of the released object failed.
+#
+# Documented Terraform behaviour, not a provider defect: update-before-destroy
+# ordering is guaranteed only when the child is RECREATED under
+# `create_before_destroy` (hashicorp/terraform#32136), and this is a pure delete.
+#
+# Same separation in time, same load-bearing ordering — the API validates these
+# as references and rejects free-form strings, so `objects ensure` running first
+# is required, not a convenience:
+#
+#   fwgitops objects ensure   before apply — create what is missing
+#   terraform apply + push
+#   fwgitops objects sweep    after push   — remove what nothing references
+removed {
+  from = scm_address.this
 
-  name   = each.value.name
-  folder = each.value.folder # exactly one of folder/snippet/device
-
-  # Exactly one of fqdn / ip_netmask / ip_range / ip_wildcard.
-  ip_netmask = each.value.type == "ip-netmask" ? each.value.value : null
-  fqdn       = each.value.type == "fqdn" ? each.value.value : null
-
-  # Reference each tag resource (not raw strings) so this object depends on ONLY
-  # the tags it uses — a fine-grained edge, not a blanket `depends_on`.
-  tag = each.value.tags
+  lifecycle {
+    destroy = false
+  }
 }
 
-# ── Service objects ───────────────────────────────────────────────────────
-resource "scm_service" "this" {
-  for_each = var.service_objects
+removed {
+  from = scm_service.this
 
-  name   = each.value.name
-  folder = each.value.folder
-
-  # `protocol` is a nested attribute (object), NOT a block. Exactly one of
-  # tcp/udp must be set; the other is null.
-  protocol = {
-    tcp = each.value.protocol == "tcp" ? { port = each.value.port } : null
-    udp = each.value.protocol == "udp" ? { port = each.value.port } : null
+  lifecycle {
+    destroy = false
   }
-
-  tag = each.value.tags
 }
 
 # ── Security rules ────────────────────────────────────────────────────────
@@ -116,11 +116,14 @@ resource "scm_security_rule" "this" {
   # address cascaded into destroying ALL rules. Fine-grained edges also give
   # correct create ordering (objects before the rule that references them) with
   # no explicit depends_on.
-  source      = [for s in each.value.sources : scm_address.this[s].name]
-  destination = [for d in each.value.destinations : scm_address.this[d].name]
-  service = [for v in each.value.services :
-  contains(local.literal_services, v) ? v : scm_service.this[v].name]
-  tag = each.value.tags
+  # Plain names now, not resource references: these objects are no longer
+  # Terraform-managed (ADR-0010). The fine-grained edges these expressions used
+  # to create are what ordered object-create before rule-create — `objects
+  # ensure` provides that ordering instead, by running to completion first.
+  source      = each.value.sources
+  destination = each.value.destinations
+  service     = each.value.services
+  tag         = each.value.tags
 
   action   = each.value.action
   log_end  = each.value.log_end

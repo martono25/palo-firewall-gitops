@@ -450,9 +450,43 @@ def dumps_payload(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, indent=2) + "\n"
 
 
+#: Service values that name no object and are passed to SCM verbatim.
+LITERAL_SERVICES = frozenset({"application-default", "any"})
+
+
+def wanted_objects(changes: List[CompiledChange]) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """The address and service objects this change set needs to exist.
+
+    `objects ensure` creates these before the apply and `objects sweep` protects
+    them after it (ADR-0010). They are no longer Terraform's business, so they
+    are deliberately NOT in the tfvars — but they are still compiled from the
+    same intent in the same pass, which is what keeps the rule's references and
+    the objects that satisfy them from ever disagreeing.
+    """
+    full = to_tfvars(changes)
+    return {"address": full["address_objects"], "service": full["service_objects"]}
+
+
+def to_tfvars_written(changes: List[CompiledChange]) -> Dict[str, Any]:
+    """What actually reaches `rules.auto.tfvars.json`.
+
+    RULES ONLY since ADR-0010. Address and service objects left Terraform's
+    management, and a root that no longer declares those variables would take a
+    tfvars file still carrying them as a WARNING and discard the value — the
+    silent discard the contract checks exist to prevent.
+
+    Separate from `to_tfvars()` on purpose. That one is the aggregation
+    primitive (it is where object dedup happens, and `wanted_objects` needs its
+    output); this one is the contract with Terraform. The registry and the file
+    writer must BOTH use this, or the contract check validates a payload nobody
+    writes — which is exactly how this was caught.
+    """
+    return {"security_rules": to_tfvars(changes)["security_rules"]}
+
+
 def dumps_tfvars(changes: List[CompiledChange]) -> str:
     """Byte-stable JSON for `rules.auto.tfvars.json`."""
-    return dumps_payload(to_tfvars(changes))
+    return dumps_payload(to_tfvars_written(changes))
 
 
 # ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────

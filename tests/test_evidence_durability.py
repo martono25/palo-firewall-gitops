@@ -326,6 +326,37 @@ def test_tags_are_ensured_BEFORE_apply_and_swept_AFTER_push():
     assert i_push < i_sweep, "the sweep runs after the push, never before"
 
 
+def test_objects_are_ensured_BEFORE_apply_and_swept_AFTER_push():
+    """Same ordering, same reason, one object class along (ADR-0010).
+
+    Stronger than the tag case in one respect: `objects ensure` also REPLACES
+    the ordering the module used to get for free. Rules referenced
+    `scm_address.this[...]`, which made Terraform create the object before the
+    rule that named it. Rules now carry plain names, so nothing in Terraform
+    orders those any more — this step is the only thing that does. If it ran
+    after the apply, every new rule would be written against objects that do not
+    exist yet and SCM would reject it.
+    """
+    run = _apply_loop()
+    i_ensure = run.index("fwgitops objects ensure")
+    i_apply = run.index("terraform -chdir=\"$dir\" apply")
+    i_push = run.index("fwgitops push --scope-dir")
+    i_sweep = run.index("fwgitops objects sweep")
+    assert i_ensure < i_apply, (
+        "address/service objects must exist before the rules that name them — "
+        "nothing else orders this since they left Terraform's graph")
+    assert i_push < i_sweep, "the sweep runs after the push, never before"
+
+
+def test_the_object_sweep_cannot_fail_the_apply_either():
+    """By the time it runs the firewall already has the change, and an
+    unreferenced object is inert."""
+    run = _apply_loop()
+    i = run.index("fwgitops objects sweep")
+    tail = run[i:i + 400]
+    assert "||" in tail and "::warning::" in tail
+
+
 def test_the_sweep_cannot_fail_the_apply():
     """By the time it runs the firewall is already updated. Failing the job would
     turn leftover garbage into a red apply for a change that succeeded."""
