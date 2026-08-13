@@ -161,9 +161,18 @@ def test_a_failed_reference_read_RAISES_so_the_caller_sweeps_nothing():
         objects={KIND_PATHS["address"]: [_addr("10.20.1.55/32")]},
         fail_on="/config/objects/v1/address-groups",
     )
-    with pytest.raises(RuntimeError):
+    from fwgitops.objectsweep import ReferenceReadError
+
+    with pytest.raises(ReferenceReadError) as excinfo:
         sweep_objects(session, "address", SCOPE, wanted=[])
     assert session.writes == []
+
+    # The message has to be diagnosable by someone who did not write this. The
+    # first live failure printed `SCM API error 404: {}` — no path, no reason.
+    msg = str(excinfo.value)
+    assert "/config/objects/v1/address-groups" in msg, "it must name the path"
+    assert "404" in msg or "does not exist" in msg, (
+        "and say what a failure of this kind usually means")
 
 
 # ── ensure ──────────────────────────────────────────────────────────────────

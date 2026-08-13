@@ -103,10 +103,19 @@ Two safety rules, both **stronger here than for tags**:
 updates — the ordinary day-2 operation — stop depending on whether the address
 they release happens to be shared. Ownership is provable rather than asserted.
 
-**Costs.** Address and service objects leave Terraform's state, which requires a
-one-time `terraform state rm` per object against live infrastructure. Until the
-sweep runs, released objects linger; a sweep that fails leaves them indefinitely,
-which is untidy but harmless. Two more API round-trips per apply.
+**Costs.** Address and service objects leave Terraform's state. Until the sweep
+runs, released objects linger; a sweep that fails leaves them indefinitely, which
+is untidy but harmless. Two more API round-trips per apply.
+
+**One gap, stated precisely.** The sweep reads references from SCM rather than
+from intent, because an object created outside GitOps can reference ours. Its
+referrer list covers security rules, address groups and service groups — not NAT
+rules, whose API path could not be confirmed. This platform has no `NatRequest`
+kind and never writes a NAT rule, so nothing it produces is exposed. What is
+exposed: a NAT rule created by hand in SCM, pointed at one of our `addr-<hash>`
+objects rather than at one of its own, would not protect that object from the
+sweep. Closing it means confirming the path against the SCM API reference —
+`/config/nat/v1/nat-rules` was inferred from its neighbours and returned 404.
 
 **What this does not change.** The compiler stays offline (ADR-0004): it emits
 the objects a change needs, and neither ensure nor sweep consults it for
