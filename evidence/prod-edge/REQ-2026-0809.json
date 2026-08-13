@@ -1,13 +1,13 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31669392104"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31670619289"
   },
   "approval": {
     "approvers": [],
     "gate": null,
-    "merge_commit": "68ead40469b0a03a16f437158ffd1918500cb2ba",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/185"
+    "merge_commit": "04f3375f5c764790c8906058057316681da12508",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/188"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -67,7 +67,7 @@
           "gitops:managed",
           "gitops:req:REQ-2026-0809",
           "gitops:section:specific-allow",
-          "gitops:ticket:JIRA-21001"
+          "gitops:ticket:JIRA-21003"
         ],
         "target_rule": null,
         "to_zones": [
@@ -76,13 +76,13 @@
       },
       "service_objects": []
     },
-    "object_sha256": "7715b060079ed3ce0ffd610fd2d2feb1dc5472faef62019797c9c396dab72e65",
+    "object_sha256": "4e81d62e52814b04680e9ea84bcc504bd594be19b4299eb30f1021b68ba5932a",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "35b26f8477eeda054697251fda7cea89e276e009f57142733fe7844b828e2df7"
+    "tfvars_sha256": "c7e5c8acd584e65f6c4bdfc0a3d1a663dee482e5a06f2355f1cdb9687f606e5d"
   },
   "controls": [
     "AC-4",
@@ -97,23 +97,23 @@
       "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
     }
   ],
-  "generated_at": "2026-08-13T05:12:07Z",
+  "generated_at": "2026-08-13T05:35:05Z",
   "kind": "AccessRequest",
   "push": {
     "admin_count": 1,
     "all_admins": false,
     "folder": "prod-edge",
-    "job_id": "231",
+    "job_id": "234",
     "status": "success"
   },
   "req_id": "REQ-2026-0809",
   "request": {
     "intent_file": "intent/prod/observability/REQ-2026-0809.yaml",
-    "intent_sha256": "e27004897f376ff1fb8bb514f20c12bff3519ab94bb1b9b192d55754c0539630",
-    "justification": "Narrow the collector ping to the one host that answers it \u2014 the rest of the tier never needed to be reachable",
+    "intent_sha256": "615670c4edd9fe0f7198a521cd09ea92ef32fc471e5ee92840c35381b50c02b3",
+    "justification": "Revert the estate-wide sweep: its apply failed and the firewall never took it, so the repository must go back to what the device is actually running",
     "requested": "2026-08-13",
     "requester": "martono@corp",
-    "ticket": "JIRA-21001"
+    "ticket": "JIRA-21003"
   },
   "risk": {
     "checks_fired": [
