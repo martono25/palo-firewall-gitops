@@ -12,16 +12,16 @@ kind: AccessRequest
 metadata:
   id: REQ-2026-0809
   requester: martono@corp
-  ticket: JIRA-20809
-  justification: "Observability collector must ping the web tier to distinguish a dead host from a dead service"
-  requested: 2026-08-09
+  ticket: JIRA-21001
+  justification: "Narrow the collector ping to the one host that answers it — the rest of the tier never needed to be reachable"
+  requested: 2026-08-13
 spec:
   environment: prod
   action: allow
   source:
     - cidr: 10.20.20.10/32     # the collector
   destination:
-    - cidr: 10.20.1.0/24       # web tier
+    - cidr: 10.20.1.55/32      # the web host, not the whole tier
   service:
     - protocol: icmp
   log: true
