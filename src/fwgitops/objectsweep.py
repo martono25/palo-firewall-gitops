@@ -80,11 +80,19 @@ KIND_PATHS: Dict[str, str] = {
 #: the shape of the others — SCM returned 404, the read raised, and the sweep
 #: ran on nothing. Fail-closed worked; the guess did not.
 #:
-#: KNOWN LIMIT, recorded rather than papered over: a NAT rule created outside
-#: GitOps referencing one of our addresses would not be seen, so that object
-#: could be swept while in use. Adding the path back requires CONFIRMING it
-#: against the SCM API reference — a wrong one fails either loudly (404, no
-#: sweep) or silently (a deletion of something live).
+#: KNOWN LIMIT, stated precisely because the imprecise version reads worse than
+#: it is. This platform has no NatRequest kind — it never writes a NAT rule — so
+#: nothing GitOps produces is at risk here. The exposure is narrower: someone
+#: hand-creating a NAT rule in the SCM UI and pointing it at one of OUR
+#: `addr-<hash>` objects rather than making their own. That object would then
+#: look unreferenced and could be swept while their rule uses it.
+#:
+#: Narrow, but it is the exact shape of the failure this whole design prevents,
+#: so it stays recorded. Adding the path back requires CONFIRMING it against the
+#: SCM API reference: `/config/nat/v1/nat-rules` was inferred from the shape of
+#: its neighbours and 404'd, and the pan.dev reference confirms a `/nat-rules`
+#: resource exists without giving the base path. A second inference is not an
+#: improvement on the first.
 REFERRER_PATHS: Dict[str, Tuple[str, ...]] = {
     "address": (
         "/config/security/v1/security-rules",
@@ -95,6 +103,15 @@ REFERRER_PATHS: Dict[str, Tuple[str, ...]] = {
         "/config/objects/v1/service-groups",
     ),
 }
+
+
+class ReferenceReadError(RuntimeError):
+    """A referrer collection could not be read, so the sweep must not run.
+
+    Its own type so a caller can tell "I could not determine what is in use"
+    apart from "the delete failed" — the first is a reason to do nothing, the
+    second is a reason to report.
+    """
 
 
 @dataclass(frozen=True)
@@ -189,7 +206,23 @@ def referenced_names(session: Any, kind: str, scope_params: Dict[str, str]) -> S
     """
     used: Set[str] = set()
     for path in REFERRER_PATHS[kind]:
-        payload = session.request("GET", path, params={**scope_params, "limit": 500})
+        try:
+            payload = session.request("GET", path, params={**scope_params, "limit": 500})
+        except Exception as e:
+            # STILL FATAL — a partial reference set is what makes a referenced
+            # object look unreferenced. But it must say WHICH path and WHY it
+            # matters. The first live failure printed `SCM API error 404: {}`
+            # and nothing else; the cause (a path invented from the shape of its
+            # neighbours) was found by remembering having written it, which does
+            # not generalise to whoever meets this next.
+            raise ReferenceReadError(
+                f"could not read {path!r} while checking which {kind} objects are "
+                f"still in use ({e}). Sweeping nothing: an incomplete reference "
+                f"set makes a referenced object look unreferenced, and deleting "
+                f"one of those is the 409 this design exists to avoid. A 404 here "
+                f"means the path does not exist at this scope — check it against "
+                f"the SCM API reference rather than inferring it from the others."
+            ) from e
         for row in _rows(payload):
             used.update(_strings(row))
     return used
