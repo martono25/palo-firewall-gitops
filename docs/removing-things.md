@@ -352,6 +352,8 @@ it. Ask the platform team before touching it anywhere else.
 
 - **Adding a rule instead:** [`requesting-rules.md`](requesting-rules.md), from
   the top.
+- **Changing one you already have** rather than removing it:
+  [`changing-a-rule.md`](changing-a-rule.md).
 - **The day-to-day operator reference** — drift, failed pushes, replacing a
   firewall: [`operator-runbook.md`](operator-runbook.md).
 - **Why removal behaves this way per kind**, in design terms:
