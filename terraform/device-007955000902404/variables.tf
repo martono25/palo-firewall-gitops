@@ -16,18 +16,6 @@
 # into it yet — which is every scope on its first day.
 
 
-variable "address_objects" {
-  description = "Map of address object name -> definition (from the compiler)."
-  type = map(object({
-    name   = string
-    type   = string # "ip-netmask" | "fqdn"
-    value  = string
-    folder = string
-    tags   = list(string)
-  }))
-  default = {}
-}
-
 variable "folder" {
   description = "SCM folder these objects/rules live in. Also scopes the scm_tag objects."
   type        = string
@@ -175,18 +163,6 @@ variable "security_rules" {
     category           = optional(list(string), ["any"])
     negate_source      = optional(bool, false)
     negate_destination = optional(bool, false)
-  }))
-  default = {}
-}
-
-variable "service_objects" {
-  description = "Map of service object name -> definition."
-  type = map(object({
-    name     = string
-    protocol = string # "tcp" | "udp"
-    port     = string # "443" or "8000-8100"
-    folder   = string
-    tags     = list(string)
   }))
   default = {}
 }

@@ -151,21 +151,87 @@ def test_scope_dirname_matches_the_root_layout():
     assert Scope("device", "007955000902404").dirname in names
 
 
-def test_a_literal_service_is_passed_through_not_resolved_as_an_object():
-    """`main.tf` maps every service name through `scm_service.this[...]`, which
-    creates the dependency edge that orders object-before-rule. An ICMP rule
-    carries `application-default`, which names NO object — so the lookup would
-    fail with a missing key.
+def _compiled_changes():
+    """Every AccessRequest in the REAL intent tree, compiled.
 
-    The passthrough must stay NARROW: anything not in the literal set is still
-    resolved, so a typo'd service name fails loudly on the lookup instead of
-    being handed to SCM as a literal."""
-    from pathlib import Path
-    main = (Path(__file__).resolve().parents[1]
-            / "terraform" / "modules" / "security_folder" / "main.tf").read_text()
-    assert "literal_services" in main
-    assert "application-default" in main
-    assert "contains(local.literal_services, v) ? v : scm_service.this[v].name" in main
+    The real tree rather than a fixture, because the property under test is
+    whether THIS repository's rules reference objects THIS repository emits.
+    Uses the same loader and catalogs the CLI does, so a catalog change that
+    would break the real compile breaks this too.
+    """
+    import sys
+
+    from fwgitops.cli import _load_catalogs
+    from fwgitops.compiler import compile_request
+    from fwgitops.intent import load_intent
+    from fwgitops.io import read_yaml
+    from fwgitops.resolve import EnvMap
+
+    root = Path(__file__).resolve().parents[1]
+    env_map = EnvMap.from_dict(read_yaml(root / "catalog" / "environments.yaml"))
+    cats, ok = _load_catalogs(root / "catalog" / "services.yaml",
+                              root / "catalog" / "apps.yaml", sys.stderr)
+    assert ok, "the real catalogs must load"
+
+    out = []
+    for path in sorted((root / "intent").rglob("*.yaml")):
+        req = load_intent(read_yaml(path), env_map=env_map, **cats)
+        if type(req).__name__ != "AccessRequest":
+            continue
+        out.append(compile_request(req, env_map))
+    return out
+
+
+def test_every_object_a_rule_REFERENCES_is_one_the_compiler_EMITS():
+    """The guarantee that moved when addresses and services left Terraform.
+
+    It used to live in `main.tf`: every service name was mapped through
+    `scm_service.this[...]`, so a name with no matching object failed at PLAN
+    time on a missing key. ADR-0010 passes names through verbatim, which removes
+    that lookup — and with it that check.
+
+    So it is asserted here instead, one stage earlier and now covering ADDRESSES
+    too, which the Terraform version only covered by accident of the same
+    expression. A reference the compiler cannot satisfy is a rule SCM will
+    reject at apply time with INVALID_REFERENCE; catching it at compile time is
+    strictly earlier than the protection it replaces.
+
+    `application-default` and `any` name no object by design and are excluded.
+    """
+    from fwgitops.compiler import LITERAL_SERVICES, to_tfvars, wanted_objects
+
+    changes = _compiled_changes()
+    assert changes, "no compiled changes to check"
+    tfvars = to_tfvars(changes)
+    objects = wanted_objects(changes)
+
+    dangling = []
+    for rid, rule in tfvars["security_rules"].items():
+        for name in rule.get("sources", []) + rule.get("destinations", []):
+            if name not in objects["address"]:
+                dangling.append(f"{rid} -> address {name}")
+        for name in rule.get("services", []):
+            if name in LITERAL_SERVICES:
+                continue
+            if name not in objects["service"]:
+                dangling.append(f"{rid} -> service {name}")
+
+    assert not dangling, (
+        f"these rules reference objects the compiler does not emit, so nothing "
+        f"will create them and SCM will reject the rule: {dangling}")
+
+
+def test_the_tfvars_no_longer_carry_objects_terraform_does_not_manage():
+    """A root that does not declare a variable takes a tfvars file carrying it
+    as a WARNING and discards the value. Emitting objects Terraform no longer
+    manages would be exactly the silent discard the contract checks exist to
+    prevent."""
+    from fwgitops.compiler import dumps_tfvars
+    import json
+
+    payload = json.loads(dumps_tfvars(_compiled_changes()))
+    assert set(payload) == {"security_rules"}, (
+        f"rules.auto.tfvars.json must carry rules only; got {sorted(payload)}")
 
 
 def test_relative_position_has_NO_default_in_the_module_or_any_root():
@@ -198,3 +264,44 @@ def test_relative_position_has_NO_default_in_the_module_or_any_root():
                     f"survive to the provider, or every rule is moved")
                 checked += 1
     assert checked >= 2, f"expected the module and at least one root, checked {checked}"
+
+
+def test_every_object_that_left_TERRAFORM_still_has_its_removed_BLOCK():
+    """The single line between an apply and mass deletion.
+
+    Tags (ADR-0009), then addresses and services (ADR-0010), stopped being
+    Terraform-managed. Their resources are gone from `main.tf`, but they are
+    still in the state files of every live root. A resource present in state
+    with no configuration is one Terraform DESTROYS — so what makes this safe is
+    not deleting the resource, it is the `removed` block telling Terraform to
+    forget it instead.
+
+    Delete that block and the next apply plans to destroy every address, service
+    and tag in the folder. Most would 409 because rules still reference them,
+    which means the blast radius is "the apply fails" rather than "the firewall
+    is stripped" — but the ones nothing references would go, silently and
+    without an evidence bundle.
+
+    FOUND BY MUTATION on 2026-08-13: removing the `scm_address` block passed all
+    890 tests. The tag block had been equally unpinned since 2026-08-10.
+    """
+    import re
+
+    main = (Path(__file__).resolve().parents[1] / "terraform" / "modules"
+            / "security_folder" / "main.tf").read_text()
+
+    for resource in ("scm_tag.this", "scm_address.this", "scm_service.this"):
+        block = re.search(
+            r"removed\s*\{[^}]*from\s*=\s*" + re.escape(resource)
+            + r"\s*lifecycle\s*\{\s*destroy\s*=\s*false\s*\}\s*\}",
+            " ".join(main.split()))
+        assert block, (
+            f"`removed {{ from = {resource} ... destroy = false }}` is missing "
+            f"from the module. Without it Terraform destroys every one of those "
+            f"objects on the next apply, because they are still in state and no "
+            f"longer in configuration.")
+
+    for resource in ("scm_address", "scm_service", "scm_tag"):
+        assert f'resource "{resource}" "this"' not in main, (
+            f"{resource} is Terraform-managed again — it must not be, and if "
+            f"that is deliberate the matching `removed` block has to go with it")

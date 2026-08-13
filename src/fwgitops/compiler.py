@@ -450,9 +450,34 @@ def dumps_payload(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, indent=2) + "\n"
 
 
+#: Service values that name no object and are passed to SCM verbatim.
+LITERAL_SERVICES = frozenset({"application-default", "any"})
+
+
+def wanted_objects(changes: List[CompiledChange]) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """The address and service objects this change set needs to exist.
+
+    `objects ensure` creates these before the apply and `objects sweep` protects
+    them after it (ADR-0010). They are no longer Terraform's business, so they
+    are deliberately NOT in the tfvars — but they are still compiled from the
+    same intent in the same pass, which is what keeps the rule's references and
+    the objects that satisfy them from ever disagreeing.
+    """
+    full = to_tfvars(changes)
+    return {"address": full["address_objects"], "service": full["service_objects"]}
+
+
 def dumps_tfvars(changes: List[CompiledChange]) -> str:
-    """Byte-stable JSON for `rules.auto.tfvars.json`."""
-    return dumps_payload(to_tfvars(changes))
+    """Byte-stable JSON for `rules.auto.tfvars.json`.
+
+    RULES ONLY since ADR-0010. Address and service objects left Terraform's
+    management — a root that no longer declares those variables would take a
+    tfvars file still carrying them as a warning and discard it silently, and
+    the whole point of the contract checks is that nothing is discarded
+    silently. `wanted_objects()` is where they go instead.
+    """
+    payload = to_tfvars(changes)
+    return dumps_payload({"security_rules": payload["security_rules"]})
 
 
 # ── ZoneRequest (kind #2) compile + tfvars ─────────────────────────────────

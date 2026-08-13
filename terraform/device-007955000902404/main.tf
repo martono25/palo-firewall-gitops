@@ -30,12 +30,10 @@ module "security_folder" {
   # EVERY module variable is wired. A declared-but-unwired variable is
   # HOLE 2: Terraform emits no diagnostic at all and the data simply
   # never reaches the resource.
-  address_objects   = var.address_objects
   folder            = var.folder
   folder_interfaces = var.folder_interfaces
   interfaces        = var.interfaces
   routers           = var.routers
   security_rules    = var.security_rules
-  service_objects   = var.service_objects
   zones             = var.zones
 }

@@ -2225,6 +2225,112 @@ def run_tags(
     return 0
 
 
+def run_objects(
+    action: str,
+    scope_dir: str,
+    intent_root: Path = Path("intent"),
+    env_map_path: Path = Path("catalog/environments.yaml"),
+    *,
+    service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
+    dry_run: bool = False,
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Create or sweep this platform's address and service objects (ADR-0010).
+
+    The same split as `tags`, for the same measured reason one object class
+    along. Widening a live rule's destination made Terraform run the address
+    DESTROY before the rule UPDATE that released it, and SCM refused with 409
+    NON_ZERO_REFS.
+
+    `ensure` runs BEFORE apply and is LOAD-BEARING, not a convenience: the API
+    validates these as references and rejects names that do not resolve, so a
+    rule cannot be applied before the objects it names exist.
+
+    `sweep` runs AFTER push and removes only objects this platform can PROVE it
+    minted — the name must equal the name its own value hashes to — and only
+    when nothing references them.
+
+    Exit codes:  0 ok · 1 usage/IO/auth · 2 invalid intent.
+    """
+    from fwgitops.clients import ScmPushClient  # noqa: F401  (auth stack)
+    from fwgitops.compiler import Scope, wanted_objects
+    from fwgitops.objectsweep import ensure_objects, sweep_objects
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
+    if not ok:
+        return 1
+    items, code = _compile_intents(intent_root, env_map_path, cats, err)
+    if items is None:
+        return code
+
+    scope = Scope.from_dirname(scope_dir)
+    # Only the changes that land in THIS scope, so a sweep of one folder is
+    # never told to protect another folder's objects — or worse, left ignorant
+    # of them and free to delete.
+    mine = [ch for _p, _req, ch in items
+            if handler_for_request(_req).scope_of(ch).key == scope.key
+            and hasattr(ch, "rule")]
+    wanted = wanted_objects(mine)
+
+    try:
+        session = session or ScmSession(ScmCredentials.from_env())
+        params = {"folder": scope.value} if scope.kind == "folder" else {"device": scope.value}
+        plans = []
+        for kind in ("address", "service"):
+            if action == "ensure":
+                body = {name: _object_body(kind, spec)
+                        for name, spec in wanted[kind].items()}
+                plans.append(ensure_objects(session, kind, params, body, dry_run=dry_run))
+            else:
+                plans.append(sweep_objects(session, kind, params,
+                                           sorted(wanted[kind]), dry_run=dry_run))
+    except ScmConfigError as e:
+        print(f"error: {e}", file=err)
+        return 1
+    except ScmApiError as e:
+        print(f"error: SCM API: {e}", file=err)
+        return 1
+
+    verb = "would " if dry_run else ""
+    made, gone = ("create", "remove") if dry_run else ("created", "removed")
+    for plan in plans:
+        if action == "ensure":
+            print(f"OK — {verb}{made} {len(plan.missing)} {plan.kind} object(s) in "
+                  f"{scope}; {len(plan.referenced)} already referenced, "
+                  f"{plan.foreign} not ours", file=out)
+            for n in plan.missing:
+                print(f"  + {n}", file=out)
+        else:
+            print(f"OK — {verb}{gone} {len(plan.unreferenced)} unreferenced "
+                  f"{plan.kind} object(s) in {scope}; {len(plan.referenced)} still "
+                  f"referenced, {plan.foreign} not ours", file=out)
+            for n in plan.unreferenced:
+                print(f"  - {n}", file=out)
+    return 0
+
+
+def _object_body(kind: str, spec: Dict[str, Any]) -> Dict[str, Any]:
+    """The create body for an object, from the compiler's own dict.
+
+    Built from the compiled spec rather than re-derived, so the value that
+    NAMES the object is the value the object is created with. If those two ever
+    disagreed the sweep could not prove ownership and would never remove it.
+    """
+    if kind == "address":
+        field = {"ip-netmask": "ip_netmask", "fqdn": "fqdn"}[spec["type"]]
+        return {field: spec["value"], "tag": spec.get("tags", [])}
+    return {
+        "protocol": {spec["protocol"]: {"port": spec["port"]}},
+        "tag": spec.get("tags", []),
+    }
+
+
 def run_push(
     folder: Optional[str] = None,
     *,
@@ -2943,6 +3049,23 @@ def build_parser() -> argparse.ArgumentParser:
     tg.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
     tg.add_argument("--dry-run", action="store_true", help="report, write nothing")
 
+    ob = sub.add_parser("objects",
+                        help="create or sweep this platform's address/service objects "
+                             "(ADR-0010)")
+    ob.add_argument("action", choices=("ensure", "sweep"),
+                    help="ensure: create missing objects, run BEFORE apply — the API "
+                         "rejects a rule naming an object that does not exist, so this "
+                         "is load-bearing. sweep: remove objects nothing references, run "
+                         "AFTER push. Terraform does neither — it ran an address destroy "
+                         "before the rule update that released it and 409'd.")
+    ob.add_argument("scope_dir",
+                    help="a Terraform root DIRECTORY name (`prod-edge` or `device-<serial>`)")
+    ob.add_argument("intent_root", nargs="?", default=Path("intent"), type=Path)
+    ob.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path)
+    ob.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
+    ob.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+    ob.add_argument("--dry-run", action="store_true", help="report, write nothing")
+
     p = sub.add_parser("push", help="push a folder's or firewall's staged config to SCM (T13)")
     p.add_argument("folder", nargs="?", default=None, help="SCM folder to push")
     p.add_argument("--device", default=None,
@@ -3144,6 +3267,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_snapshot(args.kind, args.folder, args.out, device=args.device)
     if args.command == "tags":
         return run_tags(
+            args.action, args.scope_dir, args.intent_root, args.env_map,
+            service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+            dry_run=args.dry_run,
+        )
+    if args.command == "objects":
+        return run_objects(
             args.action, args.scope_dir, args.intent_root, args.env_map,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
             dry_run=args.dry_run,

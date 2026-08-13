@@ -192,6 +192,35 @@ operation as the rule change that released the tag** — that ordering is the fi
 it, reads references from SCM rather than inferring them, and sweeps nothing if
 that read fails.
 
+### `objects`
+
+Create the address and service objects a rule references; remove unreferenced
+ones. The same split as `tags`, one object class along (ADR-0010).
+
+```sh
+fwgitops objects ensure prod-edge
+fwgitops objects sweep prod-edge
+```
+
+**`ensure` is load-bearing, not a convenience.** The API rejects a rule naming
+an object that does not resolve, so a rule cannot be applied before its objects
+exist. It runs before apply; `sweep` runs after push.
+
+The ordering is the fix. Widening a live rule's destination on 2026-08-13 made
+Terraform run the address destroy before the rule update that released it, and
+SCM refused with `409 NON_ZERO_REFS` — the same failure tags hit, for the same
+reason. The rule was never being destroyed: object names are content-addressed,
+so a changed value is a different object rather than an edited one.
+
+`sweep` removes an object only when **both** hold:
+
+* this platform can PROVE it minted it — the name equals the name its own value
+  hashes to, which a foreign object cannot imitate by being named like ours; and
+* nothing references it, read from SCM rather than inferred, by scanning each
+  referring object's whole document rather than fields we guessed.
+
+If the reference read fails, it sweeps nothing.
+
 ---
 
 ## Evidence
