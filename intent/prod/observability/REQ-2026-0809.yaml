@@ -12,8 +12,8 @@ kind: AccessRequest
 metadata:
   id: REQ-2026-0809
   requester: martono@corp
-  ticket: JIRA-21001
-  justification: "Narrow the collector ping to the one host that answers it — the rest of the tier never needed to be reachable"
+  ticket: JIRA-21002
+  justification: "Estate-wide availability sweep: the collector must ping every host in 10.20.0.0/16, not just the web host"
   requested: 2026-08-13
 spec:
   environment: prod
@@ -21,7 +21,7 @@ spec:
   source:
     - cidr: 10.20.20.10/32     # the collector
   destination:
-    - cidr: 10.20.1.55/32      # the web host, not the whole tier
+    - cidr: 10.20.0.0/16       # the whole estate, for the sweep
   service:
     - protocol: icmp
   log: true
