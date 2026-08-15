@@ -33,6 +33,10 @@ on:
         description: "also report PAN-OS predefined object names (service-*) and count the rest"
         required: false
         default: "false"
+      show_order:
+        description: "print returned names IN ORDER (rulebase order for a rules path)"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -56,6 +60,7 @@ jobs:
           SCOPE: ${{ inputs.scope }}
           SHOW_OUR_REFS: ${{ inputs.show_our_refs }}
           SHOW_PREDEFINED: ${{ inputs.show_predefined }}
+          SHOW_ORDER: ${{ inputs.show_order }}
         run: |
           python - <<'PY'
           import json
@@ -95,6 +100,16 @@ jobs:
                   blob = json.dumps(rows)
                   ours = sorted(set(re.findall(r"\b(?:addr|svc)-[A-Za-z0-9._-]+-[0-9a-f]{8}\b", blob)))
                   print(f"{'':<45} references our objects: {ours or 'NONE'}")
+              if os.environ.get("SHOW_ORDER", "").lower() == "true":
+                  # Answers where SCM PLACES a rule we sent no position for.
+                  # Only our own REQ ids and predefined names are printed; this
+                  # repo is public and anything else is counted, not named.
+                  import re
+
+                  for i, r in enumerate(rows or []):
+                      n = str(r.get("name", "")) if isinstance(r, dict) else ""
+                      safe = n if re.fullmatch(r"(?:REQ-[0-9-]+|service-[a-z0-9-]+)", n) else "<other>"
+                      print(f"{'':<45} [{i}] {safe}")
               if os.environ.get("SHOW_PREDEFINED", "").lower() == "true":
                   # DELIBERATELY NARROW. This repo is public, so only names
                   # matching the PAN-OS predefined shape are printed; anything
