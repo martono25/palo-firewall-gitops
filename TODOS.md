@@ -311,7 +311,21 @@ interfaces do not. Three kinds in, the only safe assumption is that it varies.
 **Priority:** P2 (v2.0)
 **Depends on:** its own fidelity probe.
 
-### `push` no-op detection never fires — repeat pushes create empty commit jobs
+### `push` no-op detection never fires — WORKED AROUND 2026-08-15, root cause open
+
+**The symptom in the title is fixed; the title is now misleading.** Repeat pushes
+no longer create empty commit jobs, because `apply.yml` checks whether anything
+was staged and skips the push entirely ("— skipping push, which would mint an
+empty commit job"). Observed working on every scope of the 2026-08-15 runs.
+
+What remains is the original mechanism: `push_folder`'s `_NOTHING_TO_PUSH`
+detection still cannot fire, because SCM answers an empty push with a normal
+job id and `result_str=OK` rather than an error. Any caller that reaches
+`push_folder` without the workflow's guard still mints an empty job.
+
+So this is now a LIBRARY gap behind a WORKFLOW guard, which is worth knowing
+before someone deletes the guard as redundant.
+
 
 **What:** `push_folder` returns `status="noop"` when SCM says there is nothing to
 push (`_NOTHING_TO_PUSH` matches the error text). Against the live tenant on
@@ -546,7 +560,16 @@ same false-negative rejection `baseline_zones` was added to fix.
 **Priority:** P3
 **Depends on:** None.
 
-### Removing a tag from a rule and destroying that tag OBJECT is UNORDERED — CONFIRMED 2026-08-10
+### ~~Removing a tag from a rule and destroying that tag OBJECT is UNORDERED~~ — SOLVED (ADR-0009), closed 2026-08-15
+
+Terraform no longer destroys tag objects at all: they are created before the
+apply and swept after the push, so the rule update and the garbage collection
+are no longer the same transaction. The same treatment was extended to ADDRESS
+and SERVICE objects on 2026-08-13 (ADR-0010) after they hit the identical 409 —
+which is what this entry predicted would generalise, and it did.
+
+Kept for the measurement below, which is the evidence both ADRs rest on.
+
 
 **Found 2026-08-05, MECHANISM CONFIRMED 2026-08-10** (`spike/tag-destroy-ordering`).
 Latent for any tag VALUE change — not specific to expiry.
@@ -923,7 +946,38 @@ Rework the premise before building this. Secrets (`vmseries_authcode`,
 **Priority:** P2
 **Depends on:** InterfaceRequest scope decision.
 
-### Q1 — Complete the kind registry (KindHandler)
+### ~~Q1 — Complete the kind registry (KindHandler)~~ — BUILT, closed 2026-08-15
+
+**This entry described a codebase that no longer exists, while advertising
+Effort: L / Priority: P3** — so anyone picking it up would scope a large refactor
+that had already been done. Verified 2026-08-15:
+
+* `evidence.py` assembles the bundle from the registry (`kinds.evidence_object`)
+  and dispatches with `handler_for_request`, rather than taking an
+  `AccessRequest`.
+* `drift.py` covers "a kind the moment it registers `drift_engine`"; `cli.py`
+  loops the registry via `kinds_with_drift_engine`.
+* `KindHandler` now carries compile, tfvars, classify, scope_of, name_of,
+  evidence_object, evidence_id_of, drift_engine, state_api_path and
+  depends_on_kinds.
+
+The deferral condition was "revisit once a third kind exists and the drift story
+is settled". Four kinds exist and drift is registry-driven, so both were met and
+the work happened incrementally without this entry being closed.
+
+The `zone_tfvars` folder-scoping note that travelled with this item is NOT
+covered by the above and is still latent — kept below on its own.
+
+### zone_tfvars keys globally by zone name, but is only called per-folder
+
+Latent, not an active bug: `compiler.py` keys the zone map by name alone, which
+would collide if two folders declared the same zone name and were ever compiled
+together. Split out of Q1 on 2026-08-15 so closing that item did not silently
+close this.
+
+**Effort:** S
+**Priority:** P3
+
 
 **What:** Replace the isinstance dispatch with a registered handler per intent
 kind covering load, compile, tfvars emission, classify, evidence and drift.
