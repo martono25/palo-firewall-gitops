@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -1173,3 +1174,57 @@ def test_cli_push_does_NOT_skip_a_parent_whose_CHILD_has_a_firewall(capsys):
     assert h.devices_beneath("ngfw-shared"), (
         "ngfw-shared must stay pushable — it inherits down to a real firewall")
     assert not h.devices_beneath("GitOps")
+
+
+def test_a_SKIPPED_push_is_recorded_not_silent(tmp_path, capsys):
+    """`push: null` used to mean exactly one thing: nothing was staged. That was
+    true while one folder existed.
+
+    A second folder added two more ways to get there — a folder with no firewall
+    beneath it, and a push that was attempted and FAILED. All three produced the
+    same `null`, so an assessor could not tell a correct decision from a
+    breakage. That is the single distinction this field exists to make.
+    """
+    import json as _json
+
+    rec = tmp_path / "push-GitOps.json"
+    rc = run_push("GitOps", record=rec)
+    assert rc == 0
+    assert rec.is_file(), "a skip must leave a record, or it is indistinguishable from a no-op"
+
+    d = _json.loads(rec.read_text())
+    assert d["status"] == "skipped"
+    assert d["reason"] == "no_devices_beneath"
+    assert d["scope_dir"] == "GitOps"
+
+
+def test_the_skip_reason_SURVIVES_into_the_bundle(tmp_path):
+    """A recorded reason nothing carries into evidence is a reason nobody reads.
+    `_PUSH_EVIDENCE_KEYS` is an allow-list, so a new field is dropped by default
+    — the safe direction for secrets, and the wrong one here."""
+    import json as _json
+
+    from fwgitops.cli import _push_results
+
+    rec = tmp_path / "push-GitOps.json"
+    run_push("GitOps", record=rec)
+
+    results = _push_results([rec], sys.stderr)
+    assert results is not None, "a well-formed record must not fail closed"
+    payload = results["GitOps"].to_evidence()
+    assert payload["reason"] == "no_devices_beneath", (
+        "the reason must reach the bundle, or the ambiguity is unchanged")
+    assert payload["status"] == "skipped"
+
+
+def test_a_push_record_still_discloses_no_identity(tmp_path):
+    """`admins` defaults to SCM_CLIENT_ID, a secret. Adding a field to the
+    allow-list is exactly when that guarantee is easiest to lose."""
+    import json as _json
+
+    from fwgitops.cli import _PUSH_EVIDENCE_KEYS
+
+    assert "admins" not in _PUSH_EVIDENCE_KEYS
+    rec = tmp_path / "push-GitOps.json"
+    run_push("GitOps", record=rec)
+    assert "admins" not in _json.loads(rec.read_text())
