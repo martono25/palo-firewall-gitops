@@ -93,7 +93,7 @@ jobs:
                   import re
 
                   blob = json.dumps(rows)
-                  ours = sorted(set(re.findall(r"\b(?:addr|svc)-[0-9a-f]{10}\b", blob)))
+                  ours = sorted(set(re.findall(r"\b(?:addr|svc)-[A-Za-z0-9._-]+-[0-9a-f]{8}\b", blob)))
                   print(f"{'':<45} references our objects: {ours or 'NONE'}")
               if os.environ.get("SHOW_PREDEFINED", "").lower() == "true":
                   # DELIBERATELY NARROW. This repo is public, so only names
@@ -108,7 +108,7 @@ jobs:
                   predefined = sorted(n for n in names
                                       if re.fullmatch(r"service-[a-z0-9-]+", n))
                   ours = sorted(n for n in names
-                                if re.fullmatch(r"(?:addr|svc)-[0-9a-f]{10}", n))
+                                if re.fullmatch(r"(?:addr|svc)-[A-Za-z0-9._-]+-[0-9a-f]{8}", n))
                   other = len(names) - len(predefined) - len(ours)
                   print(f"{'':<45} predefined: {predefined or 'NONE'}")
                   print(f"{'':<45} ours: {ours or 'NONE'}  | other (unnamed): {other}")

@@ -55,7 +55,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from fwgitops.tags import object_name
+from fwgitops.tags import legacy_object_name, object_name
 
 #: kind -> the collection that holds it.
 KIND_PATHS: Dict[str, str] = {
@@ -148,7 +148,13 @@ def is_ours(kind: str, name: str, value: Optional[str]) -> bool:
     if not value:
         return False
     try:
-        return object_name(kind, value) == name
+        # The LEGACY arm is what lets the sweep clean up after the 2026-08-15
+        # rename. Ownership is proved by re-deriving a name from its value, so
+        # on the day the scheme changed every object already in the tenant
+        # stopped matching and would have been stranded as "not ours" — litter
+        # this platform made and could no longer recognise. Remove the second
+        # arm once no tenant holds a legacy name.
+        return name in (object_name(kind, value), legacy_object_name(kind, value))
     except ValueError:
         return False
 
