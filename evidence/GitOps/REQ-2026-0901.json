@@ -1,13 +1,18 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31886753951"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31886981681"
   },
   "approval": {
-    "approvers": [],
+    "approvers": [
+      {
+        "login": "martono25",
+        "via": "deployment_gate"
+      }
+    ],
     "gate": null,
-    "merge_commit": "a29a28d6692ceabb3695ade01a4d65df81bb6f32",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/205"
+    "merge_commit": "9327bdfcdfa559f264d95f9e3e128ac33f7bd679",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/207"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -55,7 +60,7 @@
         "relative_position": null,
         "rulebase": "pre",
         "services": [
-          "svc-fd64e1b89a"
+          "svc-02a1b12c31"
         ],
         "source_user": [
           "any"
@@ -67,7 +72,7 @@
           "gitops:managed",
           "gitops:req:REQ-2026-0901",
           "gitops:section:specific-allow",
-          "gitops:ticket:JIRA-21100"
+          "gitops:ticket:JIRA-21101"
         ],
         "target_rule": null,
         "to_zones": [
@@ -76,8 +81,8 @@
       },
       "service_objects": [
         {
-          "name": "svc-fd64e1b89a",
-          "port": "443",
+          "name": "svc-02a1b12c31",
+          "port": "8443",
           "protocol": "tcp",
           "tags": [
             "gitops:managed"
@@ -85,38 +90,34 @@
         }
       ]
     },
-    "object_sha256": "1acb789d280b5dd3f9e3eb4a183bbbe7caeb765d3f86fd8dcd03658109ac2682",
+    "object_sha256": "26475295c332f994156b2abe84d53fe5aac01dd6ed76707e2aa79941a5f918b6",
     "scope": {
       "kind": "folder",
       "value": "GitOps"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "5f18cebebd5d6fe81f745b17e8921ac64962cefb06064d83feef8b2d205fecb1"
+    "tfvars_sha256": "f04a33b3500a95516a9fa679720eaa53a2071b7653a90b48550198a714b4f077"
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7"
+    "SC-7",
+    "CM-5"
   ],
-  "controls_not_evidenced": [
-    {
-      "control": "CM-5",
-      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
-    }
-  ],
-  "generated_at": "2026-08-15T13:18:17Z",
+  "controls_not_evidenced": [],
+  "generated_at": "2026-08-15T13:30:04Z",
   "kind": "AccessRequest",
   "push": null,
   "req_id": "REQ-2026-0901",
   "request": {
     "intent_file": "intent/sandbox/probe/REQ-2026-0901.yaml",
-    "intent_sha256": "53019fc32acd67608283fd0702c65fd6deb6cecc3a9272d79556fac49920e1e4",
-    "justification": "Standing sandbox rule: keeps a second folder in the tree so the multi-scope checks stay meaningful. Enforces nothing \u2014 the GitOps folder has no devices",
+    "intent_sha256": "0a6d591e8ec41058d559638ed9284aadf479f18ed36ee3fd0409531496ecb284",
+    "justification": "Standing sandbox rule, now on 8443. The port change is real but incidental: it STAGES something in a folder with no firewall, which is the only way to exercise the push skip added after the 2026-08-15 apply failure",
     "requested": "2026-08-13",
     "requester": "martono@corp",
-    "ticket": "JIRA-21100"
+    "ticket": "JIRA-21101"
   },
   "risk": {
     "checks_fired": [
