@@ -712,6 +712,45 @@ still needs a folder for explicit `cidr:` endpoints that have no app, and makes
 app cardinality drive folder cardinality. Worth revisiting only if apps map to
 distinct firewalls.
 
+### Rules created in ONE apply have arbitrary order among themselves
+
+**Policy confirmed 2026-08-15, and it already works:** a new rule goes to the
+BOTTOM by default, and ordering must name its anchor explicitly. Both hold
+today — `position` absent means None, so nothing is sent and SCM appends; and
+`before:`/`after:` are rejected at load time without a target.
+
+Bottom-by-default is achieved by sending NOTHING, which matters: defaulting to
+`relative_position = "bottom"` and sending it was measured to re-stack the whole
+rulebase on first write (`spike/ordering-existing`, above).
+
+Observed order in `prod-edge`, via the read-only probe:
+
+```
+[0..3] <not ours>
+[4] REQ-2026-0727   [5] REQ-2026-0726   [6] REQ-2026-0725
+[7] REQ-2026-0730   [8] REQ-2026-0809   [9] REQ-2026-0812
+```
+
+Our rules sit below the four we do not manage — bottom-by-default, as intended.
+But `0727, 0726, 0725` is REVERSED against their ids: those three were created in
+one apply, and within a single apply the relative order is whatever order
+Terraform walks the map. Two runs need not agree.
+
+**So the guarantee is per-batch, not per-rule.** "Added later" reliably means
+"lower"; "added together" means "in some order". A requester who submits two
+rules where one must precede the other cannot express that by submitting them in
+sequence — they have to use `before:`/`after:` and name the anchor.
+
+**Unconfirmed:** whether `GET /config/security/v1/security-rules` returns
+RULEBASE order or some other order. The grouping above is strong evidence, but
+the definitive cross-check is `show running security-policy` on the device, and
+the pilot was stopped when this was measured. Worth confirming before this entry
+is relied on.
+
+**Effort:** S to document, L to fix (needs deterministic batch ordering, which
+is the anchored-move problem again)
+**Priority:** P3
+
 ## Drift
 
 ### State-based drift cannot tell an orphan from a hand-added object

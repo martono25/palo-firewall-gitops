@@ -249,6 +249,32 @@ fwgitops rules prod-edge --has REQ-2026-0142         # LIVE (exit 0) / NOT FOUND
 
 ---
 
+## Where your rule lands in the rulebase
+
+**A new rule goes to the bottom.** Rules are evaluated top to bottom and the
+first match wins, so a new rule never silently pre-empts one that already
+exists. You do not have to ask for this and should not try to.
+
+**If order matters, say so explicitly** — and name the rule you are ordering
+against:
+
+```yaml
+spec:
+  position: after:REQ-2026-0142    # or before:REQ-2026-0142, top, bottom
+```
+
+`before:` and `after:` must name a rule id. "Put it near the DNS rules" is not
+something the platform can act on, and a `position` without a target is rejected
+when your request is validated.
+
+> **Submitting two rules together does not order them.** They will both land
+> below the existing rules, but their order *relative to each other* is not
+> guaranteed and can differ between runs. If one of your rules must come before
+> the other, say so with `before:`/`after:` — do not rely on the order you
+> submitted them in.
+
+---
+
 ## Confirm your rule deployed
 
 Two ways, both **without logging into SCM**. Use whichever fits your path.
