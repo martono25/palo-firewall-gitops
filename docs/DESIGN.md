@@ -160,9 +160,18 @@ auto-apply; hard dependency on owning the tool + vendor coupling.
   *(Correction 2026-07-19: the evidence bundle BASELINE is Phase 1, not Phase 2 — the
   Phase-1 success criterion requires it, and it is the audit story that justifies the
   platform. Built and tested in `fwgitops.evidence`; Phase 2 only fills `risk`.)* Heaviest phase — the classifier is the critical-path build here.
-- **Phase 3 — Scale + self-service (full B).** Expand compiler to SCM + Panorama backends
-  and multi-device-group targeting, widen intent schema, add self-service intake surface,
-  onboard additional device groups, formalize break-glass with automated evidence capture.
+- **Phase 3 — Scale + self-service (full B) — DONE.** Self-service intake (Issue Form →
+  `fwgitops from-issue` → PR), break-glass with automated evidence (`all_admins`), and
+  multi-folder — proven 2026-08-15, when a second folder found two real defects on its
+  first run.
+
+  *(Correction 2026-08-15: this line used to promise "SCM + **Panorama** backends", which
+  contradicts resolved question #2 below — **SCM single plane, no Panorama** — and the
+  non-goals table, which says the same. The wording predates that resolution and was never
+  updated, so both this file and the README carried a planned item the project had already
+  ruled out. Anyone reading the roadmap for what to build next was pointed at work that had
+  been cancelled. Multi-device-group targeting goes with it: device groups are Panorama's
+  model, and this platform targets SCM folders.)*
 
 **Risk-engine fork — RESOLVED: build.** No commercial firewall-analysis tool is owned, so
 Approach C's borrow-the-verdict shortcut is off the table. The Python policy-as-code

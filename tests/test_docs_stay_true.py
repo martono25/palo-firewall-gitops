@@ -829,3 +829,30 @@ def test_the_README_does_not_claim_a_zone_delete_NEVER_reaches_the_firewall():
     assert "Both end states fail closed; only the first fails loudly" in readme, (
         "and must say which of the two is silent, since that is the one an "
         "operator will not notice")
+
+
+def test_the_roadmap_does_not_PLAN_what_the_design_RULED_OUT():
+    """A roadmap that contradicts its own decision record sends people to build
+    cancelled work.
+
+    `DESIGN.md` resolved question #2 as "SCM single plane, no Panorama", and its
+    non-goals table says the same — while the Phase 3 line promised "SCM +
+    Panorama backends" for weeks, and the README inherited it. Found 2026-08-15
+    by being asked what to work on next and answering from the roadmap.
+
+    Pinned as a general rule rather than a Panorama one: whatever the design
+    RESOLVES against must not reappear as planned work.
+    """
+    design = _flat(DOCS / "DESIGN.md")
+    readme = _flat(REPO_ROOT / "README.md")
+
+    assert "RESOLVED: SCM single plane" in design, (
+        "the decision this test guards must still be recorded")
+
+    for name, text in (("DESIGN.md", design), ("README.md", readme)):
+        for planning in ("Expand compiler to SCM + Panorama",
+                         "Panorama backend remains",
+                         "Panorama backends and multi-device-group"):
+            assert planning not in text, (
+                f"docs/{name} plans Panorama work the design resolved against "
+                f"(SCM single plane): {planning!r}")

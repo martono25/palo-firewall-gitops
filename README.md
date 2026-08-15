@@ -131,8 +131,11 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   (`all_admins` in the bundle). Multi-folder is PROVEN: a second folder (`GitOps`) compiles,
   applies, classifies and records evidence of its own since 2026-08-15 — and found two real
   defects on its first run, a push that cannot target a folder with no firewall and an
-  evidence field that could not tell a declined push from a failed one. Panorama backend
-  remains the open item.
+  evidence field that could not tell a declined push from a failed one.
+
+  Phase 3 is COMPLETE. It previously listed a Panorama backend as the remaining item, which
+  contradicted the design's own resolved decision — SCM single plane, no Panorama
+  ([`DESIGN.md`](docs/DESIGN.md), open question #2). Corrected 2026-08-15.
 - **Day-1 as GitOps (ADR-0002) — BUILT.** The ordered chain (`InterfaceRequest` →
   `ZoneRequest` → `RouteRequest` → `AccessRequest`) is built AND run against a live firewall:
   interfaces addressed, default route active, rules enforcing on real packets. Ordering is
