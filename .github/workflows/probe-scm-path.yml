@@ -124,7 +124,15 @@ jobs:
                                       if re.fullmatch(r"service-[a-z0-9-]+", n))
                   ours = sorted(n for n in names
                                 if re.fullmatch(r"(?:addr|svc)-[A-Za-z0-9._-]+-[0-9a-f]{8}", n))
-                  other = len(names) - len(predefined) - len(ours)
+                  # LEGACY SHAPE: `<prefix>-<10 hex>`, minted before 2026-08-15.
+                  # `legacy_object_name` exists solely so the sweep can still
+                  # recognise these; it is deletable exactly when this is empty
+                  # in every folder.
+                  legacy = sorted(n for n in names
+                                  if re.fullmatch(r"(?:addr|svc)-[0-9a-f]{10}", n))
+                  other = len(names) - len(predefined) - len(ours) - len(legacy)
                   print(f"{'':<45} predefined: {predefined or 'NONE'}")
                   print(f"{'':<45} ours: {ours or 'NONE'}  | other (unnamed): {other}")
+                  print(f"{'':<45} LEGACY (blocks deleting legacy_object_name): "
+                        f"{legacy or 'NONE'}")
           PY
