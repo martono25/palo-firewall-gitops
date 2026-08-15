@@ -134,8 +134,13 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   declared in the kind registry and consumed by the apply pipeline (`fwgitops apply-order`).
   All four kinds are now verified on hardware: the last one, `ZoneRequest`, reached the
   pilot on 2026-08-05 (zone `dmz` bound to `ethernet1/2`, confirmed in the device's pushed
-  config with its protection and log-forwarding profiles intact). Zone DELETION is tested end to end and fails closed: SCM refuses to delete a zone a
-  rule still references (409 `NON_ZERO_REFS`), so the delete never reaches the firewall.
+  config with its protection and log-forwarding profiles intact). Zone DELETION is
+  tested end to end, and what happens depends on what still holds the zone:
+  a **rule** referencing it makes SCM refuse (409 `NON_ZERO_REFS`) and the delete
+  never reaches the firewall, but an **interface** bound to it does NOT — that
+  deletes in about two seconds and leaves the port addressed and unzoned, which
+  PAN-OS drops traffic on. Both end states fail closed; only the first fails
+  loudly. Measured 2026-08-12.
   `NatRequest` remains deferred. See [`TODOS.md`](TODOS.md).
 
 The three questions this project opened with are answered: no commercial firewall-analysis
