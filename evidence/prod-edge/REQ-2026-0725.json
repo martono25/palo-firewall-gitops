@@ -1,25 +1,20 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31322822785"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31889588315"
   },
   "approval": {
-    "approvers": [
-      {
-        "login": "martono25",
-        "via": "deployment_gate"
-      }
-    ],
+    "approvers": [],
     "gate": null,
-    "merge_commit": "9ec84849fc66abbdb36eecd8fbb2cc82ee676da6",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/112"
+    "merge_commit": "13eb8df38deb6b69fb2ec4d5ca4f6043512466f4",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/214"
   },
   "compiled": {
     "compiler_version": "1.0.0",
     "object": {
       "address_objects": [
         {
-          "name": "addr-85c1076cfe",
+          "name": "addr-10.20.1.0_24-85c1076c",
           "tags": [
             "gitops:managed"
           ],
@@ -27,7 +22,7 @@
           "value": "10.20.1.0/24"
         },
         {
-          "name": "addr-beed1e7b50",
+          "name": "addr-10.20.20.10_32-beed1e7b",
           "tags": [
             "gitops:managed"
           ],
@@ -45,7 +40,7 @@
         ],
         "description": null,
         "destinations": [
-          "addr-beed1e7b50"
+          "addr-10.20.20.10_32-beed1e7b"
         ],
         "from_zones": [
           "local"
@@ -60,13 +55,13 @@
         "relative_position": null,
         "rulebase": "pre",
         "services": [
-          "svc-fd64e1b89a"
+          "svc-tcp_443-fd64e1b8"
         ],
         "source_user": [
           "any"
         ],
         "sources": [
-          "addr-85c1076cfe"
+          "addr-10.20.1.0_24-85c1076c"
         ],
         "tags": [
           "gitops:managed",
@@ -81,7 +76,7 @@
       },
       "service_objects": [
         {
-          "name": "svc-fd64e1b89a",
+          "name": "svc-tcp_443-fd64e1b8",
           "port": "443",
           "protocol": "tcp",
           "tags": [
@@ -90,26 +85,36 @@
         }
       ]
     },
-    "object_sha256": "60c04344620d481e5641e22d2c113b3ee8845efaa3041a714810f5bdc86b33a5",
+    "object_sha256": "1d729a7be3a6152f8cf2f44106a454bfd2dfec194d0df700c25e4b1ec1ed8391",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "d34f2926552e6987a7c867cc5c31ae321e3efe5edbce0d33bcae184b9fd06451"
+    "tfvars_sha256": "6eff4aab9a96372830e7def58f59a589235e17913d4ff41f5fda2a58dabf2470"
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7",
-    "CM-5"
+    "SC-7"
   ],
-  "controls_not_evidenced": [],
-  "generated_at": "2026-08-09T16:09:35Z",
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-15T14:22:17Z",
   "kind": "AccessRequest",
-  "push": null,
+  "push": {
+    "admin_count": 1,
+    "all_admins": false,
+    "folder": "prod-edge",
+    "job_id": "243",
+    "status": "success"
+  },
   "req_id": "REQ-2026-0725",
   "request": {
     "intent_file": "intent/prod/observability/REQ-2026-0725.yaml",

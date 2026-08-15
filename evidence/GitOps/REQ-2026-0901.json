@@ -1,25 +1,20 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31886981681"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31889588315"
   },
   "approval": {
-    "approvers": [
-      {
-        "login": "martono25",
-        "via": "deployment_gate"
-      }
-    ],
+    "approvers": [],
     "gate": null,
-    "merge_commit": "9327bdfcdfa559f264d95f9e3e128ac33f7bd679",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/207"
+    "merge_commit": "13eb8df38deb6b69fb2ec4d5ca4f6043512466f4",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/214"
   },
   "compiled": {
     "compiler_version": "1.0.0",
     "object": {
       "address_objects": [
         {
-          "name": "addr-88ef17b752",
+          "name": "addr-10.90.1.10_32-88ef17b7",
           "tags": [
             "gitops:managed"
           ],
@@ -27,7 +22,7 @@
           "value": "10.90.1.10/32"
         },
         {
-          "name": "addr-cdbe17d00f",
+          "name": "addr-10.90.2.20_32-cdbe17d0",
           "tags": [
             "gitops:managed"
           ],
@@ -45,7 +40,7 @@
         ],
         "description": null,
         "destinations": [
-          "addr-cdbe17d00f"
+          "addr-10.90.2.20_32-cdbe17d0"
         ],
         "from_zones": [
           "local"
@@ -60,13 +55,13 @@
         "relative_position": null,
         "rulebase": "pre",
         "services": [
-          "svc-02a1b12c31"
+          "svc-tcp_8443-02a1b12c"
         ],
         "source_user": [
           "any"
         ],
         "sources": [
-          "addr-88ef17b752"
+          "addr-10.90.1.10_32-88ef17b7"
         ],
         "tags": [
           "gitops:managed",
@@ -81,7 +76,7 @@
       },
       "service_objects": [
         {
-          "name": "svc-02a1b12c31",
+          "name": "svc-tcp_8443-02a1b12c",
           "port": "8443",
           "protocol": "tcp",
           "tags": [
@@ -90,26 +85,34 @@
         }
       ]
     },
-    "object_sha256": "26475295c332f994156b2abe84d53fe5aac01dd6ed76707e2aa79941a5f918b6",
+    "object_sha256": "eb10e65e14cd9abf40fd93aa223ebe8bd0df28d473f32cf63dabf48ac46642ac",
     "scope": {
       "kind": "folder",
       "value": "GitOps"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "f04a33b3500a95516a9fa679720eaa53a2071b7653a90b48550198a714b4f077"
+    "tfvars_sha256": "84d2ea8c721930ec7a4551dd06f6ed1a165dd8ac61ccff7393a6ab0f220a0c3f"
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7",
-    "CM-5"
+    "SC-7"
   ],
-  "controls_not_evidenced": [],
-  "generated_at": "2026-08-15T13:30:04Z",
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-08-15T14:22:17Z",
   "kind": "AccessRequest",
-  "push": null,
+  "push": {
+    "folder": "GitOps",
+    "reason": "no_devices_beneath",
+    "status": "skipped"
+  },
   "req_id": "REQ-2026-0901",
   "request": {
     "intent_file": "intent/sandbox/probe/REQ-2026-0901.yaml",
