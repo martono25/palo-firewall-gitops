@@ -1858,7 +1858,31 @@ def _read_snapshot_rows(path: Path, err):
 #: Exactly what a push may disclose in a committed bundle. `admins` is absent by
 #: design — it defaults to `SCM_CLIENT_ID`, a secret; `all_admins` carries the
 #: audit-relevant half (was this break-glass?) without the identity.
-_PUSH_EVIDENCE_KEYS = ("folder", "status", "job_id", "admin_count", "all_admins")
+#: `reason` joins them 2026-08-15. `push: null` had meant "nothing was staged",
+#: which was the only way to get there while one folder existed. A second folder
+#: added two more: a folder with no firewall beneath it (nothing to push TO), and
+#: a push that was attempted and FAILED. An assessor could not tell a correct
+#: decision from a breakage, which is the one thing this field exists to say.
+_PUSH_EVIDENCE_KEYS = ("folder", "status", "job_id", "admin_count", "all_admins",
+                       "reason")
+
+
+def _write_push_record(record: Optional[Path], payload: Dict[str, Any], err) -> None:
+    """Write a `--record` file for a push that did not happen.
+
+    Best effort on purpose: the push decision has already been made correctly,
+    so failing to write the note about it must not turn a correct run red. The
+    note is for the audit trail, not for the control.
+    """
+    if record is None:
+        return
+    try:
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps(
+            {"scope_dir": payload.get("folder", ""), **payload},
+            indent=2, sort_keys=True) + "\n")
+    except OSError as e:  # noqa: BLE001
+        print(f"warning: could not write push record {record}: {e}", file=err)
 
 
 @dataclass(frozen=True)
@@ -2387,6 +2411,15 @@ def run_push(
             print(f"skipping push for {folder!r} — no firewall inherits from it, "
                   f"so there is nothing to push to. The config is applied in SCM "
                   f"and will reach a device when one registers.", file=out)
+            # RECORD THE SKIP. Writing nothing would leave `push: null`, which
+            # already means "nothing was staged" — and a bundle that cannot
+            # distinguish a deliberate skip from a failed push is the ambiguity
+            # this field exists to remove.
+            _write_push_record(record, {
+                "folder": folder,
+                "status": "skipped",
+                "reason": "no_devices_beneath",
+            }, err)
             return 0
     if session is None:
         try:
