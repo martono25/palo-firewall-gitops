@@ -968,15 +968,31 @@ the work happened incrementally without this entry being closed.
 The `zone_tfvars` folder-scoping note that travelled with this item is NOT
 covered by the above and is still latent — kept below on its own.
 
-### zone_tfvars keys globally by zone name, but is only called per-folder
+### ~~zone_tfvars keys globally by zone name, but is only called per-folder~~ — FIXED 2026-08-15
 
-Latent, not an active bug: `compiler.py` keys the zone map by name alone, which
-would collide if two folders declared the same zone name and were ever compiled
-together. Split out of Q1 on 2026-08-15 so closing that item did not silently
-close this.
+Generalised on the way: EVERY tfvars aggregator had the same implicit contract,
+and none enforced it. `group_by_kind_and_scope` guarantees single-scope input at
+the one production call site, so the assumption held — but the failure when it
+was broken actively misled. Two folders using `tcp/443` produced
 
-**Effort:** S
-**Priority:** P3
+    object name collision on 'svc-fd64e1b89a' with differing definitions
+    (deterministic naming should prevent this — investigate)
+
+which sends the reader to the naming scheme. The naming was correct; the caller
+had mixed scopes. That happened for real on 2026-08-15, in a test helper written
+the day before, and was only reachable once a second folder existed.
+
+All four aggregators now check, and the message names the scopes WITH their kind
+(`folder 'lab'`, not a bare `lab`) and points at the function that groups. The
+zone message no longer reports a cross-folder name repeat as "two ZoneRequests
+share metadata.id" — `dmz` in two folders is two legitimate zones, not an
+author's mistake.
+
+Routes check LAST rather than first: `router 'X' spans folders 'A' and 'B'`
+names the router and both folders, which is strictly better, and a guard running
+first would mask it. The generic check still earns its place after — two
+DIFFERENT routers in different folders pass the router test and are still a
+scope mix-up.
 
 
 **What:** Replace the isinstance dispatch with a registered handler per intent

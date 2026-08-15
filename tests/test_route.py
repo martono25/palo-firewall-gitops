@@ -265,3 +265,14 @@ def test_the_module_and_root_declare_routers_identically():
         return s[i:s.index("\n}\n", i)]
     assert _block("terraform/prod-edge/variables.tf") == \
            _block("terraform/modules/security_folder/variables.tf")
+
+
+def test_the_ROUTER_message_still_wins_over_the_generic_one():
+    """`router 'X' spans folders 'A' and 'B'` names the router and both folders.
+    A generic scope guard running first would mask it, which is why routes check
+    last."""
+    with pytest.raises(CompileError, match="spans folders"):
+        route_tfvars([
+            _compiled("RT-1", "0.0.0.0/0", nexthop="10.1.0.1"),
+            _compiled("RT-2", "10.9.0.0/24", nexthop="10.1.0.1", folder="lab"),
+        ])
