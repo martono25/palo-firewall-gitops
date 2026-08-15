@@ -29,6 +29,10 @@ on:
         description: "also report which of OUR addr-/svc- objects each path references"
         required: false
         default: "false"
+      show_predefined:
+        description: "also report PAN-OS predefined object names (service-*) and count the rest"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -51,6 +55,7 @@ jobs:
           PATHS: ${{ inputs.paths }}
           SCOPE: ${{ inputs.scope }}
           SHOW_OUR_REFS: ${{ inputs.show_our_refs }}
+          SHOW_PREDEFINED: ${{ inputs.show_predefined }}
         run: |
           python - <<'PY'
           import json
@@ -90,4 +95,21 @@ jobs:
                   blob = json.dumps(rows)
                   ours = sorted(set(re.findall(r"\b(?:addr|svc)-[0-9a-f]{10}\b", blob)))
                   print(f"{'':<45} references our objects: {ours or 'NONE'}")
+              if os.environ.get("SHOW_PREDEFINED", "").lower() == "true":
+                  # DELIBERATELY NARROW. This repo is public, so only names
+                  # matching the PAN-OS predefined shape are printed; anything
+                  # else is counted, never named. The question being answered is
+                  # "do OUR objects duplicate a predefined one", and that needs
+                  # the predefined names only.
+                  import re
+
+                  names = [str(r.get("name", "")) for r in (rows or [])
+                           if isinstance(r, dict)]
+                  predefined = sorted(n for n in names
+                                      if re.fullmatch(r"service-[a-z0-9-]+", n))
+                  ours = sorted(n for n in names
+                                if re.fullmatch(r"(?:addr|svc)-[0-9a-f]{10}", n))
+                  other = len(names) - len(predefined) - len(ours)
+                  print(f"{'':<45} predefined: {predefined or 'NONE'}")
+                  print(f"{'':<45} ours: {ours or 'NONE'}  | other (unnamed): {other}")
           PY
