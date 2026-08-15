@@ -791,3 +791,44 @@ def test_a_COMPILER_change_triggers_an_apply():
         "not trigger an apply, the tenant silently keeps the old output")
     for desired_state in ("intent/**", "catalog/**", "terraform/**"):
         assert desired_state in paths, f"{desired_state} must still trigger"
+
+
+def test_the_TAG_drift_engine_is_actually_invoked():
+    """It was implemented, registered, tested — and called by nothing.
+
+    `terraform plan` cannot see a rule added directly in SCM, because it is not
+    in state; the plan reports "No drift" however many appear. Only the tag
+    engine tells ours from somebody else's. The nightly job's one drift loop
+    iterated `kinds --state-drift`, which is the OTHER three kinds, so rules
+    were in no loop anywhere.
+
+    Found 2026-08-15: four rules added straight into `prod-edge` had never been
+    flagged, and every drift run reported clean.
+    """
+    wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+
+    assert "fwgitops snapshot AccessRequest" in wf, (
+        "something must PRODUCE the rule snapshot — the tag engine had a flag "
+        "to read one and no producer, which is why it never ran")
+    assert "fwgitops drift --snapshot" in wf, (
+        "and something must feed it to the tag engine")
+
+
+def test_every_registered_kind_is_covered_by_SOME_drift_engine_in_the_workflow():
+    """A kind can register a drift engine and still be checked by nobody. That
+    is the exact shape of the gap found on 2026-08-15, so it is asserted for
+    every kind rather than for the one that was missed."""
+    from fwgitops.kinds import REGISTRY
+
+    wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+    state_loop = "fwgitops kinds --state-drift" in wf
+
+    for handler in REGISTRY.values():
+        if handler.drift_engine == "state":
+            assert state_loop, (
+                f"{handler.kind} uses the state engine and nothing iterates the "
+                f"state-drift kinds")
+        elif handler.drift_engine == "tag":
+            assert f"fwgitops snapshot {handler.kind}" in wf, (
+                f"{handler.kind} uses the TAG engine and no step snapshots it, "
+                f"so its drift is never checked")

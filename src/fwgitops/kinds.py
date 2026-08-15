@@ -204,7 +204,14 @@ REGISTRY: Dict[str, KindHandler] = {
         depends_on_kinds=("InterfaceRequest", "ZoneRequest", "RouteRequest"),
         report_prefix="",
         drift_engine="tag",
-        state_api_path=None,   # rules use the tag-based engine      # rules carry gitops: provenance tags
+        # The path is for READING, the engine decides the COMPARISON. Rules
+        # compare by tag (they carry gitops: provenance), but nothing could
+        # produce the snapshot to compare against: `snapshot` is driven off this
+        # field, so with it None the tag engine had a CLI flag, a tested
+        # comparison, and no way to be fed. It was never invoked by any
+        # workflow, which is why four rules added directly in prod-edge went
+        # unflagged (found 2026-08-15).
+        state_api_path="/config/security/v1/security-rules",
         # A CompiledChange is a rule PLUS the address/service objects it needs,
         # so the default (serialise the dataclass whole) already yields all
         # three. The rule is lifted to the top so `object.rule` reads the same
