@@ -1228,3 +1228,43 @@ def test_a_push_record_still_discloses_no_identity(tmp_path):
     rec = tmp_path / "push-GitOps.json"
     run_push("GitOps", record=rec)
     assert "admins" not in _json.loads(rec.read_text())
+
+
+def test_drift_accepts_SCMs_OWN_tag_spelling(tmp_path, capsys):
+    """SCM returns the field as `tag`; this parser only read `tags`.
+
+    Nothing exercised the difference while the tag engine was unwired, because
+    the snapshots were hand-written in tests using `tags`. Feed it a snapshot
+    straight from the API and every rule looks UNTAGGED — therefore unmanaged,
+    including our own — so the first real run would have reported the entire
+    rulebase as drift and buried the four rules that genuinely were.
+
+    `tagsweep` already accepted both spellings. This asserts drift does too.
+    """
+    intent_root, env_map, _ = _setup(tmp_path)
+    snap = tmp_path / "snap.json"
+    # `tag`, exactly as /config/security/v1/security-rules returns it.
+    snap.write_text(json.dumps([
+        {"folder": "prod-edge", "name": "REQ-2026-0417", "tag": _MANAGED_417},
+    ]))
+    rc = run_drift(intent_root, env_map, snap)
+    out = capsys.readouterr().out
+    assert rc == 0, f"a managed rule from a REAL snapshot must not read as drift: {out}"
+    assert "REQ-2026-0417" not in out or "unmanaged" not in out.lower()
+
+
+def test_rules_are_SNAPSHOTTABLE_or_the_tag_engine_cannot_be_fed(tmp_path):
+    """The tag engine had a comparison, a CLI flag, and no producer.
+
+    `fwgitops snapshot` is driven off `state_api_path`, and AccessRequest
+    declared None — so nothing could generate the snapshot the engine reads.
+    That, not the comparison, is why rule drift went unchecked.
+    """
+    from fwgitops.kinds import REGISTRY, kinds_with_state_api
+
+    handler = REGISTRY["AccessRequest"]
+    assert handler.drift_engine == "tag", "rules compare by provenance tag"
+    assert handler.state_api_path, (
+        "and must still be READABLE, or no snapshot can be produced and the "
+        "engine is never fed")
+    assert handler in kinds_with_state_api()

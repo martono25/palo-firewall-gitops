@@ -140,6 +140,40 @@ jobs:
       # returns the folder an object is DEFINED in, and without that distinction
       # every inherited object reads as unexpected (7 false positives against the
       # live tenant, where all zones are defined in the shared parent).
+      # THE CHECK THAT CATCHES A RULE ADDED DIRECTLY IN SCM. terraform cannot
+      # see those — they are not in its state — so the plan above reports "No
+      # drift" no matter how many appear. Only the tag-based engine can tell
+      # ours from somebody else's, by reading gitops: provenance.
+      #
+      # It was implemented, registered and tested, and NOTHING CALLED IT. The
+      # step below iterates `kinds --state-drift`, which is the other three
+      # kinds; rules declare drift_engine="tag" and were in no loop anywhere.
+      # Four rules added straight into prod-edge sat unflagged (2026-08-15).
+      - name: Detect rule drift (added or removed directly in SCM)
+        run: |
+          set -euo pipefail
+          drift=0
+          for dir in terraform/*/; do
+            folder=$(basename "$dir")
+            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
+            [ -f "$dir/main.tf" ] || continue
+            echo "::group::rule drift $folder"
+            out="rules-$folder.json"
+            fwgitops snapshot AccessRequest --scope-dir "$folder" --out "$out"
+            rc=0
+            fwgitops drift --snapshot "$out" || rc=$?
+            echo "::endgroup::"
+            case "$rc" in
+              0) ;;
+              # 3 is the drift signal, not a failure of the check. A warning
+              # keeps the job red-for-broken and yellow-for-drifted, which are
+              # different things to act on.
+              3) echo "::warning::RULE DRIFT in '$folder' — see the group above"; drift=1 ;;
+              *) echo "::error::rule drift check failed for '$folder' (rc=$rc)"; exit 1 ;;
+            esac
+          done
+          [ "$drift" -eq 0 ] || echo "::warning::rule drift detected — see groups above"
+
       - name: Detect state drift (kinds that cannot carry tags)
         run: |
           set -euo pipefail

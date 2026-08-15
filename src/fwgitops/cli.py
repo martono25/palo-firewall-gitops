@@ -1270,8 +1270,15 @@ def run_drift(
         if not isinstance(x, dict) or "folder" not in x or "name" not in x:
             print(f"error: snapshot[{i}] must have 'folder' and 'name'", file=err)
             return 1
+        # SCM returns the field as `tag`; this parser only read `tags`, so a
+        # snapshot straight from the API would have shown every rule as
+        # UNTAGGED — and therefore unmanaged, including our own. `tagsweep`
+        # already accepts both spellings; this now matches it.
+        tags = x.get("tags")
+        if tags is None:
+            tags = x.get("tag")
         actual.append(ActualRule(folder=str(x["folder"]), name=str(x["name"]),
-                                  tags=tuple(x.get("tags", []) or [])))
+                                  tags=tuple(tags or [])))
 
     report = detect_drift(
         of_kind([ch for _, _, ch in items], "AccessRequest"), actual
