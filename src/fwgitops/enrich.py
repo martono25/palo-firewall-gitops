@@ -11,8 +11,8 @@ than wasteful — a redundant write silently repairs a field Terraform failed to
 set, so a regression in the module would never surface. See the ADR-0003
 addendum.
 
-WHAT REMAINS, and why it cannot move to Terraform. An anchored move needs the
-anchor's UUID:
+WHAT REMAINS, and why it does not move to Terraform AS THIS MODULE IS SHAPED.
+An anchored move needs the anchor's UUID:
 
     target_rule = scm_security_rule.this[<key>].id
 
@@ -21,9 +21,21 @@ rejects it:
 
     Error: Cycle: module.security_folder.scm_security_rule.this["REQ-..."], ...
 
+NOT A TERRAFORM LIMITATION — corrected 2026-08-15. The provider documents this
+exact pattern (Example 4 on `scm_security_rule`), referencing a DIFFERENT
+resource block: `target_rule = scm_security_rule.standard_web_access.id`. It
+works. Measured on Terraform v1.15.8: two resources, anchored -> unanchored,
+plans clean; one `for_each` referencing its own instances cycles even when
+nothing is genuinely circular, because those instances are one graph node.
+
+So the constraint is OUR shape — every rule in a single `for_each` — not
+Terraform's capability. A split into anchored and unanchored resources would
+work for depth-1 anchoring, and cycles again for chains (also measured). See
+TODOS for the table.
+
 `top` / `bottom` need no anchor and ARE honoured through `relative_position`;
-only before/after ordering lands here. This is a Terraform limitation, not a
-provider one — the SCM move endpoint works when called with the anchor's UUID.
+only before/after ordering lands here. The SCM move endpoint works when called
+with the anchor's UUID, which is what this module does.
 
     terraform apply ──▶ rules created WITH their fields
          enrich_folder() ──▶ ordering (before/after moves)

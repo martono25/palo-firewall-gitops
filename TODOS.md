@@ -429,15 +429,35 @@ Terraform in v1.15.0/v1.16.0. `enrich.py` has been narrowed to ONE
 responsibility ever since, and the question the title still poses has no bearing
 on it.
 
-**What remains, and why it cannot move.** Before/after ordering. An anchored move
-needs the anchor's UUID — `target_rule = scm_security_rule.this[<key>].id` —
-which is a self-reference inside a single `for_each` block, and Terraform
-rejects it outright:
+**What remains: before/after ordering.**
 
-    Error: Cycle: module.security_folder.scm_security_rule.this["REQ-..."], ...
+**CORRECTION 2026-08-15.** The earlier wording said Terraform "cannot express"
+an anchored move. That is wrong, and the provider's own documentation shows it —
+Example 4 on the `scm_security_rule` page does exactly this:
 
-That is a Terraform limitation, not a provider one; the SCM move endpoint works
-when called with the anchor's UUID, which is exactly what `enrich` does.
+    target_rule = scm_security_rule.standard_web_access.id
+
+The distinction is the SHAPE, not the capability. That example references a
+DIFFERENT resource block. Our module is one `scm_security_rule "this"` with
+`for_each` over every rule, so the same reference points back into its own graph
+node. Measured on Terraform v1.15.8 with `null_resource`, so no provider is
+involved:
+
+| shape | result |
+|---|---|
+| one `for_each`, referencing its own instances (ours) | `Error: Cycle` |
+| two resources, anchored -> unanchored (the docs example) | `Plan: 3 to add` |
+| two resources, anchored -> anchored | `Error: Cycle` |
+
+Note the first case cycles even though instance `b` only references instance
+`a` and nothing is genuinely circular: `for_each` instances of one resource are
+a single node for dependency purposes.
+
+So a split IS viable for depth-1 anchoring — "put X after Y" where Y is not
+itself anchored. It fails for chains ("X after Y, Y after Z"), which the third
+row measures. Supporting arbitrary depth needs one resource per depth level,
+which caps chain length at however many strata the hand-authored module
+declares.
 `top`/`bottom` need no anchor and were wired through `relative_position` in
 v1.41.0 — that entry is about those two, NOT about before/after, which is an
 easy misread since they sit next to each other.
@@ -446,12 +466,16 @@ easy misread since they sit next to each other.
 
 * dropping before/after ordering from the intent schema — it is expressible
   today (`intent.py` `_load_position`), so this removes capability; or
-* splitting `scm_security_rule` into anchored and unanchored resources so the
-  reference crosses resources instead of looping. This breaks the cycle only
-  while an anchor never points at another anchored rule — which nothing
-  prevents, so it trades a clean limitation for a conditional one.
+* splitting `scm_security_rule` into anchored and unanchored resources, which is
+  MEASURED TO WORK for depth-1 anchoring and measured to cycle for chains. The
+  intent schema does not currently restrict anchor depth, so adopting this means
+  rejecting chained anchors at compile time — a real constraint to accept
+  deliberately, not a detail to discover later.
 
-Neither is worth doing to delete 191 lines that work.
+The second is a genuine option rather than a dead end, which the earlier wording
+obscured by blaming Terraform. It is still not free: it buys tidiness over
+`enrich`'s 191 working lines, and adds a compile-time rule about anchor depth
+that requesters would have to be told about.
 
 **Worth knowing:** no intent in the tree uses before/after today, so the capability
 is unexercised on the live tenant — every apply reports `moved: false`. It has
