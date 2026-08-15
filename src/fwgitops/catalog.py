@@ -314,6 +314,30 @@ class FolderHierarchy:
         return sorted(self.targetable)
 
     # ── Firewalls (the last level of the hierarchy) ───────────────────────
+    def devices_beneath(self, folder: str) -> List[str]:
+        """Every firewall that inherits from `folder`, transitively.
+
+        A push commits to DEVICES. A folder with none beneath it has nothing to
+        push to, and SCM rejects the attempt outright:
+
+            400 Invalid Command
+            push-config -> push-to unexpected node here
+
+        Transitive because config inherits DOWN the tree: `ngfw-shared` has no
+        device of its own, but a push there reaches `prod-edge`'s firewall and is
+        perfectly valid. Only a subtree with no firewall anywhere in it is
+        unpushable.
+        """
+        seen, stack, found = set(), [folder], []
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            found.extend(s for s, f in self.devices.items() if f == cur)
+            stack.extend(self.children.get(cur, frozenset()))
+        return sorted(found)
+
     def device_known(self, serial: str) -> bool:
         return serial in self.devices
 

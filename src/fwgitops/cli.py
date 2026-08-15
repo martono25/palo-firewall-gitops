@@ -2338,13 +2338,28 @@ def run_push(
     admins: Optional[List[str]] = None,
     all_admins: bool = False,
     record: Optional[Path] = None,
+    catalog_path: Path = Path("catalog/folders.yaml"),
     session=None,
     out=None,
     err=None,
 ) -> int:
     """Push a folder's staged config to SCM (T13). Returns a process exit code.
 
-    Exit codes:  0 ok/noop · 1 config/auth · 3 push failed.
+    A FOLDER WITH NO FIREWALL BENEATH IT IS SKIPPED, not attempted. A push
+    commits to devices, so a subtree containing none has nothing to push to and
+    SCM rejects the command outright:
+
+        400 Invalid Command
+        push-config -> push-to unexpected node here
+
+    Measured 2026-08-15, the first time this pipeline applied a second folder.
+    The rule was created and enriched correctly; only the push failed, and it
+    failed for a reason the platform already knew — `compile` and
+    `verify-catalog` both warn that the folder has no firewall beneath it. The
+    check is transitive, because config inherits DOWN: `ngfw-shared` owns no
+    device but reaches `prod-edge`'s, so it is pushable.
+
+    Exit codes:  0 ok/noop/skipped · 1 config/auth · 3 push failed.
     Credentials come from SCM_* env; the scm session does its own OAuth. The push
     is ADMIN-SCOPED — it commits only `admins`' staged changes (default: the
     service-account identity), so a shared-candidate folder with out-of-band edits
@@ -2352,12 +2367,27 @@ def run_push(
     `session` is injectable for testing.
     """
     # Imported lazily so `fwgitops compile` never needs the SCM stack.
+    from fwgitops.catalog import FolderHierarchy
     from fwgitops.clients import ScmPushClient
     from fwgitops.push import PushError, push_folder
     from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
 
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
+
+    # NOOP, NOT AN ERROR. Nothing is staged that could ever land, so failing the
+    # run would turn a correctly-applied folder into a red apply.
+    if folder and catalog_path.is_file():
+        try:
+            hierarchy = FolderHierarchy.from_dict(read_yaml(catalog_path))
+        except Exception:  # noqa: BLE001  — a bad catalog is verify-catalog's job
+            hierarchy = None
+        if hierarchy is not None and hierarchy.known(folder) \
+                and not hierarchy.devices_beneath(folder):
+            print(f"skipping push for {folder!r} — no firewall inherits from it, "
+                  f"so there is nothing to push to. The config is applied in SCM "
+                  f"and will reach a device when one registers.", file=out)
+            return 0
     if session is None:
         try:
             session = ScmSession(ScmCredentials.from_env())
