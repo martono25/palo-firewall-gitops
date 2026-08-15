@@ -268,6 +268,13 @@ def legacy_object_name(kind: str, value: str) -> str:
 
     DELETE THIS once no tenant holds a legacy name. Until then it is what lets
     the sweep clean up after the rename.
+
+    HOW TO KNOW IT IS SAFE TO DELETE: run the probe against
+    `/config/objects/v1/addresses` and `/config/objects/v1/services` for every
+    folder and confirm no name matches the legacy shape `<prefix>-<10 hex>`.
+    `prod-edge` was clean as of 2026-08-15, the day of the rename, because the
+    sweep removed all eleven in the same run that created their replacements.
+    Any tenant onboarded before that date has to be checked separately.
     """
     if kind not in _OBJECT_PREFIX:
         raise ValueError(f"unknown object kind {kind!r}; expected one of {list(_OBJECT_PREFIX)}")
