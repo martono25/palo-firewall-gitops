@@ -281,3 +281,49 @@ def test_a_device_with_no_declared_display_name_is_not_reported():
         if r["name"] == "007955000902404":
             r["display_name"] = "anything-at-all"
     assert not [f for f in compare(_h(bare), _live(rows)) if "display_name" in f.message]
+
+
+# ── SCM -> catalog: a firewall we did not declare (2026-08-15) ─────────────
+
+def _with_extra_device(serial="007955000901881", parent="prod-edge"):
+    return LIVE_OK + [{"name": serial, "type": "on-prem", "parent": parent,
+                       "serial_number": serial, "model": "PA-VM"}]
+
+
+def test_a_firewall_in_SCM_that_the_catalog_does_NOT_declare_is_flagged():
+    """Every other check here reads catalog -> SCM: does what we DECLARE exist?
+    That direction cannot see a firewall someone registered directly, or one
+    left behind by a replacement — and such a device sits under our folder and
+    INHERITS OUR POLICY.
+
+    Found on the live tenant 2026-08-15: the retired 007955000901881 was still
+    registered under prod-edge days after being replaced, while verify-catalog
+    reported "catalog matches SCM" every single run.
+    """
+    findings = compare(_h(), _live(_with_extra_device()))
+    hits = [f for f in findings if "007955000901881" in f.subject]
+    assert hits, "an undeclared firewall under a managed folder must be reported"
+    assert hits[0].blocking, (
+        "it inherits our zones, routes and rules — that is not a note")
+    assert "deregister" in hits[0].message, "and must say what to do about it"
+
+
+def test_a_firewall_under_a_folder_we_do_NOT_manage_is_left_alone():
+    """SCM holds the whole tenant. A device under someone else's folder is not
+    ours to police, and flagging it would make this check unusable in any
+    shared tenant."""
+    live = LIVE_OK + [
+        {"name": "other-folder", "type": "container", "parent": "All"},
+        {"name": "007955000900001", "type": "on-prem", "parent": "other-folder",
+         "serial_number": "007955000900001", "model": "PA-VM"},
+    ]
+    findings = compare(_h(), _live(live))
+    assert not [f for f in findings if "007955000900001" in f.subject], (
+        "a device outside the folders this repo declares is none of its business")
+
+
+def test_a_DECLARED_firewall_is_not_reported_as_undeclared():
+    """The obvious regression: the new direction must not fire on the device
+    the catalog does declare."""
+    findings = compare(_h(), _live())
+    assert not [f for f in findings if "does not know about" in f.message]

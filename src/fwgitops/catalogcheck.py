@@ -154,6 +154,33 @@ def compare(hierarchy: Any, live: Dict[str, LiveEntry]) -> List[Finding]:
             blocking=False,
         ))
 
+    # SCM -> CATALOG. Everything else here reads catalog -> SCM: it checks that
+    # what we DECLARE exists. That direction can never see a firewall someone
+    # registered directly, or one left behind after a replacement — and such a
+    # device sits under our folder and INHERITS OUR POLICY. It is the exact
+    # shape of "a direct change in SCM", which this platform claims to flag.
+    #
+    # Found 2026-08-15: the retired 007955000901881 was still registered under
+    # prod-edge days after being replaced, while verify-catalog reported
+    # "catalog matches SCM" on every run.
+    #
+    # Scoped to folders WE declare. SCM holds the whole tenant, and a device
+    # under someone else's folder is not ours to police.
+    for name, entry in sorted(live.items()):
+        if not entry.is_device or entry.parent not in hierarchy.children:
+            continue
+        if name in hierarchy.devices:
+            continue
+        findings.append(Finding(
+            f"firewall {name!r}",
+            f"is registered in SCM under {entry.parent!r} — a folder this repo "
+            f"manages — but NOTHING in catalog/folders.yaml declares it. It "
+            f"inherits that folder's zones, routes and rules, so this repo is "
+            f"configuring a firewall it does not know about. Either declare it, "
+            f"or deregister it (`fwgitops deregister`).",
+            blocking=True,
+        ))
+
     for serial, folder in sorted(hierarchy.devices.items()):
         entry = live.get(serial)
         targetable = hierarchy.is_device_targetable(serial)

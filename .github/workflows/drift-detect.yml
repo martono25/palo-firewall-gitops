@@ -28,22 +28,29 @@ jobs:
     runs-on: ubuntu-latest
     # THE SCHEDULE ONLY RUNS WHILE THE FIREWALL IS UP.
     #
-    # The pilot is suspended in AWS between test sessions to stop the EC2 draw
-    # (m5.xlarge — sized for ENIs, not CPU; see
-    # provisioning/aws-vmseries-pilot/variables.tf). With it stopped, every
-    # nightly run fails on `device-sync` and the SCM reads — and a red run every
-    # morning for a known-absent firewall is exactly how a real alert gets
-    # ignored. This job's FAILURE IS THE ALERT, so protecting that signal matters
-    # more than having it run on a schedule nobody can act on.
+    # NO FIREWALL_ONLINE GATE — removed 2026-08-15, because its premise was
+    # false. It read:
     #
-    # A manual dispatch ALWAYS runs: you only dispatch when you mean to, and
-    # needing to flip a variable first would put friction in front of the check
-    # at the exact moment someone wants it.
+    #   "With it stopped, every nightly run fails on device-sync and the SCM
+    #    reads ... this job's FAILURE IS THE ALERT, so protecting that signal
+    #    matters more than having it run on a schedule nobody can act on."
     #
-    # Set repo variable FIREWALL_ONLINE=true when the pilot is up for testing;
-    # unset or false while it is stopped. A skipped job is visibly skipped in the
-    # runs list — not silently green, which would be the worse failure here.
-    if: github.event_name == 'workflow_dispatch' || vars.FIREWALL_ONLINE == 'true'
+    # Sound reasoning from a wrong fact. NOTHING here touches the firewall.
+    # `device-sync` is SCM-only — it reads
+    # /config/operations/v1/config-versions/{running,candidate}, has no ssh path
+    # at all, and answers "what does SCM believe the device is running". Verified
+    # 2026-08-15 with the pilot STOPPED: the whole job ran green, device-sync
+    # included.
+    #
+    # The cost of the gate was five consecutive skipped nights (2026-08-11
+    # onward) during which a rule added straight into SCM would have gone
+    # unreported — while the repo's claim is that GitOps is the source of truth
+    # and direct changes are flagged.
+    #
+    # KNOWN LIMIT OF device-sync, which the gate obscured: because it reads SCM's
+    # view rather than the device, a POWERED-OFF firewall still reports as
+    # running the newest config. It answers "did the push land in SCM's record",
+    # not "is that box alive".
     # SCM auth for the scm provider's refresh during plan.
     env:
       SCM_CLIENT_ID: ${{ secrets.SCM_CLIENT_ID }}
