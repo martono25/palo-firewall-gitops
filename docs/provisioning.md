@@ -274,7 +274,7 @@ needed, on a first build). Start at **step 4** and work to **step 10**:
 
 | Step | What |
 |---|---|
-| 4 | **`fwgitops adopt-device <serial> --folder <f>`** — reads SCM and writes the catalog, the port map and every `spec.device` |
+| 4 | **`fwgitops adopt-device <serial> --folder <f> --replacing <old> --ticket <T>`** — reads SCM and writes the catalog, the port map and every `spec.device`. `--ticket` is REQUIRED alongside `--replacing`: the adoption changes those specs, and a changed spec carrying the old ticket is rejected, so omitting it produces a pull request that cannot merge |
 | 5 | rename the intent directory (cosmetic) |
 | 6 | `scaffold-root` for the new device, remove the old root |
 | 7 | follow the serial through `tests/` and the live guides |

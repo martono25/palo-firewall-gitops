@@ -5,6 +5,33 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed — the other three guides carried the same two gaps
+
+A pass over `requesting-rules.md`, `building-a-folder.md` and `provisioning.md`
+after the rebuild retest, for the findings that were not specific to deletion.
+
+**The deployment gate is a second approval and nothing said so.** Every guide
+walked the reader through approving the *pull request*, then described HIGH
+changes as "held for an explicit approval step" without saying that this is a
+different approval, on a different page, that merging does not release. It has
+no timeout: an un-approved run waits indefinitely, the firewall never gets the
+change, and from the merged pull request it looks finished. All three now name
+the button, the page, and the `pending_deployments` check that says whether an
+approval actually registered.
+
+**"Green ✅ = deployed" was not true.** A green run means Strata Cloud Manager
+accepted the change; the device follows seconds to minutes later. The requester
+guide now says what green does and does not prove, and adds the third case a
+first-timer will actually hit — a run still yellow after several minutes is
+usually waiting for the approval above, not running slowly.
+
+Both facts are pinned across every guide that can strand a run, rather than in
+the one they were noticed in.
+
+**`adopt-device --ticket` is required with `--replacing`**, and neither guide
+that shows the command mentioned it. Without it the adoption writes a pull
+request that cannot merge, failing a gate its own edit triggered.
+
 ### Added — `removing-things.md`, a removal guide for people who do not know this system
 
 The runbook's removal section was written by someone who already knew the

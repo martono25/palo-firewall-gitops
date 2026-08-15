@@ -57,8 +57,15 @@ fwgitops verify-catalog          # catalog vs SCM's real hierarchy
 If those serials are not the firewall you have, the one-command fix is:
 
 ```sh
-fwgitops adopt-device <serial> --folder <folder> --replacing <old-serial>
+fwgitops adopt-device <serial> --folder <folder> --replacing <old-serial> \
+  --ticket <TICKET>
 ```
+
+`--ticket` is not optional when you pass `--replacing`. The adoption rewrites
+`spec.device` on every device-scoped intent, and a changed `spec` still carrying
+the ticket that authorised the previous version is rejected — so without it the
+command produces a pull request that cannot merge, failing a gate its own edit
+triggered. Found by running it on 2026-08-12.
 
 For the full sequence around it — the Terraform root, the old state, the serial
 in `tests/` — stop and do
@@ -391,6 +398,20 @@ until someone approves it — see
 [`operator-runbook.md` § A run is waiting for you](operator-runbook.md#a-run-is-waiting-for-you).
 
 A Day-1 chain containing a default route is HIGH, so **expect to approve it**.
+
+**This approval is not the pull request approval, and merging does not release
+it.** It is on the **run** page: repo → **Actions** → **apply** → your run →
+**Review deployments** → tick `firewall-apply` → **Approve and deploy**. To
+confirm an approval actually landed rather than assuming it:
+
+```sh
+gh api repos/<owner>/<repo>/actions/runs/<run-id>/pending_deployments \
+  -q '.[].environment.name'
+```
+
+Still printing `firewall-apply` means still waiting. There is no timeout: an
+un-approved Day-1 chain waits indefinitely while the firewall stays unconfigured,
+and from the merged pull request everything looks finished.
 
 ### 5. Merge the evidence pull request
 
