@@ -1,0 +1,79 @@
+# Remove a firewall's SCM registration. MANUAL DISPATCH ONLY.
+#
+# WHY THIS EXISTS. `terraform destroy` tears down the EC2 instance and leaves
+# the SCM registration behind. That leftover is not inert: the serial still sits
+# under its folder and INHERITS THAT FOLDER'S POLICY, so the repo is configuring
+# a firewall it does not know about. Nothing detected it until
+# `verify-catalog` learned to look SCM -> catalog on 2026-08-15, which found
+# 007955000901881 still registered under prod-edge days after its instance was
+# terminated.
+#
+# WRITE OPERATION, and effectively one-way — re-registering needs the device
+# itself, which by definition is gone. So it is dispatch-only, never scheduled,
+# never triggered by a push, and it asks for the serial TWICE: `confirm` must
+# match `serial` exactly. A dropdown-free text field typed twice is the cheapest
+# guard against deregistering the wrong firewall, and the wrong firewall here is
+# a production one.
+name: deregister-device
+
+on:
+  workflow_dispatch:
+    inputs:
+      serial:
+        description: "Serial of the firewall to deregister from SCM"
+        required: true
+      confirm:
+        description: "Type the SAME serial again to confirm"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deregister:
+    runs-on: ubuntu-latest
+    env:
+      SCM_CLIENT_ID: ${{ secrets.SCM_CLIENT_ID }}
+      SCM_CLIENT_SECRET: ${{ secrets.SCM_CLIENT_SECRET }}
+      SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+
+      - name: Confirm the two serials match
+        env:
+          SERIAL: ${{ inputs.serial }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$SERIAL" != "$CONFIRM" ]; then
+            echo "::error::serial and confirm differ ('$SERIAL' vs '$CONFIRM') — refusing"
+            exit 1
+          fi
+          echo "confirmed: $SERIAL"
+
+      # REFUSES A DECLARED FIREWALL. Deregistering one the catalog still names
+      # would strand every intent that targets it — compile rejects an intent
+      # naming a firewall the catalog does not declare, but nothing stops the
+      # reverse. Remove it from the catalog first, in a reviewed PR.
+      - name: Refuse if the catalog still declares it
+        env:
+          SERIAL: ${{ inputs.serial }}
+        run: |
+          set -euo pipefail
+          if grep -q "\"$SERIAL\"" catalog/folders.yaml; then
+            echo "::error::catalog/folders.yaml still declares $SERIAL — remove it there first"
+            exit 1
+          fi
+          echo "not declared in the catalog; safe to deregister"
+
+      - name: Deregister
+        env:
+          SERIAL: ${{ inputs.serial }}
+        run: fwgitops deregister "$SERIAL"
+
+      - name: Verify it is gone
+        run: fwgitops verify-catalog
