@@ -21,8 +21,8 @@ kind: AccessRequest
 metadata:
   id: REQ-2026-0901
   requester: martono@corp
-  ticket: JIRA-21100
-  justification: "Standing sandbox rule: keeps a second folder in the tree so the multi-scope checks stay meaningful. Enforces nothing — the GitOps folder has no devices"
+  ticket: JIRA-21101
+  justification: "Standing sandbox rule, now on 8443. The port change is real but incidental: it STAGES something in a folder with no firewall, which is the only way to exercise the push skip added after the 2026-08-15 apply failure"
   requested: 2026-08-13
 spec:
   environment: sandbox
@@ -33,5 +33,5 @@ spec:
     - cidr: 10.90.2.20/32
   service:
     - protocol: tcp
-      port: "443"
+      port: "8443"
   log: true
