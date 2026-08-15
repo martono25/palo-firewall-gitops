@@ -805,3 +805,27 @@ def test_the_change_guide_grades_updates_by_DIRECTION():
     assert "narrowing" in guide and "widening" in guide
     assert "| LOW |" in guide and "| HIGH |" in guide, (
         "the guide must state both grades, since only one of them stops")
+
+
+def test_the_README_does_not_claim_a_zone_delete_NEVER_reaches_the_firewall():
+    """It reached it on 2026-08-12, in the ordinary case.
+
+    The README said SCM refuses to delete a referenced zone "so the delete never
+    reaches the firewall". True when a RULE holds the zone. Not true when an
+    INTERFACE does — that deletes in about two seconds, reports success, and
+    leaves the port addressed and unzoned. Both end states fail closed, but only
+    one fails loudly, and a reader who takes the first for the general case
+    expects an error that will not arrive.
+
+    `TODOS.md` always covered both branches; it was the README summary that
+    generalised the loud one.
+    """
+    readme = _flat(REPO_ROOT / "README.md").replace("*", "").replace("`", "")
+
+    assert "the delete never reaches the firewall." not in readme, (
+        "an interface-bound zone deletes cleanly and DOES reach the firewall")
+    assert "interface" in readme and "unzoned" in readme, (
+        "the README must name the case that does reach the device")
+    assert "Both end states fail closed; only the first fails loudly" in readme, (
+        "and must say which of the two is silent, since that is the one an "
+        "operator will not notice")
