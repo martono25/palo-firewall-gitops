@@ -856,3 +856,30 @@ def test_the_roadmap_does_not_PLAN_what_the_design_RULED_OUT():
             assert planning not in text, (
                 f"docs/{name} plans Panorama work the design resolved against "
                 f"(SCM single plane): {planning!r}")
+
+
+def test_the_requester_guide_states_the_RULE_PLACEMENT_policy():
+    """Two guarantees a requester plans around, and one they must not.
+
+    A new rule goes to the BOTTOM, so it never silently pre-empts an existing
+    one — that is why `position` absent sends nothing rather than `bottom`,
+    which was measured to re-stack the whole rulebase on first write.
+
+    And ordering must NAME its anchor. What a requester must not assume is that
+    submitting two rules together orders them: within one apply the relative
+    order is whatever order Terraform walks the map, and two runs need not
+    agree (observed 2026-08-15 — three rules landed reversed against their ids).
+    """
+    guide = _flat(DOCS / "requesting-rules.md").replace("*", "").replace("`", "")
+
+    assert "A new rule goes to the bottom" in guide, (
+        "the default placement must be stated, not left to be discovered")
+    assert "pre-rulebase" in guide, (
+        "and WHICH bottom: a rule lands at the foot of the folder's "
+        "pre-rulebase, still above the post-rulebase and anything local to the "
+        "firewall — which is the distinction that decides what matches first")
+    assert "must name a rule id" in guide, (
+        "an anchored position without a target is rejected — say so")
+    assert "Submitting two rules together does not order them" in guide, (
+        "the one thing a requester will assume and must not: batch order is "
+        "not the order they submitted in")
