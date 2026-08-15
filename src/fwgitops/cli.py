@@ -1277,8 +1277,13 @@ def run_drift(
         tags = x.get("tags")
         if tags is None:
             tags = x.get("tag")
+        # `scope` is the folder that was QUERIED — `snapshot` stamps it. Without
+        # it every inherited rule reads as locally-defined and therefore as
+        # drift, which is what the first live run did.
+        scope = x.get("scope")
         actual.append(ActualRule(folder=str(x["folder"]), name=str(x["name"]),
-                                  tags=tuple(tags or [])))
+                                  tags=tuple(tags or []),
+                                  scope=str(scope) if scope else None))
 
     report = detect_drift(
         of_kind([ch for _, _, ch in items], "AccessRequest"), actual

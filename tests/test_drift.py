@@ -266,3 +266,50 @@ def test_a_nested_null_is_not_reported_as_modified():
                              {"name": "R-1", "destination": "0.0.0.0/0",
                               "metric": 10}]}}}]})]
     assert detect_object_drift(declared, actual).is_clean
+
+
+def test_an_INHERITED_rule_is_not_drift():
+    """A folder read returns everything that APPLIES to it, ancestors included.
+
+    PAN-OS ships `All/default`, `All/Web-Security-Default`, `All/hip-default`;
+    a snippet contributes `ngfw-shared/Auto-VPN-Default-Snippet`. None carries a
+    gitops: tag, so all four look "added outside GitOps" — and on the first live
+    run of the tag engine all six across two scopes were reported as drift, in a
+    job whose warning IS the alert.
+
+    They belong to whoever owns the ancestor. The state engine already drew this
+    line; drawing it differently here would make the same rule drift or not
+    depending on which engine looked.
+    """
+    from fwgitops.drift import ActualRule, detect_drift
+
+    report = detect_drift([], [
+        ActualRule(folder="All", name="default", tags=(), scope="prod-edge"),
+        ActualRule(folder="ngfw-shared", name="Auto-VPN-Default-Snippet",
+                   tags=(), scope="prod-edge"),
+    ])
+    assert report.is_clean, f"inherited rules must not read as drift: {report.summary()}"
+    assert len(report.inherited) == 2
+    assert "not checked — owned by an ancestor folder" in report.summary()
+
+
+def test_a_rule_added_LOCALLY_without_a_tag_is_still_drift():
+    """The inheritance skip must not become a blanket amnesty — a hand-added
+    rule in the folder under inspection is exactly what this engine is for."""
+    from fwgitops.drift import ActualRule, detect_drift
+
+    report = detect_drift([], [
+        ActualRule(folder="prod-edge", name="MANUAL-RULE", tags=(), scope="prod-edge"),
+    ])
+    assert not report.is_clean
+    assert [r.name for r in report.unmanaged] == ["MANUAL-RULE"]
+
+
+def test_a_snapshot_without_scope_treats_rules_as_LOCAL():
+    """Fail toward reporting. An older snapshot with no `scope` field cannot
+    prove a rule is inherited, and silently skipping it would hide real drift —
+    the opposite of the mistake being fixed."""
+    from fwgitops.drift import ActualRule, detect_drift
+
+    report = detect_drift([], [ActualRule(folder="All", name="default", tags=())])
+    assert not report.is_clean, "unknown provenance must be reported, not skipped"
