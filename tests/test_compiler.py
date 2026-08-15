@@ -544,3 +544,53 @@ def test_top_and_bottom_ARE_sent_to_terraform():
         doc = valid_doc(); doc["spec"]["position"] = pos
         ch = compile_request(load_intent(doc), env_map())
         assert to_tfvars([ch])["security_rules"][ch.rule.name]["relative_position"] == pos
+
+
+# ── the per-scope contract (2026-08-15) ────────────────────────────────────
+
+def test_mixing_scopes_says_SO_instead_of_blaming_the_naming():
+    """The error this replaces sent me to the wrong place.
+
+    Two folders both using `tcp/443` produced
+
+        object name collision on 'svc-fd64e1b89a' with differing definitions
+        (deterministic naming should prevent this — investigate)
+
+    so I investigated the naming, which was correct. The caller had mixed
+    scopes. Only reachable once a second folder existed, in a helper written the
+    day before.
+    """
+    from fwgitops.compiler import CompileError, to_tfvars
+
+    import dataclasses
+
+    # The folder is set directly rather than via an environment, so the test
+    # exercises the SCOPE guard and not the environment map.
+    a = compiled()
+    b = compiled()
+    b = dataclasses.replace(b, rule=dataclasses.replace(b.rule, folder="GitOps"))
+
+    with pytest.raises(CompileError) as e:
+        to_tfvars([a, b])
+
+    msg = str(e.value)
+    assert "MORE THAN ONE scope" in msg
+    assert "folder" in msg, "the message must say what kind of scope, not just a bare name"
+    assert "group_by_kind_and_scope" in msg, "and name the thing that groups"
+
+
+def test_a_zone_name_repeated_across_FOLDERS_is_not_a_duplicate_id():
+    """`dmz` in two folders is two legitimate zones. The old message called it
+    'two ZoneRequests share metadata.id/zone', which accuses the author of a
+    mistake they did not make."""
+    from fwgitops.compiler import CompileError, zone_tfvars
+
+    from fwgitops.compiler import CompiledZone
+
+    z1 = CompiledZone(name="dmz", zone_type="layer3", interfaces=[], folder="prod-edge")
+    z2 = CompiledZone(name="dmz", zone_type="layer3", interfaces=[], folder="GitOps")
+    with pytest.raises(CompileError) as e:
+        zone_tfvars([z1, z2])
+    assert "MORE THAN ONE scope" in str(e.value)
+    assert "metadata.id" not in str(e.value), (
+        "a cross-folder name repeat must not be reported as a duplicate id")

@@ -353,6 +353,41 @@ def _names_in_order(objs: List[Any]) -> List[str]:
     return out
 
 
+def _require_single_scope(objs: List[Any], what: str, *, of=None) -> None:
+    """Every tfvars aggregator is PER SCOPE. Enforce it instead of assuming it.
+
+    One root is one state and one tfvars file, so these functions are only ever
+    called with the objects of a single folder or device —
+    `group_by_kind_and_scope` guarantees it at the one production call site. The
+    contract was implicit, and the failure when it is broken actively misleads:
+    two folders using `tcp/443` produced
+
+        object name collision on 'svc-fd64e1b89a' with differing definitions
+        (deterministic naming should prevent this — investigate)
+
+    which sent the reader to the naming scheme. The naming was correct; the
+    caller had mixed scopes. Measured 2026-08-15, in a test helper written the
+    day before, and only reachable once a second folder existed.
+
+    Zones are the same shape: keyed by name alone, so `dmz` in two folders reads
+    as a duplicate `metadata.id` rather than as two legitimate zones.
+    """
+    # `of` unwraps where the scope fields do not sit on the object itself: a
+    # CompiledChange keeps folder/device on its `.rule`, which is why the
+    # registry reaches through it too.
+    pick = of or (lambda o: o)
+    seen = {scope_of(pick(o)) for o in objs}
+    if len(seen) > 1:
+        scopes = sorted(f"{sc.kind} {sc.value!r}" for sc in seen)
+        raise CompileError(
+            f"{what} received objects from MORE THAN ONE scope ({', '.join(scopes)}). "
+            f"These aggregators are per-scope — one root, one state, one tfvars "
+            f"file — so the caller must group by scope first "
+            f"(`group_by_kind_and_scope`). Any name collision reported from here "
+            f"would be a scope mix-up, not a naming defect."
+        )
+
+
 def to_tfvars(changes: List[CompiledChange]) -> Dict[str, Any]:
     """Aggregate compiled changes into the per-folder tfvars structure.
 
@@ -360,6 +395,7 @@ def to_tfvars(changes: List[CompiledChange]) -> Dict[str, Any]:
     by rule name (the stable for_each key). Raises on a genuine conflict — two
     different definitions sharing a name — rather than silently last-wins.
     """
+    _require_single_scope(changes, "to_tfvars", of=lambda c: c.rule)
     address_objects: Dict[str, Dict[str, Any]] = {}
     service_objects: Dict[str, Dict[str, Any]] = {}
     security_rules: Dict[str, Dict[str, Any]] = {}
@@ -613,6 +649,7 @@ def route_tfvars(routes: List[CompiledRoute]) -> Dict[str, Any]:
     the object all traffic depends on — which is why membership is carried on
     every compiled route and re-asserted here.
     """
+
     by_router: Dict[str, Dict[str, Any]] = {}
     for r in sorted(routes, key=lambda r: (r.router, r.vrf, r.name)):
         router = by_router.setdefault(r.router, {
@@ -622,6 +659,12 @@ def route_tfvars(routes: List[CompiledRoute]) -> Dict[str, Any]:
             raise CompileError(
                 f"router {r.router!r} spans folders {router['folder']!r} and {r.folder!r}"
             )
+        # NOTE: the scope guard for routes runs at the END of this function, not
+        # the top like the other aggregators. This message names the ROUTER and
+        # both folders, which is strictly more useful than "more than one
+        # scope", and a guard that fires first would mask it. The generic check
+        # still earns its place afterwards: two DIFFERENT routers in different
+        # folders pass the test above and are still a scope mix-up.
         vrf = router["_vrfs"].setdefault(r.vrf, {
             "name": r.vrf, "interface": list(r.vrf_interfaces), "_routes": {},
         })
@@ -665,6 +708,7 @@ def route_tfvars(routes: List[CompiledRoute]) -> Dict[str, Any]:
             })
         out[name] = {"name": router["name"], "folder": router["folder"],
                      "device": router["device"], "vrf": vrfs}
+    _require_single_scope(routes, "route_tfvars")
     return {"routers": out}
 
 
@@ -675,6 +719,7 @@ def interface_tfvars(interfaces: List[CompiledInterface]) -> Dict[str, Any]:
     `layer3`, and EXACTLY ONE of `ip` / `dhcp_client` is non-null — the provider
     requires it and the intent loader already enforces it.
     """
+    _require_single_scope(interfaces, "interface_tfvars")
     out: Dict[str, Dict[str, Any]] = {}
     for i in interfaces:
         if i.name in out:
@@ -707,10 +752,14 @@ def zone_tfvars(zones: List[CompiledZone]) -> Dict[str, Any]:
     scm_zone's `network` selects the type: {layer3: [ifaces]} etc. — an empty
     interface list is a valid typed zone (references resolve; traffic needs ifaces).
     """
+    _require_single_scope(zones, "zone_tfvars")
     out: Dict[str, Dict[str, Any]] = {}
     for z in zones:
         if z.name in out:
-            raise CompileError(f"duplicate zone key {z.name!r} — two ZoneRequests share metadata.id/zone")
+            raise CompileError(
+                f"duplicate zone key {z.name!r} in scope {scope_of(z).key} — two "
+                f"ZoneRequests in the SAME scope share metadata.id/zone. (The same "
+                f"zone name in two different folders is legitimate and is not this.)")
         # Shape mirrors the scm_zone provider schema exactly: the protection
         # profile and log setting live INSIDE `network`; the identification
         # toggles, DoS fields and ACLs are top-level. Keys are always present
