@@ -256,32 +256,6 @@ def readable_part(value: str) -> str:
     return out or "x"
 
 
-def legacy_object_name(kind: str, value: str) -> str:
-    """The name this platform minted BEFORE 2026-08-15: `<prefix>-<sha256[:10]>`.
-
-    Kept for one reason: `objectsweep.is_ours` proves ownership by re-deriving a
-    name from its value, so the day the scheme changed, every object already in
-    the tenant stopped matching and became unrecognisable — "not ours", which
-    the sweep refuses to touch. Eleven objects would have been orphaned
-    permanently, and the count would have looked like a foreign-object tally
-    rather than our own litter.
-
-    DELETE THIS once no tenant holds a legacy name. Until then it is what lets
-    the sweep clean up after the rename.
-
-    HOW TO KNOW IT IS SAFE TO DELETE: run the probe against
-    `/config/objects/v1/addresses` and `/config/objects/v1/services` for every
-    folder and confirm no name matches the legacy shape `<prefix>-<10 hex>`.
-    `prod-edge` was clean as of 2026-08-15, the day of the rename, because the
-    sweep removed all eleven in the same run that created their replacements.
-    Any tenant onboarded before that date has to be checked separately.
-    """
-    if kind not in _OBJECT_PREFIX:
-        raise ValueError(f"unknown object kind {kind!r}; expected one of {list(_OBJECT_PREFIX)}")
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
-    return f"{_OBJECT_PREFIX[kind]}-{digest}"
-
-
 def object_name(kind: str, value: str, length: int = _DIGEST_LEN) -> str:
     """Deterministic, dedup-friendly, and LEGIBLE object name for a value.
 

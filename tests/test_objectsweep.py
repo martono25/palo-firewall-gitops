@@ -314,24 +314,15 @@ def test_an_object_collection_is_NOT_a_referrer_for_its_own_kind():
             f"every one of them will look referenced and none will ever be swept")
 
 
-def test_the_sweep_still_recognises_names_it_minted_BEFORE_the_rename():
-    """The migration trap.
+def test_a_name_from_an_UNKNOWN_scheme_is_left_alone_not_deleted():
+    """The legacy arm was deleted on 2026-08-15, once every scope probed clean.
 
-    Ownership is proved by re-deriving a name from its value. The day the naming
-    scheme changed, every object already in the tenant stopped matching and
-    became "not ours" — which the sweep refuses to touch, so eleven objects this
-    platform created would have been stranded permanently, counted as foreign.
-
-    Caught before shipping by checking `is_ours` against an old name; nothing in
-    the suite would have failed.
+    What matters is the behaviour that replaces it: a name this platform cannot
+    re-derive is NOT ours, so it is left alone. Untidy if some old tenant
+    appears, never destructive — which is the right way round for a function
+    that authorises deletion.
     """
-    from fwgitops.tags import legacy_object_name
-
-    legacy = legacy_object_name("address", "10.20.1.0/24")
-    assert legacy == "addr-85c1076cfe", "the legacy shape must stay reproducible"
-    assert is_ours("address", legacy, "10.20.1.0/24"), (
-        "an object minted under the old scheme is still ours and must be sweepable")
+    assert not is_ours("address", "addr-85c1076cfe", "10.20.1.0/24"), (
+        "the pre-rename shape is no longer recognised, and must therefore be "
+        "left alone rather than swept")
     assert is_ours("address", object_name("address", "10.20.1.0/24"), "10.20.1.0/24")
-
-    # And the guarantee that mattered all along still holds in both schemes.
-    assert not is_ours("address", legacy, "10.99.99.99/32")
