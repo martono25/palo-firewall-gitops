@@ -126,8 +126,13 @@ and Day-1 bootstrap + SCM onboarding. See [`CHANGELOG.md`](CHANGELOG.md) and
   Day-2 rule flow proven in the device running config.
 - **Phase 2 — Risk-tiering + evidence — DONE.** Risk classifier built in-house (no commercial
   tool in the estate), auto-apply at LOW, NIST-mapped evidence bundles, drift detect-and-alert.
-- **Phase 3 — Scale + self-service — NEXT.** Multi-folder, Panorama backend, self-service
-  intake, break-glass with automated evidence.
+- **Phase 3 — Scale + self-service — IN PROGRESS.** Self-service intake is BUILT (Issue
+  Form → `fwgitops from-issue` → PR), and break-glass carries automated evidence
+  (`all_admins` in the bundle). Multi-folder is PROVEN: a second folder (`GitOps`) compiles,
+  applies, classifies and records evidence of its own since 2026-08-15 — and found two real
+  defects on its first run, a push that cannot target a folder with no firewall and an
+  evidence field that could not tell a declined push from a failed one. Panorama backend
+  remains the open item.
 - **Day-1 as GitOps (ADR-0002) — BUILT.** The ordered chain (`InterfaceRequest` →
   `ZoneRequest` → `RouteRequest` → `AccessRequest`) is built AND run against a live firewall:
   interfaces addressed, default route active, rules enforcing on real packets. Ordering is
