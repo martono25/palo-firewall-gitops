@@ -251,9 +251,15 @@ fwgitops rules prod-edge --has REQ-2026-0142         # LIVE (exit 0) / NOT FOUND
 
 ## Where your rule lands in the rulebase
 
-**A new rule goes to the bottom.** Rules are evaluated top to bottom and the
-first match wins, so a new rule never silently pre-empts one that already
-exists. You do not have to ask for this and should not try to.
+**A new rule goes to the bottom, and you do not have to ask for it.** Leave
+`position` out entirely — the platform then sends no placement instruction at
+all and SCM appends. Rules are evaluated top to bottom and the first match wins,
+so a new rule never silently pre-empts one that already exists.
+
+To be precise about *which* bottom: the bottom of this folder's **pre-rulebase**.
+Your rule sits below every other rule in the folder, including any created
+outside this platform — but still above the post-rulebase and above anything
+configured locally on the firewall. Those still evaluate after yours.
 
 **If order matters, say so explicitly** — and name the rule you are ordering
 against:

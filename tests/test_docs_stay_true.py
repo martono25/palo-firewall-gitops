@@ -874,6 +874,10 @@ def test_the_requester_guide_states_the_RULE_PLACEMENT_policy():
 
     assert "A new rule goes to the bottom" in guide, (
         "the default placement must be stated, not left to be discovered")
+    assert "pre-rulebase" in guide, (
+        "and WHICH bottom: a rule lands at the foot of the folder's "
+        "pre-rulebase, still above the post-rulebase and anything local to the "
+        "firewall — which is the distinction that decides what matches first")
     assert "must name a rule id" in guide, (
         "an anchored position without a target is rejected — say so")
     assert "Submitting two rules together does not order them" in guide, (
