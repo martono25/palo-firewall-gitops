@@ -768,3 +768,26 @@ def test_the_evidence_pr_merges_itself():
     assert "could not enable auto-merge" in code, (
         "if auto-merge cannot be enabled the run must say so — silently leaving "
         "the PR open is how the record goes missing")
+
+
+def test_a_COMPILER_change_triggers_an_apply():
+    """The tool decides what the desired state compiles to, so a change to it
+    can diverge the tenant from the repository without touching intent.
+
+    Measured 2026-08-15: object naming changed entirely inside `src/`, the
+    compiler began emitting new names, the tenant kept the old ones, and no
+    apply ran. Merged, green, silently diverged — and the drift job that catches
+    this was parked with the firewall stopped.
+    """
+    import yaml
+
+    wf = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "apply.yml").read_text())
+    # `on` parses as the boolean True in YAML 1.1, which is a classic trap here.
+    trigger = wf.get("on") or wf.get(True)
+    paths = trigger["push"]["paths"]
+
+    assert "src/fwgitops/**" in paths, (
+        "a compiler change can alter what every intent compiles to; if it does "
+        "not trigger an apply, the tenant silently keeps the old output")
+    for desired_state in ("intent/**", "catalog/**", "terraform/**"):
+        assert desired_state in paths, f"{desired_state} must still trigger"

@@ -42,6 +42,21 @@ on:
       - "intent/**"
       - "catalog/**"
       - "terraform/**"
+      # THE COMPILER TOO, since 2026-08-15. This list used to hold only the
+      # DESIRED STATE, on the reasoning that an apply should run when what we
+      # want changes, not when the tool changes. That reasoning has a hole: the
+      # tool decides what the desired state COMPILES TO.
+      #
+      # Object names became legible that day — a change entirely inside
+      # `src/` — so the compiler began generating `addr-10.20.1.0_24-85c1076c`
+      # while the tenant still held `addr-85c1076cfe`. Merged, green, and
+      # silently diverged. The drift job that catches exactly this was parked
+      # with the firewall stopped, so nothing would have said so.
+      #
+      # The cost is small: a code change that does not alter generated config
+      # produces a no-op apply, which stages nothing and skips the push. The
+      # tier gate still decides whether anything reaches a firewall unattended.
+      - "src/fwgitops/**"
       # ...BUT NOT THE PROSE INSIDE THEM. Observed 2026-08-10: a one-paragraph
       # edit to `intent/README.md` matched `intent/**` and ran a full apply
       # against the live tenant. It was a no-op and the push was correctly
