@@ -46,3 +46,21 @@ prod-ingress:
 
   baseline_zones:
     - zone-internal
+
+# ── Sandbox ────────────────────────────────────────────────────────────────
+#
+# The GitOps folder: zero devices, nothing inherits from it, and the place the
+# provider fidelity probes already run. Declared as an environment on
+# 2026-08-13 so the pipeline finally has a SECOND FOLDER to compile, apply and
+# push — every multi-folder path in this platform had been untested belief up to
+# that point, and nearly every defect found on 2026-08-12/13 was a scope defect.
+#
+# Safe by construction: a folder with no devices cannot reach a firewall, so a
+# mistake here costs an SCM object rather than production traffic.
+sandbox:
+  folder: GitOps
+  from_zone: local      # SCM/NGFW default zone
+  to_zone: internet     # SCM/NGFW default zone
+
+  baseline_zones:
+    - zone-internal

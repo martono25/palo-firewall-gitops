@@ -1,0 +1,28 @@
+# The FIRST intent this platform has ever compiled for a second folder.
+#
+# Every multi-folder path — compile, apply-order, classify, evidence, push,
+# object ensure/sweep — had only ever run against `prod-edge`. Nearly every
+# defect found on 2026-08-12/13 was a scope defect, so "it works for one folder"
+# was never evidence that it works for two.
+#
+# The GitOps folder has ZERO devices, so this reaches no firewall by
+# construction: a mistake here costs an SCM object, not production traffic.
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0901
+  requester: martono@corp
+  ticket: JIRA-21100
+  justification: "Exercise the pipeline against a second folder for the first time — the sandbox has no devices, so nothing can reach a firewall"
+  requested: 2026-08-13
+spec:
+  environment: sandbox
+  action: allow
+  source:
+    - cidr: 10.90.1.10/32
+  destination:
+    - cidr: 10.90.2.20/32
+  service:
+    - protocol: tcp
+      port: "443"
+  log: true
