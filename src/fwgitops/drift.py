@@ -45,9 +45,20 @@ from fwgitops.tags import is_managed, parse_managed_meta
 class ActualRule:
     """A security rule as it currently exists in SCM (what a folder read returns)."""
 
+    #: The folder the rule is DEFINED in. For an inherited rule this is an
+    #: ANCESTOR of the folder that was queried — same distinction ActualObject
+    #: makes for the state engine.
     folder: str
     name: str
     tags: Tuple[str, ...] = ()
+    #: The folder that was QUERIED. Distinct from `folder` whenever the rule is
+    #: inherited; None for a snapshot that does not record it.
+    scope: Optional[str] = None
+
+    @property
+    def is_inherited(self) -> bool:
+        """Defined in an ancestor folder, not the one under inspection."""
+        return self.scope is not None and self.scope != self.folder
 
 
 @dataclass(frozen=True)
@@ -55,6 +66,9 @@ class DriftReport:
     unmanaged: Tuple[ActualRule, ...] = ()
     orphaned: Tuple[ActualRule, ...] = ()
     malformed: Tuple[ActualRule, ...] = ()
+    #: Rules owned by an ancestor folder. REPORTED, never counted as drift —
+    #: see detect_drift.
+    inherited: Tuple[ActualRule, ...] = ()
 
     @property
     def is_clean(self) -> bool:
@@ -65,25 +79,50 @@ class DriftReport:
         return len(self.unmanaged) + len(self.orphaned) + len(self.malformed)
 
     def summary(self) -> str:
+        # Reported either way: "we looked and skipped N" is a different claim
+        # from "there was nothing", and only one of them is checkable.
+        note = ""
+        if self.inherited:
+            folders = sorted({r.folder for r in self.inherited})
+            note = (f"\n  ({len(self.inherited)} inherited rule(s) from {folders} "
+                    f"not checked — owned by an ancestor folder)")
         if self.is_clean:
-            return "no drift: SCM matches the declared policy"
+            return "no drift: SCM matches the declared policy" + note
         parts = []
         for label, rules in (("unmanaged", self.unmanaged), ("orphaned", self.orphaned),
                              ("malformed", self.malformed)):
             for r in rules:
                 parts.append(f"  {label:9} {r.folder}/{r.name}")
-        return f"DRIFT — {self.count} rule(s):\n" + "\n".join(parts)
+        return f"DRIFT — {self.count} rule(s):\n" + "\n".join(parts) + note
 
 
 def detect_drift(
     desired: Iterable[CompiledChange], actual: Iterable[ActualRule]
 ) -> DriftReport:
-    """Compare the declared managed rules against the folder's actual rules."""
+    """Compare the declared managed rules against the folder's actual rules.
+
+    INHERITED RULES ARE NOT DRIFT. A folder read returns everything that applies
+    to it, including rules defined in ancestors — PAN-OS defaults like
+    `All/default` and snippet-provided rules like
+    `ngfw-shared/Auto-VPN-Default-Snippet`. None carries a `gitops:` tag, so
+    they all look "added outside GitOps", and on the first live run they were
+    all reported as drift: six of them, permanently, in a job whose warning is
+    the alert.
+
+    They are not ours and not the queried folder's; whoever owns that ancestor
+    owns them. The state engine already drew this line, and drawing it
+    differently here would mean the same rule is drift or not depending on which
+    engine looked at it.
+    """
     declared = {(ch.rule.folder, ch.rule.name) for ch in desired}
     unmanaged: List[ActualRule] = []
     orphaned: List[ActualRule] = []
     malformed: List[ActualRule] = []
+    inherited: List[ActualRule] = []
     for r in actual:
+        if r.is_inherited:
+            inherited.append(r)
+            continue
         if not is_managed(r.tags):
             unmanaged.append(r)  # no managed marker -> added outside GitOps
             continue
@@ -94,7 +133,8 @@ def detect_drift(
             continue
         if meta is None or (r.folder, meta.req_id) not in declared:
             orphaned.append(r)   # managed, but not in the current declared set
-    return DriftReport(tuple(unmanaged), tuple(orphaned), tuple(malformed))
+    return DriftReport(tuple(unmanaged), tuple(orphaned), tuple(malformed),
+                       tuple(inherited))
 
 
 # ── State-based drift, for objects that CANNOT carry tags ──────────────────
