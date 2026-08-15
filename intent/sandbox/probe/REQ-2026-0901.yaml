@@ -1,0 +1,37 @@
+# PERMANENT. The standing second-folder rule (decided 2026-08-15).
+#
+# Every multi-folder path — compile, apply-order, classify, evidence, push,
+# object ensure/sweep — had only ever run against `prod-edge`. Nearly every
+# defect found on 2026-08-12/13 was a scope defect, so "it works for one folder"
+# was never evidence that it works for two. It broke two tests on the day it
+# landed, both of which had a single-folder assumption baked into them.
+#
+# It stays because the property it protects is CONTINUOUS: without a second
+# scope in the tree, the multi-scope checks silently degrade into single-scope
+# ones and pass. `tests/test_tfroots.py` now REFUSES to run against fewer than
+# two scopes, so deleting this file fails the build rather than quietly
+# weakening it.
+#
+# DO NOT REMOVE as test residue. It is not residue.
+#
+# The GitOps folder has ZERO devices, so this reaches no firewall by
+# construction and enforces nothing: it costs one SCM object.
+apiVersion: fw-intent/v1
+kind: AccessRequest
+metadata:
+  id: REQ-2026-0901
+  requester: martono@corp
+  ticket: JIRA-21100
+  justification: "Standing sandbox rule: keeps a second folder in the tree so the multi-scope checks stay meaningful. Enforces nothing — the GitOps folder has no devices"
+  requested: 2026-08-13
+spec:
+  environment: sandbox
+  action: allow
+  source:
+    - cidr: 10.90.1.10/32
+  destination:
+    - cidr: 10.90.2.20/32
+  service:
+    - protocol: tcp
+      port: "443"
+  log: true

@@ -151,8 +151,31 @@ def test_scope_dirname_matches_the_root_layout():
     assert Scope("device", "007955000902404").dirname in names
 
 
-def _compiled_changes():
-    """Every AccessRequest in the REAL intent tree, compiled.
+def _changes_by_scope():
+    """Compiled AccessRequests GROUPED BY SCOPE, the way the compiler writes them.
+
+    `to_tfvars` aggregates within ONE scope. Calling it across folders raises a
+    name collision the moment two folders use the same service — `tcp/443` is
+    `svc-fd64e1b89a` everywhere, but its definition carries the folder, so the
+    two disagree.
+
+    That is not a compiler bug: `fwgitops compile` groups by scope and writes a
+    file per folder. It was a single-folder assumption baked into THIS helper,
+    which nothing caught until a second folder existed on 2026-08-13 — the whole
+    reason for adding one.
+    """
+    from collections import defaultdict
+
+    from fwgitops.kinds import handler_for_request
+
+    out = defaultdict(list)
+    for req, ch in _compiled_pairs():
+        out[handler_for_request(req).scope_of(ch).key].append(ch)
+    return dict(out)
+
+
+def _compiled_pairs():
+    """(request, compiled) for every AccessRequest in the REAL intent tree.
 
     The real tree rather than a fixture, because the property under test is
     whether THIS repository's rules reference objects THIS repository emits.
@@ -178,7 +201,7 @@ def _compiled_changes():
         req = load_intent(read_yaml(path), env_map=env_map, **cats)
         if type(req).__name__ != "AccessRequest":
             continue
-        out.append(compile_request(req, env_map))
+        out.append((req, compile_request(req, env_map)))
     return out
 
 
@@ -200,21 +223,25 @@ def test_every_object_a_rule_REFERENCES_is_one_the_compiler_EMITS():
     """
     from fwgitops.compiler import LITERAL_SERVICES, to_tfvars, wanted_objects
 
-    changes = _compiled_changes()
-    assert changes, "no compiled changes to check"
-    tfvars = to_tfvars(changes)
-    objects = wanted_objects(changes)
+    by_scope = _changes_by_scope()
+    assert by_scope, "no compiled changes to check"
+    assert len(by_scope) > 1, (
+        "this must run across MORE THAN ONE scope, or it re-proves the "
+        "single-folder assumption it exists to catch")
 
     dangling = []
-    for rid, rule in tfvars["security_rules"].items():
-        for name in rule.get("sources", []) + rule.get("destinations", []):
-            if name not in objects["address"]:
-                dangling.append(f"{rid} -> address {name}")
-        for name in rule.get("services", []):
-            if name in LITERAL_SERVICES:
-                continue
-            if name not in objects["service"]:
-                dangling.append(f"{rid} -> service {name}")
+    for scope, changes in sorted(by_scope.items()):
+        tfvars = to_tfvars(changes)
+        objects = wanted_objects(changes)
+        for rid, rule in tfvars["security_rules"].items():
+            for name in rule.get("sources", []) + rule.get("destinations", []):
+                if name not in objects["address"]:
+                    dangling.append(f"{scope}: {rid} -> address {name}")
+            for name in rule.get("services", []):
+                if name in LITERAL_SERVICES:
+                    continue
+                if name not in objects["service"]:
+                    dangling.append(f"{scope}: {rid} -> service {name}")
 
     assert not dangling, (
         f"these rules reference objects the compiler does not emit, so nothing "
@@ -231,7 +258,7 @@ def test_the_tfvars_no_longer_carry_objects_terraform_does_not_manage():
     from fwgitops.compiler import dumps_tfvars
     from fwgitops.kinds import REGISTRY
 
-    changes = _compiled_changes()
+    changes = next(iter(_changes_by_scope().values()))
     payload = json.loads(dumps_tfvars(changes))
     assert set(payload) == {"security_rules"}, (
         f"rules.auto.tfvars.json must carry rules only; got {sorted(payload)}")
