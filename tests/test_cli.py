@@ -415,7 +415,7 @@ def _session(**kw):
 
 def test_cli_push_success_scoped_to_service_account(capsys):
     sink = []
-    rc = run_push("GitOps", session=ScmSession(CREDS, transport=_scm_transport(sink=sink)))
+    rc = run_push("prod-edge", session=ScmSession(CREDS, transport=_scm_transport(sink=sink)))
     assert rc == 0
     assert "OK — success" in capsys.readouterr().out
     assert sink[-1]["admin"] == [SA]          # default: commit only our SA's changes
@@ -423,14 +423,14 @@ def test_cli_push_success_scoped_to_service_account(capsys):
 
 def test_cli_push_all_admins_is_unscoped(capsys):
     sink = []
-    rc = run_push("GitOps", all_admins=True,
+    rc = run_push("prod-edge", all_admins=True,
                   session=ScmSession(CREDS, transport=_scm_transport(sink=sink)))
     assert rc == 0
     assert "admin" not in sink[-1]            # break-glass: whole candidate
 
 
 def test_cli_push_noop_when_nothing_staged(capsys):
-    rc = run_push("GitOps", session=_session(nothing_to_push=True))
+    rc = run_push("prod-edge", session=_session(nothing_to_push=True))
     assert rc == 0
     assert "noop" in capsys.readouterr().out
 
@@ -438,7 +438,7 @@ def test_cli_push_noop_when_nothing_staged(capsys):
 def test_cli_push_missing_env_exits_1(monkeypatch, capsys):
     for v in ("SCM_CLIENT_ID", "SCM_CLIENT_SECRET", "SCM_SCOPE"):
         monkeypatch.delenv(v, raising=False)
-    rc = run_push("GitOps")   # no session -> from_env -> missing -> 1
+    rc = run_push("prod-edge")   # no session -> from_env -> missing -> 1
     assert rc == 1
 
 
@@ -1137,3 +1137,39 @@ def test_EVERY_load_loop_checks_the_filename(tmp_path):
             f"a load site at offset {pos} does not check the filename against "
             f"metadata.id; every one must, or the check depends on which "
             f"command you happen to run")
+
+
+def test_cli_push_SKIPS_a_folder_with_no_firewall_beneath_it(capsys):
+    """A push commits to DEVICES. A folder with none has nothing to push to, and
+    SCM rejects the command outright:
+
+        400 Invalid Command
+        push-config -> push-to unexpected node here
+
+    Measured 2026-08-15 on the first two-folder apply. The rule was created and
+    enriched correctly in `GitOps`; only the push failed, for a reason the
+    platform already knew — `compile` and `verify-catalog` both warn the folder
+    has no firewall beneath it.
+
+    It is a NOOP, not an error: failing here turns a correctly-applied folder
+    into a red apply. And it must not need credentials to decide, which is why
+    no session is passed.
+    """
+    rc = run_push("GitOps")
+    out = capsys.readouterr().out
+    assert rc == 0, "an unpushable folder is a noop, not a failure"
+    assert "no firewall inherits from it" in out
+    assert "nothing to push to" in out
+
+
+def test_cli_push_does_NOT_skip_a_parent_whose_CHILD_has_a_firewall(capsys):
+    """Config inherits DOWN, so `ngfw-shared` owns no device but a push there
+    reaches `prod-edge`'s firewall. A non-transitive check would skip it and
+    silently stop pushing the folder with the largest blast radius."""
+    from fwgitops.catalog import FolderHierarchy
+    from fwgitops.io import read_yaml
+
+    h = FolderHierarchy.from_dict(read_yaml(Path("catalog/folders.yaml")))
+    assert h.devices_beneath("ngfw-shared"), (
+        "ngfw-shared must stay pushable — it inherits down to a real firewall")
+    assert not h.devices_beneath("GitOps")
