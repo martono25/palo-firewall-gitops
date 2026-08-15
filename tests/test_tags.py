@@ -191,3 +191,56 @@ def test_validate_object_name_length_cap():
         validate_object_name("x" * (tags.PANOS_NAME_MAX + 1))
     ok = "x" * tags.PANOS_NAME_MAX
     assert validate_object_name(ok) == ok
+
+
+# ── the naming scheme (2026-08-15) ─────────────────────────────────────────
+
+def test_a_name_is_LEGIBLE_and_still_a_pure_function_of_the_value():
+    """Both halves earn their place.
+
+    Readable, because `addr-85c1076cfe` in the SCM GUI tells an engineer
+    nothing — they had to come back to Git to decode it. And a pure function of
+    the VALUE, because that is what makes two requests for the same address
+    reuse one object instead of minting two.
+    """
+    assert object_name("address", "10.20.1.0/24") == "addr-10.20.1.0_24-85c1076c"
+    assert object_name("service", "tcp/443") == "svc-tcp_443-fd64e1b8"
+    # Same value, asked for twice -> the same object. This is the whole of reuse.
+    assert object_name("service", "tcp/443") == object_name("service", "tcp/443")
+
+
+def test_the_name_ignores_HOW_the_service_was_requested():
+    """`catalog/services.yaml` calls tcp/443 `https`, and naming the object
+    `svc-https` was the obvious idea. It breaks dedup: a requester may write
+    `name: https` OR `protocol: tcp, port: "443"`, and two names for one value
+    means two objects. It also ties object identity to an EDITABLE file —
+    renaming a catalog entry would orphan every object named after it."""
+    assert "https" not in object_name("service", "tcp/443")
+
+
+def test_unsafe_characters_never_reach_a_name():
+    """PAN-OS names allow letters, digits, period, hyphen, underscore. A slash
+    or a colon in a name is rejected by the API, and `/` is an XPath separator."""
+    import re
+
+    for value in ("10.20.1.0/24", "tcp/443", "2001:db8::/32", "a b/c:d"):
+        name = object_name("address", value)
+        assert re.fullmatch(r"[A-Za-z0-9._-]+", name), f"{value!r} -> {name!r}"
+
+
+def test_truncation_sacrifices_the_READABLE_half_never_the_digest():
+    """The digest is what makes the name unique and unforgeable. Truncating it
+    to fit a long FQDN would trade a cosmetic gain for collisions and a broken
+    ownership proof."""
+    long_fqdn = "a." + "very-long-subdomain." * 5 + "example.com"
+    name = object_name("address", long_fqdn)
+    assert len(name) <= 63
+    assert name.endswith(object_name("address", long_fqdn)[-8:])
+
+    import hashlib
+    digest = hashlib.sha256(long_fqdn.encode()).hexdigest()[:8]
+    assert name.endswith(digest), "the digest must survive truncation intact"
+
+    other = "b." + "very-long-subdomain." * 5 + "example.com"
+    assert object_name("address", other) != name, (
+        "two long names truncating to the same readable half must still differ")

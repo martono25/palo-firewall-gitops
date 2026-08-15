@@ -30,10 +30,14 @@ SCOPE = {"folder": "prod-edge"}
 # REAL object names from the live tenant, verified 2026-08-13. Using the real
 # ones makes this a regression test for the incident rather than a test of an
 # invented convention.
-ADDR_HOST = "addr-a102bfc799"      # 10.20.1.55/32 — the one that refused to delete
-ADDR_WIDE = "addr-5cbf6964f2"      # 10.20.0.0/16  — the orphan the failed apply left
-ADDR_TIER = "addr-85c1076cfe"      # 10.20.1.0/24  — shared by three rules
-SVC_DNS = "svc-df1c6fc644"         # udp/53
+# DERIVED, not written out. These were literals until 2026-08-15, when the name
+# format changed and every one of them had to be edited by hand — which tests
+# the FORMAT, not the behaviour. Deriving them means a format change is
+# invisible here and a naming-BEHAVIOUR change (dedup, ownership) still fails.
+ADDR_HOST = object_name("address", "10.20.1.55/32")   # the one that refused to delete
+ADDR_WIDE = object_name("address", "10.20.0.0/16")    # the orphan the failed apply left
+ADDR_TIER = object_name("address", "10.20.1.0/24")    # shared by three rules
+SVC_DNS = object_name("service", "udp/53")
 
 
 class FakeSession:
@@ -78,7 +82,9 @@ def test_an_object_that_IMITATES_our_naming_is_not_ours():
     hash cannot be. An object named like ours whose value does not hash to that
     name was not minted here and must never be swept."""
     assert not is_ours("address", ADDR_HOST, "10.99.99.99/32")
-    assert not is_ours("address", "addr-deadbeef00", "10.20.1.55/32")
+    assert not is_ours("address", "addr-10.20.1.55_32", "10.20.1.55/32"), (
+        "a readable name WITHOUT the digest is exactly what a human would type "
+        "for this address — it must not read as ours, or the sweep deletes it")
 
 
 def test_an_object_whose_value_SCM_does_not_report_is_not_ours():
@@ -99,7 +105,7 @@ def test_sweep_deletes_only_what_is_ours_AND_unreferenced():
              "ip_netmask": "10.0.0.53/32"},
         ]},
         referrers={"/config/security/v1/security-rules": [
-            {"name": "R1", "source": ["addr-85c1076cfe"], "destination": ["any"]},
+            {"name": "R1", "source": [ADDR_TIER], "destination": ["any"]},
         ]},
     )
     plan = sweep_objects(session, "address", SCOPE, wanted=[])
@@ -306,3 +312,26 @@ def test_an_object_collection_is_NOT_a_referrer_for_its_own_kind():
         assert KIND_PATHS[kind] not in paths, (
             f"{kind} objects are being read as referrers of themselves, so "
             f"every one of them will look referenced and none will ever be swept")
+
+
+def test_the_sweep_still_recognises_names_it_minted_BEFORE_the_rename():
+    """The migration trap.
+
+    Ownership is proved by re-deriving a name from its value. The day the naming
+    scheme changed, every object already in the tenant stopped matching and
+    became "not ours" — which the sweep refuses to touch, so eleven objects this
+    platform created would have been stranded permanently, counted as foreign.
+
+    Caught before shipping by checking `is_ours` against an old name; nothing in
+    the suite would have failed.
+    """
+    from fwgitops.tags import legacy_object_name
+
+    legacy = legacy_object_name("address", "10.20.1.0/24")
+    assert legacy == "addr-85c1076cfe", "the legacy shape must stay reproducible"
+    assert is_ours("address", legacy, "10.20.1.0/24"), (
+        "an object minted under the old scheme is still ours and must be sweepable")
+    assert is_ours("address", object_name("address", "10.20.1.0/24"), "10.20.1.0/24")
+
+    # And the guarantee that mattered all along still holds in both schemes.
+    assert not is_ours("address", legacy, "10.99.99.99/32")

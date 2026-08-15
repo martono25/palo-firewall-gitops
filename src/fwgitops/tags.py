@@ -228,16 +228,80 @@ _OBJECT_PREFIX = {
 }
 
 
-def object_name(kind: str, value: str, length: int = 10) -> str:
-    """Deterministic, dedup-friendly object name for a value.
+#: Everything outside the PAN-OS-safe charset collapses to this in a name.
+_UNSAFE_IN_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
-    Same value → same name, so re-requesting an address/service reuses the
-    existing object instead of creating a duplicate.
+#: Hash characters kept. Short, because the readable half carries the meaning
+#: and the digest only has to make the name unforgeable and unique.
+_DIGEST_LEN = 8
+
+
+def readable_part(value: str) -> str:
+    """The legible half of an object name: the VALUE, charset-safe.
+
+    `10.20.1.0/24` -> `10.20.1.0_24`, `tcp/443` -> `tcp_443`. Periods, hyphens
+    and underscores are all PAN-OS-safe (the same charset `_SAFE_VALUE` already
+    enforces for tag values), so an IPv4 CIDR survives almost intact and stays
+    recognisable at a glance in the SCM GUI.
+
+    DERIVED FROM THE VALUE, NEVER FROM A CATALOG NAME. `catalog/services.yaml`
+    knows `tcp/443` as `https`, and naming the object `svc-https` was the
+    obvious idea — but it fails twice. A requester may write either
+    `name: https` or `protocol: tcp, port: "443"`, and if those produced
+    different names the same value would mint two objects and dedup would break.
+    And object identity would then depend on an EDITABLE file: renaming a
+    catalog entry would silently orphan every object named after it.
+    """
+    out = _UNSAFE_IN_NAME.sub("_", value).strip("._-")
+    return out or "x"
+
+
+def legacy_object_name(kind: str, value: str) -> str:
+    """The name this platform minted BEFORE 2026-08-15: `<prefix>-<sha256[:10]>`.
+
+    Kept for one reason: `objectsweep.is_ours` proves ownership by re-deriving a
+    name from its value, so the day the scheme changed, every object already in
+    the tenant stopped matching and became unrecognisable — "not ours", which
+    the sweep refuses to touch. Eleven objects would have been orphaned
+    permanently, and the count would have looked like a foreign-object tally
+    rather than our own litter.
+
+    DELETE THIS once no tenant holds a legacy name. Until then it is what lets
+    the sweep clean up after the rename.
+    """
+    if kind not in _OBJECT_PREFIX:
+        raise ValueError(f"unknown object kind {kind!r}; expected one of {list(_OBJECT_PREFIX)}")
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
+    return f"{_OBJECT_PREFIX[kind]}-{digest}"
+
+
+def object_name(kind: str, value: str, length: int = _DIGEST_LEN) -> str:
+    """Deterministic, dedup-friendly, and LEGIBLE object name for a value.
+
+    Shape: `<prefix>-<readable>-<digest>` — e.g. `addr-10.20.1.0_24-85c1076c`,
+    `svc-tcp_443-fd64e1b8`.
+
+    Same value → same name, so re-requesting an address or service reuses the
+    existing object instead of creating a duplicate. That property is why the
+    name is a pure function of the value and of nothing else.
+
+    THE DIGEST IS NOT DECORATION. `objectsweep.is_ours` proves an object was
+    minted here by checking that its name equals the name its own value hashes
+    to, and the sweep DELETES on the strength of that. A purely readable name is
+    exactly what a human would type by hand for the same address, so a
+    hand-made `addr-10.20.1.0_24` would look like ours and be swept. The digest
+    is what a hand-made name cannot reproduce.
+
+    The readable half is truncated to fit PAN-OS's 63-char cap; the digest is
+    never truncated, so uniqueness survives any truncation.
     """
     if kind not in _OBJECT_PREFIX:
         raise ValueError(f"unknown object kind {kind!r}; expected one of {list(_OBJECT_PREFIX)}")
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
-    name = f"{_OBJECT_PREFIX[kind]}-{digest}"
+    prefix = _OBJECT_PREFIX[kind]
+    budget = PANOS_NAME_MAX - len(prefix) - len(digest) - 2   # two separators
+    readable = readable_part(value)[:budget].rstrip("._-")
+    name = f"{prefix}-{readable}-{digest}" if readable else f"{prefix}-{digest}"
     return validate_object_name(name)
 
 

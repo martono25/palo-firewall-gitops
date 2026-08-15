@@ -201,7 +201,10 @@ though you only edited one line. That is normal, and it is worth thirty seconds
 of your time because it explains an error you might otherwise misread.
 
 Addresses and services are **named after their value** — `10.20.1.55/32` is
-always the object `addr-a102bfc799`, everywhere, forever. So identical values
+always the object `addr-10.20.1.55_32-a102bfc7`, everywhere, forever. The
+readable half is the address itself; the digest on the end is what proves the
+platform minted it, so a hand-made object cannot be mistaken for one of ours and
+swept. So identical values
 collapse into one shared object: three rules using `10.20.1.0/24` share a single
 one.
 
