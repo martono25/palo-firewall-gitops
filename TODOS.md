@@ -420,7 +420,48 @@ The fix came from the provider's own documented example, which sets
 `category = ["any"]` and `source_user = ["any"]` explicitly — omission is not
 "leave alone" for an optional-NOT-computed attribute.
 
-### `fwgitops enrich` may be retirable — 1.0.12-beta.4 writes what 1.0.11 drops
+### `fwgitops enrich` is NOT retirable — reassessed 2026-08-15
+
+**The title's premise was answered and the entry was never rewritten.** It asks
+whether provider 1.0.12-beta.4 writing `application`, `profile_setting` and
+`log_setting` makes `enrich` unnecessary. It did, and those fields moved to
+Terraform in v1.15.0/v1.16.0. `enrich.py` has been narrowed to ONE
+responsibility ever since, and the question the title still poses has no bearing
+on it.
+
+**What remains, and why it cannot move.** Before/after ordering. An anchored move
+needs the anchor's UUID — `target_rule = scm_security_rule.this[<key>].id` —
+which is a self-reference inside a single `for_each` block, and Terraform
+rejects it outright:
+
+    Error: Cycle: module.security_folder.scm_security_rule.this["REQ-..."], ...
+
+That is a Terraform limitation, not a provider one; the SCM move endpoint works
+when called with the anchor's UUID, which is exactly what `enrich` does.
+`top`/`bottom` need no anchor and were wired through `relative_position` in
+v1.41.0 — that entry is about those two, NOT about before/after, which is an
+easy misread since they sit next to each other.
+
+**Retiring it therefore means one of:**
+
+* dropping before/after ordering from the intent schema — it is expressible
+  today (`intent.py` `_load_position`), so this removes capability; or
+* splitting `scm_security_rule` into anchored and unanchored resources so the
+  reference crosses resources instead of looping. This breaks the cycle only
+  while an anchor never points at another anchored rule — which nothing
+  prevents, so it trades a clean limitation for a conditional one.
+
+Neither is worth doing to delete 191 lines that work.
+
+**Worth knowing:** no intent in the tree uses before/after today, so the capability
+is unexercised on the live tenant — every apply reports `moved: false`. It has
+14 unit tests, but the last end-to-end evidence that an anchored move lands is
+the `spike/beta4-ordering` probe. If before/after is ever requested in earnest,
+treat the first one as unproven in production.
+
+**Effort:** — **Priority:** closed as answered
+
+### (historical) the probe that answered it
 
 ADR-0003 exists because the provider ACCEPTS `application`, `profile_setting`
 and `log_setting`, reports success, and never writes them — confirmed on v1.0.11
