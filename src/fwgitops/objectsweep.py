@@ -55,7 +55,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from fwgitops.tags import legacy_object_name, object_name
+from fwgitops.tags import object_name
 
 #: kind -> the collection that holds it.
 KIND_PATHS: Dict[str, str] = {
@@ -148,13 +148,16 @@ def is_ours(kind: str, name: str, value: Optional[str]) -> bool:
     if not value:
         return False
     try:
-        # The LEGACY arm is what lets the sweep clean up after the 2026-08-15
-        # rename. Ownership is proved by re-deriving a name from its value, so
-        # on the day the scheme changed every object already in the tenant
-        # stopped matching and would have been stranded as "not ours" — litter
-        # this platform made and could no longer recognise. Remove the second
-        # arm once no tenant holds a legacy name.
-        return name in (object_name(kind, value), legacy_object_name(kind, value))
+        # ONE SCHEME AGAIN. A legacy arm carried the pre-2026-08-15 shape
+        # (`<prefix>-<10 hex>`) so the sweep could still recognise — and so
+        # remove — what it had minted under the old naming. It was deleted on
+        # 2026-08-15 after probing every scope in the hierarchy and finding no
+        # legacy name left: prod-edge, GitOps and ngfw-shared all clean, and the
+        # device scope holds no objects of ours at all.
+        #
+        # If a tenant onboarded before that date ever appears, its objects will
+        # read as NOT ours and simply be left alone — untidy, never destructive.
+        return object_name(kind, value) == name
     except ValueError:
         return False
 
