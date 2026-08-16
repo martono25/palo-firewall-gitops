@@ -111,6 +111,30 @@ summary is worth having in your head:
 
 ---
 
+## An emergency change has a deadline
+
+**Anything you create by hand in SCM is deleted at 03:00 UTC** (11:00 Singapore)
+by the `remediate` job. That is not a warning about tidiness — it is automatic,
+unattended, and it will remove a rule that is carrying production traffic.
+
+If you open a path by hand to restore a service:
+
+1. Do it. Restoring service comes first.
+2. **Raise and apply an AccessRequest the same day, before 03:00 UTC.**
+3. The AccessRequest creates a **new** rule under its request id. Your hand-made
+   rule is still unmanaged and is still deleted — that is the intended end
+   state, not a failure. Check the new rule carries the traffic before the
+   window closes.
+
+Miss the window and the path closes. `evidence/manual-actions/` will say exactly
+what was removed and when.
+
+To see what would be removed without removing it:
+
+```bash
+gh workflow run remediate.yml -f dry_run=true
+```
+
 ## Drift fired
 
 The nightly job failed. That failure **is** the alert.
