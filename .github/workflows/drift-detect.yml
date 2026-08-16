@@ -268,7 +268,27 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="violations/run-${GITHUB_RUN_ID}"
-          git checkout -B "$branch"
+          # CUT THE BRANCH FROM `main`, NOT FROM WHATEVER REF THIS RUN USED.
+          #
+          # `git checkout -B` from the current ref carried every commit on it
+          # into the pull request. On the schedule that is main and harmless; on
+          # a `workflow_dispatch --ref <branch>` it produced a PR TITLED AS A
+          # RECORD that quietly contained code changes — seen on #242, which
+          # carried this workflow's own diff. A record must be reviewable as
+          # exactly what it claims to be, so the records are carried across to a
+          # branch cut from main and nothing else comes with them.
+          tmp=$(mktemp -d)
+          cp -R evidence/violations/. "$tmp"/ 2>/dev/null || true
+          git reset
+          git fetch origin main
+          git checkout -B "$branch" origin/main
+          mkdir -p evidence/violations
+          cp -R "$tmp"/. evidence/violations/ 2>/dev/null || true
+          git add -A evidence/violations
+          if git diff --cached --quiet -- evidence/violations; then
+            echo "records already on main — nothing to land"
+            exit 0
+          fi
           git commit -m "record: policy violations seen in run ${GITHUB_RUN_ID}"
           git push -f origin "$branch"
           # Never auto-merged. A violation is an UNAUTHORISED CHANGE, and the
