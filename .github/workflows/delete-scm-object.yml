@@ -38,9 +38,13 @@ on:
       confirm:
         description: "Type the SAME name again to confirm"
         required: true
+      reason:
+        description: "Why it is being removed — lands in the record"
+        required: true
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
   delete:
@@ -120,4 +124,62 @@ jobs:
               print(f"::error::DELETE failed: {e}")
               sys.exit(3)
           print(f"OK — deleted {kind} {name!r} from {folder!r}")
+
+          # THE RECORD. This deletion cannot go through Git — Git has no
+          # representation of an object it never created — so it is an
+          # out-of-band action by necessity. What it CAN be is auditable, which
+          # is the value the source-of-truth rule actually delivers here.
+          #
+          # Deliberately NOT an evidence bundle: those are keyed on a request id
+          # from an intent, and this object had none. Claiming that shape would
+          # imply an authorisation that never existed.
+          import datetime
+          import json as _json
+          import pathlib as _pathlib
+
+          rec = {
+              "schema": "fw-manual-action/v1",
+              "action": "delete",
+              "kind": kind,
+              "folder": folder,
+              "name": name,
+              "object_id": obj.get("id"),
+              "tags_at_deletion": list(tags),
+              "reason": os.environ.get("REASON", ""),
+              "dispatched_by": os.environ.get("ACTOR", ""),
+              "run_url": os.environ.get("RUN_URL", ""),
+              "at": datetime.datetime.now(datetime.timezone.utc)
+                    .strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }
+          out = _pathlib.Path("evidence/manual-actions")
+          out.mkdir(parents=True, exist_ok=True)
+          stamp = rec["at"].replace(":", "").replace("-", "")
+          f = out / f"{stamp}-{kind}-{name}.json"
+          f.write_text(_json.dumps(rec, indent=2, sort_keys=True) + "\n")
+          print(f"recorded: {f}")
           PY
+
+      # Lands by PR, like every other record here: `main` takes no direct push,
+      # including from the pipeline.
+      - name: Open a pull request with the record
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
+          NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="manual-action/run-${GITHUB_RUN_ID}"
+          git checkout -B "$branch"
+          git add evidence/manual-actions/
+          if git diff --cached --quiet; then
+            echo "::error::nothing recorded — the delete step should have written a record"
+            exit 1
+          fi
+          git commit -m "record: deleted ${NAME} from SCM (run ${GITHUB_RUN_ID})"
+          git push -f origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "record: deleted ${NAME} from SCM" \
+            --body "An object GitOps did not own was removed directly in SCM. It could not go through the pipeline — Git has no representation of an object it never created — so this is the record of it. See \`evidence/manual-actions/\`." \
+            || gh pr view "$branch" --json url >/dev/null
+          gh pr merge "$branch" --squash --auto --delete-branch || true

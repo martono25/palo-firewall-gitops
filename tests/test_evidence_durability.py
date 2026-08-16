@@ -955,3 +955,38 @@ def test_the_drift_job_materialises_EVERY_input_the_plan_needs():
             f"apply.yml materialises desired state with `{cmd}` and the drift "
             f"job does not — the plan then compares against an INCOMPLETE "
             f"desired state and proposes destroying whatever is missing")
+
+
+def test_deleting_an_UNOWNED_object_leaves_a_record():
+    """The deletion cannot go through Git, so the record is the only trace.
+
+    An unmanaged object has no representation in Git — that is what makes it
+    unmanaged — so removing it is an out-of-band action by necessity. What it
+    can be is auditable, which is the value the source-of-truth rule actually
+    delivers here.
+
+    Shipped without this on 2026-08-16: the workflow's own guard text cited "no
+    record" as the reason to refuse MANAGED objects, while leaving no record for
+    the unmanaged ones it deleted. Five mentions of the word evidence, all
+    prose.
+    """
+    wf = (REPO_ROOT / ".github" / "workflows" / "delete-scm-object.yml").read_text()
+
+    assert "fw-manual-action/v1" in wf, (
+        "the record needs its own schema — NOT an evidence bundle, which is "
+        "keyed on a request id this object never had; borrowing that shape "
+        "would imply an authorisation that did not exist")
+    for field in ("reason", "dispatched_by", "run_url", "tags_at_deletion"):
+        assert field in wf, f"the record must capture {field}"
+    assert "gh pr create" in wf, (
+        "and land by PR like every other record — main takes no direct push")
+
+
+def test_the_delete_workflow_requires_a_REASON():
+    """A deletion with no stated reason is indistinguishable from a mistake."""
+    import yaml
+
+    wf = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "delete-scm-object.yml").read_text())
+    inputs = wf[True]["workflow_dispatch"]["inputs"]
+    assert "reason" in inputs and inputs["reason"]["required"] is True
