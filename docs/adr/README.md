@@ -16,6 +16,7 @@ the context, the decision, and its consequences at a point in time.
 | [0009](0009-tag-object-lifecycle.md) | Tags are created before apply and swept after push, never destroyed by Terraform | Accepted — built |
 | [0010](0010-address-and-service-object-lifecycle.md) | Address and service objects follow the tag lifecycle | Accepted — lifecycle code built, switch pending |
 | [0011](0011-unmanaged-drift-is-deleted.md) | Unmanaged drift is DELETED, never adopted | Accepted |
+| [0012](0012-what-may-be-reconstructed.md) | Reconstruct actions, never detections | Accepted |
 
 **0001** — the intent-loader registry and `ZoneRequest` are built; the registry
 is otherwise a registry in name only (classify / evidence / drift are still
