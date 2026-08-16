@@ -165,6 +165,26 @@ Two properties worth testing, because both are places this could quietly lie:
   read as a clean bill of health — and this failed exactly that way until
   2026-08-16, when an empty checked-set skipped the guard entirely.
 
+### Joining a deletion to what justified it
+
+Every finding carries an **`id`** — `VIOL-2026-0816-GitOps-test-unmanaged-2` —
+built from the date it was first seen, its scope, and its name. Derived rather
+than allocated, so it is identical on every run with no counter to coordinate,
+and a finding that resolves and returns keeps the id it was first known by.
+
+Every manual-action record states which finding it remediated:
+
+```bash
+jq -r '"\(.name)\t-> \(.violation_id // "no violation: " + .unlinked_reason)"' \
+  evidence/manual-actions/*.json
+```
+
+A deletion that remediates nothing detected is legitimate — a disposable
+fixture, a cleanup — but it must say so in `unlinked_reason` rather than leave
+the field empty, so an unexplained deletion cannot pass as an oversight. A
+`violation_id` that resolves to no record is refused outright: a link pointing
+nowhere reads as provenance while providing none.
+
 ### Who wrote the record
 
 Deleting an object that GitOps does not own produces a `fw-manual-action/v2`

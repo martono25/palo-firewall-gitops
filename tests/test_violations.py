@@ -212,3 +212,64 @@ def test_but_a_violation_that_CHANGES_CLASS_does_write(tmp_path):
     changed = reconcile(found=[_found(cls="malformed", tags=["gitops:managed"])],
                         existing=load(tmp_path), root=tmp_path, run_url=RUN, at=T2)
     assert len(changed) == 1 and changed[0][1]["class"] == "malformed"
+
+
+def test_the_SAME_NAME_in_two_scopes_gets_two_DIFFERENT_ids():
+    """The scope is part of the IDENTITY, so it must be part of the id.
+
+    Ids are readable rather than hashed, which makes it tempting to build them
+    from the object name alone — and `test-unmanaged-2` in GitOps then means the
+    same thing as `test-unmanaged-2` in prod-edge. Two distinct findings sharing
+    one identifier silently merges them in the join the id exists to enable, and
+    a deletion record pointing at that id would not say which unauthorised
+    change it actually removed.
+
+    Caught by mutation: dropping `scope` from the id left every other test in
+    this suite green.
+    """
+    from fwgitops.violations import violation_id
+
+    a = violation_id(scope="GitOps", name="dup", first_seen="2026-08-16T01:00:00Z")
+    b = violation_id(scope="prod-edge", name="dup", first_seen="2026-08-16T01:00:00Z")
+    assert a != b, "same name in two folders is two findings, not one"
+    assert "GitOps" in a and "prod-edge" in b
+
+
+def test_an_id_SURVIVES_a_resolve_and_return_cycle(tmp_path):
+    """A finding that comes back is the same finding, and must keep the id it
+    was first known by — `first_seen` is never overwritten, which is what makes
+    the id stable without an allocator."""
+    write(reconcile(found=[_found()], existing={}, root=tmp_path, run_url=RUN, at=T1))
+    first = json.loads(next(tmp_path.glob("*.json")).read_text())["id"]
+
+    write(reconcile(found=[], existing=load(tmp_path), root=tmp_path, run_url=RUN,
+                    at=T2, scopes_checked=["GitOps"]))
+    write(reconcile(found=[_found()], existing=load(tmp_path), root=tmp_path,
+                    run_url=RUN, at=T3, scopes_checked=["GitOps"]))
+
+    assert json.loads(next(tmp_path.glob("*.json")).read_text())["id"] == first
+
+
+def test_two_findings_CANNOT_COLLAPSE_INTO_ONE_RECORD(tmp_path):
+    """`web/1` and `web 1` sanitise to the same filename AND the same id.
+
+    The filename half predates ids entirely — `record_path` has always
+    sanitised — so the second finding silently OVERWROTE the first and vanished.
+    Invisible by construction: the result is one file where there should be two,
+    and nothing was left to notice. Found while mutation-testing the id.
+    """
+    import pytest
+
+    from fwgitops.violations import build, record_path
+
+    a = build(cls="unmanaged", kind="security-rule", scope="GitOps",
+              name="web/1", tags=[], run_url=RUN, at=T1)
+    b = build(cls="unmanaged", kind="security-rule", scope="GitOps",
+              name="web 1", tags=[], run_url=RUN, at=T1)
+    assert a["id"] == b["id"], "the collision this guard exists for"
+
+    write([(record_path(tmp_path, scope="GitOps", kind="security-rule",
+                        name="web/1"), a)])
+    with pytest.raises(ValueError, match="already holds the finding"):
+        write([(record_path(tmp_path, scope="GitOps", kind="security-rule",
+                            name="web 1"), b)])

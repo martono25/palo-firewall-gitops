@@ -41,6 +41,9 @@ on:
       reason:
         description: "Why it is being removed — lands in the record"
         required: true
+      violation_id:
+        description: "The VIOL-... id this remediates (see evidence/violations/), or NONE if nothing detected it"
+        required: true
 
 permissions:
   contents: write
@@ -78,6 +81,7 @@ jobs:
           KIND: ${{ inputs.kind }}
           FOLDER: ${{ inputs.folder }}
           NAME: ${{ inputs.name }}
+          VIOLATION_ID: ${{ inputs.violation_id }}
           # THE RECORD'S CONTENTS. Absent until 2026-08-16, so `reason` — a
           # REQUIRED input, described as "lands in the record" — reached the
           # record as an empty string, along with who ran it and where.
@@ -143,6 +147,12 @@ jobs:
           # deletion.
           from fwgitops.evidence import build_manual_action, write_manual_action
 
+          _vid = os.environ.get("VIOLATION_ID", "").strip()
+          if _vid and _vid != "NONE" and not _vid.startswith("VIOL-"):
+              print(f"::error::violation_id {_vid!r} must be a VIOL-... id or the "
+                    f"word NONE")
+              sys.exit(1)
+
           rec = build_manual_action(
               action="delete", kind=kind, folder=folder, name=name,
               object_id=obj.get("id"), tags=tags,
@@ -152,6 +162,14 @@ jobs:
               # Stated, not defaulted. This IS the workflow, so it is the one
               # caller entitled to say so.
               provenance="workflow",
+              # `NONE` is TYPED, not left blank. A deletion that remediates
+              # nothing the platform detected is a legitimate act (a fixture, a
+              # cleanup) and exactly the one worth saying out loud — an empty
+              # box would let it pass as an oversight.
+              violation_id=None if _vid in ("", "NONE") else _vid,
+              unlinked_reason=(
+                  f"No detected violation. Operator stated NONE. {os.environ.get('REASON', '')}"
+                  if _vid in ("", "NONE") else ""),
           )
           # PRINTED FIRST, and in full. The commit below can fail — an expired
           # token, a protected branch, a push race — and the object is already

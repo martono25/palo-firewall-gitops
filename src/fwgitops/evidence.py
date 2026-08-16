@@ -539,7 +539,8 @@ _UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 def build_manual_action(*, action: str, kind: str, folder: str, name: str,
                         object_id: Optional[str], tags: Sequence[str],
                         reason: str, actor: str, run_url: str,
-                        provenance: str, reconstructed_from: str = "",
+                        provenance: str, violation_id: Optional[str],
+                        unlinked_reason: str = "", reconstructed_from: str = "",
                         at: Optional[str] = None) -> Dict[str, Any]:
     """A record of something done to SCM directly, outside the pipeline.
 
@@ -567,6 +568,17 @@ def build_manual_action(*, action: str, kind: str, folder: str, name: str,
     A `reconstructed` record must also say WHAT it was rebuilt from — a record
     that cannot be traced to a source is not a reconstruction, it is an
     assertion.
+
+    `violation_id` LINKS THE ACT TO WHAT JUSTIFIED IT, and is required for the
+    same reason. Until 2026-08-16 that link existed only as prose someone typed
+    into `reason`, so "show me every unauthorised change and what removed it"
+    was a manual read of two directories. With the id on the record it is a
+    join.
+
+    Pass `None` when the deletion remediates no DETECTED violation — a disposable
+    fixture, a cleanup — but then `unlinked_reason` must say why. Deleting
+    something the platform never flagged is not wrong, and it is exactly the case
+    worth stating out loud rather than leaving as an empty field.
     """
     if provenance not in PROVENANCE:
         raise ValueError(
@@ -578,9 +590,20 @@ def build_manual_action(*, action: str, kind: str, folder: str, name: str,
             "a reconstructed record must name what it was rebuilt from (a run "
             "URL, a log, a console export). Without a source it is an assertion, "
             "not a reconstruction.")
+    if violation_id is None and not unlinked_reason.strip():
+        raise ValueError(
+            "a deletion with no violation_id must say why in `unlinked_reason` "
+            "— 'nothing detected this' is a claim worth recording, not an empty "
+            "field")
+    if violation_id is not None and not str(violation_id).startswith("VIOL-"):
+        raise ValueError(
+            f"violation_id {violation_id!r} does not look like a violation id "
+            f"(VIOL-YYYY-MMDD-scope-name); a link that resolves to nothing is "
+            f"worse than no link")
     rec = {
         "schema": MANUAL_ACTION_SCHEMA,
         "action": action,
+        "violation_id": violation_id,
         "kind": kind,
         "folder": folder,
         "name": name,
@@ -594,6 +617,8 @@ def build_manual_action(*, action: str, kind: str, folder: str, name: str,
     }
     if provenance == "reconstructed":
         rec["reconstructed_from"] = reconstructed_from
+    if violation_id is None:
+        rec["unlinked_reason"] = unlinked_reason
     return rec
 
 
@@ -611,6 +636,15 @@ def validate_manual_action(record: Dict[str, Any]) -> None:
     if prov == "reconstructed" and not str(record.get("reconstructed_from", "")).strip():
         raise ValueError(
             f"reconstructed record for {record.get('name')!r} names no source")
+    if "violation_id" not in record:
+        raise ValueError(
+            f"manual-action record for {record.get('name')!r} does not say which "
+            f"violation it remediates (use null plus `unlinked_reason` if none)")
+    if record["violation_id"] is None and not str(
+            record.get("unlinked_reason", "")).strip():
+        raise ValueError(
+            f"manual-action record for {record.get('name')!r} links to no "
+            f"violation and does not say why")
 
 
 def manual_action_path(record: Dict[str, Any], root: Path) -> Path:

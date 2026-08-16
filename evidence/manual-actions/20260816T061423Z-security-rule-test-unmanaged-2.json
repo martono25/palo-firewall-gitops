@@ -12,5 +12,6 @@
   "reconstruction_note": "RECONSTRUCTED FROM THE RUN LOG on 2026-08-16. The DELETE succeeded and the record step then crashed on NameError: _json, so the workflow wrote nothing and its pull-request step was skipped. An irreversible action left no evidence \u2014 the exact failure this workflow exists to prevent. object_id and tags come from the log line 'deleting security-rule ... (id=...) tags=none'; 'at' is the timestamp of the 'OK \u2014 deleted' line. Fixed in the same commit.",
   "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31930920345",
   "schema": "fw-manual-action/v2",
-  "tags_at_deletion": []
+  "tags_at_deletion": [],
+  "violation_id": "VIOL-2026-0816-GitOps-test-unmanaged-2"
 }

@@ -10,5 +10,7 @@
   "reason": "Proving fw-manual-action/v2 in CI after #252 made provenance a required argument. build_manual_action is a breaking signature change whose only production caller is this workflow, and heredoc static checks do not verify signatures.",
   "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31932499885",
   "schema": "fw-manual-action/v2",
-  "tags_at_deletion": []
+  "tags_at_deletion": [],
+  "unlinked_reason": "No detected violation. This object was created by create-test-fixture.yml and deleted within the same hour, entirely between two drift runs, so the platform never saw it and filed nothing. Recorded rather than left blank: a deletion with no corresponding detection is exactly the case worth stating out loud.",
+  "violation_id": null
 }
