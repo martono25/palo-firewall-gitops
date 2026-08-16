@@ -1230,9 +1230,21 @@ def test_the_unattended_restore_CANNOT_deploy_unapproved_intent():
         "depending on the guard is not enough — the result must be REQUIRED")
     assert restore["with"]["unattended"] is True
 
-    guard = wf["jobs"]["already-applied"]["steps"][0]["run"]
-    assert "headSha" in guard and "success" in guard, (
-        "the guard must check for a SUCCESSFUL apply of THIS commit")
+    steps = wf["jobs"]["already-applied"]["steps"]
+    guard = next(st["run"] for st in steps if st.get("run"))
+    assert "conclusion==\"success\"" in guard, "it must find a SUCCESSFUL apply"
+
+    # THE QUESTION IT ASKS. "Was THIS COMMIT applied?" was the first version and
+    # was wrong within the hour: apply.yml triggers only on declared-state paths,
+    # so merging docs or a workflow advances main WITHOUT an apply and the guard
+    # refuses for the rest of time — the restore silently never running, which is
+    # the failure mode this repository keeps producing.
+    assert "git diff --name-only" in guard and "intent catalog terraform" in guard, (
+        "the guard must ask whether DECLARED STATE changed since the last "
+        "successful apply, not whether this exact commit was applied")
+    checkout = next(st for st in steps if str(st.get("uses", "")).startswith("actions/checkout"))
+    assert (checkout.get("with") or {}).get("fetch-depth") == 0, (
+        "diffing against the last applied commit needs history")
 
 
 def test_apply_routes_an_unattended_run_to_the_UNGATED_environment():
