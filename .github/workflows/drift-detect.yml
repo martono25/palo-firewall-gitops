@@ -242,7 +242,93 @@ jobs:
               >> "$RUNNER_TEMP/drift-verdicts"
           fi
 
+      - name: Detect state drift (kinds that cannot carry tags)
+        run: |
+          set -euo pipefail
+          drift=0
+          for dir in terraform/*/; do
+            folder=$(basename "$dir")
+            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
+            [ -f "$dir/main.tf" ] || continue
+            echo "::group::state drift $folder"
+            # One snapshot per kind that cannot carry gitops: tags. Driven off
+            # the registry, so a new kind is covered as soon as it registers
+            # drift_engine="state" — no edit needed here.
+            snaps=()
+            for kind in $(fwgitops kinds --state-drift); do
+              out="state-$kind-$folder.json"
+              # --scope-dir, not a positional folder: for the device root the
+              # directory is `device-<serial>`, which SCM rejects as a folder
+              # ("Folder device-... doesn't exist"). fwgitops owns that mapping
+              # via Scope.from_dirname; duplicating the `device-` prefix here is
+              # what broke this job on 2026-08-08.
+              fwgitops snapshot "$kind" --scope-dir "$folder" --out "$out"
+              snaps+=(--state-snapshot "$out")
+            done
+            rc=0
+            if [ ${#snaps[@]} -gt 0 ]; then
+              fwgitops drift "${snaps[@]}" || rc=$?
+            fi
+            echo "::endgroup::"
+            case "$rc" in
+              0) ;;
+              3) echo "::warning::ZONE DRIFT in '$folder'"; drift=1 ;;
+              *) echo "::error::zone drift check failed for '$folder' (rc=$rc)"; exit 1 ;;
+            esac
+          done
+          if [ "$drift" = "1" ]; then
+            echo "State drift detected — an object exists in SCM that Git never declared, or a declared one has been changed or removed out of band." \
+              >> "$RUNNER_TEMP/drift-verdicts"
+          else
+            echo "No state drift."
+          fi
+
+      # ADDRESS AND SERVICE OBJECTS — the blind spot, closed 2026-08-16.
+      #
+      # These are not registry kinds, so neither engine above looks at them, and
+      # `objectsweep` only ever asks "did WE mint this" — the right question for
+      # DELETING, the wrong one for detecting. An address created straight into
+      # the GitOps folder sat live in SCM while run 31934305374 reported "No
+      # drift of any kind". The premise that GitOps is the source of truth was
+      # simply not enforced here.
+      #
+      # No allowlist of permitted pre-existing objects: SCM marks what it
+      # provides (`snippet`), so provenance is derived live and there is nothing
+      # on disk for anyone to add a name to.
+      - name: Detect unmanaged objects (addresses and services)
+        run: |
+          set -euo pipefail
+          drift=0
+          for dir in terraform/*/; do
+            folder=$(basename "$dir")
+            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
+            [ -f "$dir/main.tf" ] || continue
+            echo "::group::object drift $folder"
+            rc=0
+            fwgitops objects drift "$folder" \
+              --record-violations evidence/violations \
+              --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              || rc=$?
+            echo "::endgroup::"
+            case "$rc" in
+              0) ;;
+              3) echo "::warning::UNMANAGED OBJECT(S) in '$folder'"; drift=1 ;;
+              *) echo "::error::object drift check failed for '$folder' (rc=$rc)"; exit 1 ;;
+            esac
+          done
+          if [ "$drift" = "1" ]; then
+            echo "An address or service object exists in a managed folder that this platform did not create and SCM does not provide. Nothing authorised it." \
+              >> "$RUNNER_TEMP/drift-verdicts"
+          else
+            echo "No unmanaged objects."
+          fi
+
       # A VIOLATION OUTLIVES THE RUN THAT FOUND IT.
+      #
+      # MUST RUN AFTER EVERY STEP THAT WRITES A RECORD. It sat between the
+      # rule and object checks when the object check was added, so an
+      # unmanaged object was detected, recorded to the workspace, and then
+      # never committed — the finding would have died with the runner.
       #
       # `if: always()` no longer exists for the reason it was added. It was
       # written when the step above EXITED 1 on a finding, which would have run
@@ -311,47 +397,6 @@ jobs:
             --title "record: policy violations pending review" \
             --body "Drift detection found configuration in SCM that no request authorised. Each file under \`evidence/violations/\` is one finding, keyed on the object — reappearing nightly updates \`last_seen\` rather than filing a duplicate. Review, act, and merge to accept the record. See \`docs/adr/0011-unmanaged-drift-is-deleted.md\`." \
             || gh pr view "$branch" --json url >/dev/null
-
-      - name: Detect state drift (kinds that cannot carry tags)
-        run: |
-          set -euo pipefail
-          drift=0
-          for dir in terraform/*/; do
-            folder=$(basename "$dir")
-            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
-            [ -f "$dir/main.tf" ] || continue
-            echo "::group::state drift $folder"
-            # One snapshot per kind that cannot carry gitops: tags. Driven off
-            # the registry, so a new kind is covered as soon as it registers
-            # drift_engine="state" — no edit needed here.
-            snaps=()
-            for kind in $(fwgitops kinds --state-drift); do
-              out="state-$kind-$folder.json"
-              # --scope-dir, not a positional folder: for the device root the
-              # directory is `device-<serial>`, which SCM rejects as a folder
-              # ("Folder device-... doesn't exist"). fwgitops owns that mapping
-              # via Scope.from_dirname; duplicating the `device-` prefix here is
-              # what broke this job on 2026-08-08.
-              fwgitops snapshot "$kind" --scope-dir "$folder" --out "$out"
-              snaps+=(--state-snapshot "$out")
-            done
-            rc=0
-            if [ ${#snaps[@]} -gt 0 ]; then
-              fwgitops drift "${snaps[@]}" || rc=$?
-            fi
-            echo "::endgroup::"
-            case "$rc" in
-              0) ;;
-              3) echo "::warning::ZONE DRIFT in '$folder'"; drift=1 ;;
-              *) echo "::error::zone drift check failed for '$folder' (rc=$rc)"; exit 1 ;;
-            esac
-          done
-          if [ "$drift" = "1" ]; then
-            echo "State drift detected — an object exists in SCM that Git never declared, or a declared one has been changed or removed out of band." \
-              >> "$RUNNER_TEMP/drift-verdicts"
-          else
-            echo "No state drift."
-          fi
 
       # ONE NIGHT, ONE ALERT, EVERY FINDING IN IT.
       #

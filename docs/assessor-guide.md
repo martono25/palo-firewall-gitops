@@ -165,6 +165,32 @@ Two properties worth testing, because both are places this could quietly lie:
   read as a clean bill of health — and this failed exactly that way until
   2026-08-16, when an empty checked-set skipped the guard entirely.
 
+### What is checked, and what is not
+
+Drift detection covers security rules (by tag), interfaces, routes and zones (by
+state), and — since 2026-08-16 — **address and service objects**. Objects were
+the blind spot: they are not intent kinds, so neither engine looked at them, and
+the sweep only ever asked "did WE mint this", which is the right question for
+deleting and the wrong one for detecting. An address created by hand in a
+managed folder was invisible indefinitely.
+
+An object is accounted for when SCM provides it (`snippet` set — the PAN
+defaults and predefined services), when it is inherited from an ancestor folder,
+or when its name is the hash of its own value, which only this platform's
+compiler produces. Anything else in a managed folder is a violation.
+
+There is deliberately **no allowlist of permitted pre-existing objects**. One was
+designed and rejected: a baseline a user can edit is a way to launder an
+unauthorised object by adding its name to it, which is worse than no control at
+all. Provenance is read from SCM on every run instead, so there is nothing
+stored and nothing to amend.
+
+**Known limit, since it bounds the claim:** `snippet` means "this came from a
+snippet rather than this folder", and snippets are a construct a user can also
+create. An object placed in a hand-made snippet attached to the folder reads as
+SCM-provided. Closing that needs snippet-level management, which this repository
+does not have.
+
 ### Joining a deletion to what justified it
 
 Every finding carries an **`id`** — `VIOL-2026-0816-GitOps-test-unmanaged-2` —

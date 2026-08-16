@@ -2297,6 +2297,67 @@ def run_tags(
     return 0
 
 
+def run_object_drift(
+    scope_dir: str,
+    *,
+    record_violations: Optional[Path] = None,
+    run_url: Optional[str] = None,
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Is anything in this folder's objects unaccounted for? Exit 3 if so.
+
+    SEPARATE FROM `run_objects` on purpose. Ensure and sweep both need the
+    compiled intents, because they act on what the platform WANTS. This asks
+    only what SCM HOLDS, and making it depend on a successful compile would mean
+    a broken intent silently stops the check that finds unauthorised objects —
+    the two failures that must never be coupled.
+    """
+    from fwgitops.clients import ScmPushClient  # noqa: F401  (auth stack)
+    from fwgitops.compiler import Scope
+    from fwgitops.objectdrift import detect
+    from fwgitops.objectsweep import KIND_PATHS
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    scope = Scope.from_dirname(scope_dir)
+    params = {"folder": scope.value} if scope.kind == "folder" else {"device": scope.value}
+
+    try:
+        session = session or ScmSession(ScmCredentials.from_env())
+        per_kind = {}
+        for kind in ("address", "service"):
+            payload = session.request("GET", KIND_PATHS[kind],
+                                      params={**params, "limit": 500})
+            rows = payload.get("data") if isinstance(payload, dict) else payload
+            per_kind[kind] = [r for r in (rows or []) if isinstance(r, dict)]
+    except ScmConfigError as e:
+        print(f"error: SCM credentials not usable: {e}", file=err)
+        return 1
+    except ScmApiError as e:
+        print(f"error: SCM read failed: {e}", file=err)
+        return 1
+
+    report = detect(per_kind, scope=scope.key)
+    print(report.summary(), file=out)
+
+    if record_violations is not None:
+        from fwgitops import violations as _v
+
+        found = [{"cls": "unmanaged", "kind": o.kind, "scope": o.scope,
+                  "name": o.name, "tags": list(o.tags)}
+                 for o in report.unmanaged]
+        changed = _v.reconcile(found=found, existing=_v.load(record_violations),
+                               root=record_violations, run_url=run_url or "",
+                               scopes_checked=[scope.key])
+        for path in _v.write(changed):
+            print(f"violation record: {path}", file=out)
+
+    return 0 if report.is_clean else 3
+
+
 def run_objects(
     action: str,
     scope_dir: str,
@@ -3177,7 +3238,7 @@ def build_parser() -> argparse.ArgumentParser:
     ob = sub.add_parser("objects",
                         help="create or sweep this platform's address/service objects "
                              "(ADR-0010)")
-    ob.add_argument("action", choices=("ensure", "sweep"),
+    ob.add_argument("action", choices=("ensure", "sweep", "drift"),
                     help="ensure: create missing objects, run BEFORE apply — the API "
                          "rejects a rule naming an object that does not exist, so this "
                          "is load-bearing. sweep: remove objects nothing references, run "
@@ -3190,6 +3251,10 @@ def build_parser() -> argparse.ArgumentParser:
     ob.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     ob.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
     ob.add_argument("--dry-run", action="store_true", help="report, write nothing")
+    ob.add_argument("--record-violations", type=Path, metavar="DIR",
+                    help="drift only: write a fw-violation/v1 record per "
+                         "unaccounted-for object")
+    ob.add_argument("--run-url", default=None, help="drift only: recorded on each violation")
 
     p = sub.add_parser("push", help="push a folder's or firewall's staged config to SCM (T13)")
     p.add_argument("folder", nargs="?", default=None, help="SCM folder to push")
@@ -3399,6 +3464,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             dry_run=args.dry_run,
         )
     if args.command == "objects":
+        if args.action == "drift":
+            return run_object_drift(
+                args.scope_dir, record_violations=args.record_violations,
+                run_url=args.run_url,
+            )
         return run_objects(
             args.action, args.scope_dir, args.intent_root, args.env_map,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
