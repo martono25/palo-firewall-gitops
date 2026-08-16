@@ -149,6 +149,24 @@ def compare(rule: Any, live: Optional[Dict[str, Any]], *, scope: str) -> RuleDif
             continue
         want = _norm(mine, getattr(rule, mine, None))
         got = _norm(mine, live.get(theirs))
+        # A FIELD THIS PLATFORM DOES NOT DECLARE IS NOT COMPARED.
+        #
+        # The first live run reported EVERY managed rule as modified:
+        # `log_setting: declared None, live 'Cortex Data Lake'`. No intent
+        # declares log forwarding, so the compiler emits None — while SCM holds
+        # a value nothing here wrote and Terraform cannot clear (the field is
+        # optional-computed, so a null config means "leave alone", not
+        # "remove"). Comparing it produced drift that no remediation could fix:
+        # a permanently red job, which is how a detector gets switched off.
+        #
+        # THE TRADE, stated rather than hidden: a field left undeclared can be
+        # SET in the console without this noticing. The remedy is to declare it —
+        # `spec.log_forwarding` exists and is validated against
+        # catalog/log-forwarding.yaml — at which point it is compared like any
+        # other field. Asserting a value this platform never writes is the worse
+        # error, because it cannot be satisfied.
+        if want is None:
+            continue
         if want != got:
             diffs.append(FieldDiff(field=theirs,
                                    declared=sorted(want) if isinstance(want, frozenset) else want,

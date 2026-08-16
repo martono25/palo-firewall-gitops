@@ -156,3 +156,35 @@ def test_a_row_WITH_fields_is_still_compared():
 
     assert carries_content(LIVE)
     assert not carries_content({"folder": "f", "name": "n"})
+
+
+def test_an_UNDECLARED_field_is_not_compared():
+    """The false positive that hit every rule in the estate on the first live run.
+
+    No intent declares log forwarding, so the compiler emits None — while SCM
+    holds 'Cortex Data Lake', a value nothing here wrote and Terraform cannot
+    clear (optional-computed: a null config means "leave alone"). Comparing it
+    reported six rules modified and filed six violation records, none of which
+    any remediation could resolve.
+    """
+    undeclared = _declared(log_setting=None)
+    assert compare(undeclared, LIVE, scope="prod-edge").is_clean
+
+
+def test_a_DECLARED_field_is_still_compared_when_it_differs():
+    """The guard must not become "compare nothing": declaring a value is what
+    makes it enforceable."""
+    d = compare(_declared(log_setting="log-best"), LIVE, scope="prod-edge")
+    assert [f.field for f in d.fields] == ["log_setting"]
+
+
+def test_an_undeclared_field_being_SET_is_the_accepted_blind_spot():
+    """Pinned so the trade is deliberate rather than forgotten.
+
+    A field the intent leaves unset can be changed in the console without this
+    noticing. Declaring it makes it enforceable — the remedy is in the intent,
+    not in this comparison.
+    """
+    d = compare(_declared(description=None), dict(LIVE, description="edited by hand"),
+                scope="prod-edge")
+    assert d.is_clean

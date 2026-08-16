@@ -302,3 +302,33 @@ def test_a_violation_record_CANNOT_be_hand_authored_with_a_provenance_flag():
     assert rec["first_seen_run"] == RUN, (
         "every violation names the run that saw it; that is what makes it "
         "impossible to write after the fact")
+
+
+def test_a_checker_that_saw_ONLY_OBJECTS_does_not_close_RULE_findings(tmp_path):
+    """The bug that silently closed six real findings.
+
+    Several detectors run over the same scope, each knowing about one KIND: the
+    object checker reports addresses and services, the tag and content checkers
+    report security rules. Resolving on scope alone meant the object checker —
+    whose `found` list can never contain a rule — closed every open RULE finding
+    in the folder it had just read.
+
+    A finding that closes itself because a DIFFERENT detector ran is worse than
+    one never raised: the record says "resolved", with a timestamp, and nobody
+    looks again.
+    """
+    write(reconcile(found=[{"cls": "modified", "kind": "security-rule",
+                            "scope": "prod-edge", "name": "REQ-1", "tags": []}],
+                    existing={}, root=tmp_path, run_url=RUN, at=T1))
+
+    # The object checker runs next over the same folder and finds nothing.
+    changed = reconcile(found=[], existing=load(tmp_path), root=tmp_path,
+                        run_url=RUN, at=T2, scopes_checked=["prod-edge"],
+                        kinds_checked=["address", "service"])
+    assert changed == [], "an object checker cannot speak for security rules"
+
+    # The rule checker running over the same folder CAN close it.
+    changed = reconcile(found=[], existing=load(tmp_path), root=tmp_path,
+                        run_url=RUN, at=T2, scopes_checked=["prod-edge"],
+                        kinds_checked=["security-rule", "security-rule-order"])
+    assert len(changed) == 1 and changed[0][1]["status"] == "resolved"
