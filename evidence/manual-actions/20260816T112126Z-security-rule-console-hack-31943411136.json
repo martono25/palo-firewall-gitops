@@ -1,0 +1,16 @@
+{
+  "action": "delete",
+  "at": "2026-08-16T11:21:26Z",
+  "dispatched_by": "github-actions[bot]",
+  "folder": "prod-edge",
+  "kind": "security-rule",
+  "name": "console-hack-31943411136",
+  "object_id": "6b21ee0e-f3ac-4a96-9ded-0f294caf5bdc",
+  "provenance": "workflow",
+  "reason": "Automatic remediation: this object was in a managed scope, no request authorised it, and GitOps is the source of truth (ADR-0011). Emergency changes must be raised as an AccessRequest before this job runs.",
+  "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31944080524",
+  "schema": "fw-manual-action/v2",
+  "tags_at_deletion": [],
+  "unlinked_reason": "No open violation record matched. Detected and removed within the same run, before any drift job had recorded it.",
+  "violation_id": null
+}
