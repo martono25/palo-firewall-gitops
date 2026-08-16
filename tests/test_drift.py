@@ -313,3 +313,54 @@ def test_a_snapshot_without_scope_treats_rules_as_LOCAL():
 
     report = detect_drift([], [ActualRule(folder="All", name="default", tags=())])
     assert not report.is_clean, "unknown provenance must be reported, not skipped"
+
+
+def test_a_DUPLICATED_managed_rule_does_not_pass_as_clean():
+    """The hole found by asking what `malformed` is for.
+
+    Copy a managed rule in the SCM console and the copy inherits its tags —
+    `gitops:managed` plus `gitops:req:REQ-...`. The original check asked only
+    whether the TAG's request was declared, never whether the object's own name
+    matched it. So the duplicate was not unmanaged, not malformed and not
+    orphaned: it reported NO DRIFT, while being free to carry any contents at
+    all — copy a narrow rule, widen the copy, and nothing says a word.
+
+    Every managed rule is named after its request (`name = metadata.id`), so a
+    managed object whose name differs from the request it claims did not come
+    from this pipeline.
+    """
+    from fwgitops.compiler import CompiledChange, SecurityRule
+    from fwgitops.drift import ActualRule, detect_drift
+
+    rule = SecurityRule(name="REQ-2026-0725", folder="prod-edge",
+                        from_zones=["local"], to_zones=["internet"], sources=[],
+                        destinations=[], services=[], action="allow",
+                        log_end=True, tags=[], profile_group=None,
+                        negate_source=False, negate_destination=False)
+    declared = [CompiledChange(address_objects=[], service_objects=[], rule=rule)]
+
+    copy = ActualRule(folder="prod-edge", name="REQ-2026-0725-copy",
+                      tags=("gitops:managed", "gitops:req:REQ-2026-0725"),
+                      scope="prod-edge")
+
+    report = detect_drift(declared, [copy])
+    assert not report.is_clean, "a duplicated managed rule must not read as clean"
+    assert [r.name for r in report.malformed] == ["REQ-2026-0725-copy"]
+
+
+def test_the_GENUINE_managed_rule_is_still_clean():
+    """The obvious regression: tightening the check must not flag the real one."""
+    from fwgitops.compiler import CompiledChange, SecurityRule
+    from fwgitops.drift import ActualRule, detect_drift
+
+    rule = SecurityRule(name="REQ-2026-0725", folder="prod-edge",
+                        from_zones=["local"], to_zones=["internet"], sources=[],
+                        destinations=[], services=[], action="allow",
+                        log_end=True, tags=[], profile_group=None,
+                        negate_source=False, negate_destination=False)
+    declared = [CompiledChange(address_objects=[], service_objects=[], rule=rule)]
+
+    real = ActualRule(folder="prod-edge", name="REQ-2026-0725",
+                      tags=("gitops:managed", "gitops:req:REQ-2026-0725"),
+                      scope="prod-edge")
+    assert detect_drift(declared, [real]).is_clean
