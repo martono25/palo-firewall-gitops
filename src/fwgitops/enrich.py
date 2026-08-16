@@ -128,6 +128,22 @@ def restore_deployment_order(
     already reports, and failing here would block the apply that fixes it.
     """
     ids = client.rule_ids_by_name(folder)
+
+    # ALREADY IN ORDER? THEN DO NOTHING.
+    #
+    # The moves are idempotent AT THE API, so issuing them unconditionally
+    # looked harmless. It was not: the caller records a remediation whenever
+    # this returns a non-empty list, and this returned every rule every time —
+    # so a REORDER REMEDIATION RECORD was filed on every apply, claiming rules
+    # were re-seated that had never moved. Two false records reached `main`
+    # before a dry run made it visible. False evidence is worse than none.
+    #
+    # `rule_ids_by_name` builds its dict from the API response in order and dicts
+    # preserve insertion order, so its keys ARE the live rulebase order.
+    present = [n for n in expected if n in ids]
+    if [n for n in ids if n in set(expected)] == present:
+        return []
+
     moved: List[str] = []
     for i, name in enumerate(expected):
         if i == 0 or name not in ids or expected[i - 1] not in ids:

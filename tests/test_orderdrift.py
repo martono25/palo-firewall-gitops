@@ -183,6 +183,8 @@ class _FakeClient:
         self.moves = []
 
     def rule_ids_by_name(self, folder):
+        # INSERTION ORDER IS THE RULEBASE ORDER, as with the real client, which
+        # builds its dict from the API response in order.
         return dict(self._ids)
 
     def move_rule(self, rule_id, *, destination, rulebase, target=None):
@@ -192,7 +194,10 @@ class _FakeClient:
 def test_restoring_issues_ANCHORED_moves_in_deployment_order():
     from fwgitops.enrich import restore_deployment_order
 
-    c = _FakeClient(DEPLOYED)
+    # OUT OF ORDER, deliberately. This built a client already in deployment
+    # order and asserted that moves were issued anyway — encoding the bug that
+    # filed a false remediation record on every apply.
+    c = _FakeClient(LIVE)
     moved = restore_deployment_order(c, "prod-edge", DEPLOYED)
 
     assert moved == DEPLOYED[1:], "every rule but the anchor is re-seated"
@@ -339,3 +344,29 @@ def test_run_drift_ACTUALLY_WRITES_a_reordered_violation(tmp_path):
         "nothing behind, which is the gap records exist to close")
     assert {r["name"] for r in reordered} >= {"REQ-2026-0725", "REQ-2026-0812"}
     assert all(r["id"].startswith("VIOL-") for r in reordered)
+
+
+def test_an_APPLY_ON_A_CORRECT_RULEBASE_issues_no_moves():
+    """The defect that filed false evidence on every apply.
+
+    The moves are idempotent at the API, so issuing them unconditionally looked
+    harmless — but the caller records a REMEDIATION whenever this returns a
+    non-empty list, and it returned every rule every time. Two records reached
+    `main` claiming five rules were re-seated that had never moved, and it took a
+    dry run to notice. The test that should have caught it passed `moved=[]` by
+    hand, which the production path can never produce.
+    """
+    from fwgitops.enrich import restore_deployment_order
+
+    c = _FakeClient(DEPLOYED)                    # already in deployment order
+    assert restore_deployment_order(c, "prod-edge", DEPLOYED) == []
+    assert c.moves == [], "a correct rulebase must not be written to"
+
+
+def test_an_OUT_OF_ORDER_rulebase_still_gets_moved():
+    """The guard must not disable the repair it protects."""
+    from fwgitops.enrich import restore_deployment_order
+
+    c = _FakeClient(LIVE)                        # 0727, 0726, 0725, ...
+    assert restore_deployment_order(c, "prod-edge", DEPLOYED) == DEPLOYED[1:]
+    assert c.moves, "an out-of-order rulebase must be re-seated"
