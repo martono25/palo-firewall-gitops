@@ -20,6 +20,29 @@ a cross-model challenge invalidated two of its load-bearing assumptions.
    ZoneRequest loop" without interfaces does not produce a working zone.
 
 
+## Re-prove the delete + record path against a fresh object
+
+`delete-scm-object.yml` has run exactly once, on 2026-08-16 (run 31930920345).
+The DELETE worked; the record crashed on `NameError: _json` and the pull-request
+step was skipped, so an irreversible action left no evidence. Fixed in #245,
+along with two defects behind it (REASON/ACTOR/RUN_URL were never passed to the
+step, and the record was printed before being written).
+
+**The corrected path has still not run**, because the object it would delete no
+longer exists. `tests/test_workflow_heredocs.py` now catches both classes of
+defect statically, but static checks are not a run — and the whole reason this
+was found is that a green suite said nothing.
+
+To close it: create a disposable unmanaged object in the GitOps folder (any
+`address` will do — the workflow refuses anything carrying `gitops:req`), then
+dispatch the workflow against it and confirm THREE things, none of which has
+ever been observed:
+
+  1. `evidence/manual-actions/<ts>-<kind>-<name>.json` is written;
+  2. `reason`, `dispatched_by` and `run_url` are POPULATED, not empty strings;
+  3. the pull request opens and contains only that record.
+
+
 ## Completed
 
 ### Human-approval gate — DONE v2.1.0
