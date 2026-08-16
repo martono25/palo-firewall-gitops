@@ -115,6 +115,12 @@ summary is worth having in your head:
 
 The nightly job failed. That failure **is** the alert.
 
+**Read the last step first — `Alert on everything this run found`.** It lists
+every finding from all three detectors in one place. The individual detect steps
+record their verdicts and pass; only the gate fails the job. Before 2026-08-16
+each detector exited on its first finding and skipped the ones after it, so a
+night with more drift reported less of it.
+
 **The finding also outlives the run.** Every violation the nightly job detects
 is written to `evidence/violations/` and lands on a branch as a pull request
 titled `record: policy violations (run <id>)`. Review it, act on the finding,
