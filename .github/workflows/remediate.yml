@@ -44,6 +44,17 @@ permissions:
   # directly.
   contents: write
   pull-requests: write
+  # `actions: read` so the guard can query previous apply runs, and REQUIRED BY
+  # THE WORKFLOW THIS CALLS as well.
+  actions: read
+  # REQUIRED BY THE WORKFLOW THIS CALLS, not by anything here.
+  #
+  # A called workflow cannot be granted more than its caller holds, and
+  # `apply.yml` needs `id-token: write` for the OIDC exchange to the Terraform
+  # state backend. Without it the whole run is rejected at STARTUP — no jobs, no
+  # log, and an error that says nothing about permissions. Two dispatches were
+  # spent looking elsewhere.
+  id-token: write
 
 jobs:
   remediate:
