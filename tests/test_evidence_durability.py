@@ -922,3 +922,36 @@ def test_the_drift_plan_accepts_ANY_compiled_tfvars():
         "the plan must run for a scope with ANY compiled tfvars")
     assert '[ -f "$dir/rules.auto.tfvars.json" ] || continue' not in plan_step, (
         "keying on rules alone silently skips interface/zone/route-only scopes")
+
+
+def test_the_drift_job_materialises_EVERY_input_the_plan_needs():
+    """Compiling is not the whole desired state.
+
+    `$eth-*` folder interface variables come from `fwgitops folder-interfaces`,
+    a separate producer. Adding only `compile` to the drift job made the first
+    real plan propose
+
+        scm_ethernet_interface.this["$eth-dmz"] will be destroyed
+
+    for a LIVE interface — state held it, config did not. A drift report telling
+    an operator to delete a firewall's interface is worse than the silent one it
+    replaced, and the documented response ("reconcile via the apply workflow")
+    would have carried it out.
+
+    Asserted against apply.yml rather than a hardcoded list, so a third producer
+    added there cannot be forgotten here — which is exactly how this happened.
+    """
+    drift = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+    apply = (REPO_ROOT / ".github" / "workflows" / "apply.yml").read_text()
+
+    import re
+
+    producers = set(re.findall(r"run: (fwgitops (?:compile|folder-interfaces)[^\n]*)", apply))
+    assert producers, "apply.yml must still declare the producers this compares against"
+
+    for cmd in producers:
+        head = cmd.split()[1]          # compile | folder-interfaces
+        assert f"fwgitops {head}" in drift, (
+            f"apply.yml materialises desired state with `{cmd}` and the drift "
+            f"job does not — the plan then compares against an INCOMPLETE "
+            f"desired state and proposes destroying whatever is missing")
