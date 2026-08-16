@@ -977,3 +977,34 @@ def test_the_runbook_says_APPLY_means_the_workflow_not_the_terraform_command():
         "SCM and the device disagreeing")
     assert "No version bump" in runbook, (
         "reconciling drift bumps no version; versions move in a release PR")
+
+
+def test_the_assessor_guide_discloses_that_ORDER_is_not_verified():
+    """The gap lived only in TODOS.md — a backlog file — while the assessor
+    guide, which exists to state what the evidence does and does not support,
+    said nothing.
+
+    On a first-match-wins firewall order IS policy: a broad allow moved above a
+    narrow deny inverts both without changing a field. Demonstrated 2026-08-16
+    on the live tenant — a rule moved four places in the console and every
+    engine reported no drift, green run.
+
+    Unlike the gaps fixed that week, this one is not an unwired check. It cannot
+    work as built, which is precisely why it belongs in the disclosures rather
+    than the backlog.
+    """
+    guide = _flat(DOCS / "assessor-guide.md").replace("*", "").replace("`", "")
+
+    assert "RULE ORDER IS NOT VERIFIED" in guide, (
+        "an assessor reading the evidence must be told order is not covered")
+    assert "first-match-wins" in guide, (
+        "and why that matters on a firewall specifically")
+    assert "green run" in guide, (
+        "and that it was demonstrated, not merely reasoned about")
+
+
+def test_the_runbook_says_reordering_is_detected_by_NOTHING():
+    """An operator who sees a green drift run must not conclude the rulebase is
+    unchanged — only that its contents are."""
+    runbook = _flat(DOCS / "operator-runbook.md").replace("*", "").replace("`", "")
+    assert "Reordering is not detected — by any engine" in runbook
