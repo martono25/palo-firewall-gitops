@@ -126,7 +126,7 @@ not that a process document exists.
 | Control | Evidenced by |
 |---|---|
 | `AC-4` information flow enforcement | the rule *is* the flow control; `compiled.object` is what was enforced |
-| `CM-3` configuration change control | ticket, justification, PR, merge commit, reviewed before merge |
+| `CM-3` configuration change control | ticket, justification, PR, merge commit, and — for HIGH/CRITICAL — a deployment-gate approval before anything reaches the device |
 | `AU-2` / `AU-12` audit events and record generation | the bundle itself, committed and hash-linked |
 | `SC-7` boundary protection | the object is a boundary control on a boundary device |
 
@@ -138,6 +138,21 @@ not that a process document exists.
   bundle claimed a control and answered nobody. That is the defect this
   structure exists to prevent.
 - **`AC-5` separation of duties** — CRITICAL-tier dual-control changes only.
+
+**WHERE APPROVAL IS ENFORCED, precisely.** Not at the merge. The `main` ruleset
+requires a pull request and green `pytest` + `compile-and-plan`, and requires
+**zero approving reviews** — check it rather than taking this on trust. Approval
+is enforced at the DEPLOYMENT GATE: the `firewall-apply` environment carries a
+`required_reviewers` rule, so a HIGH or CRITICAL change waits for a human before
+anything reaches the firewall. LOW routes to `firewall-apply-auto`, which has no
+gate, by design and by risk tier.
+
+That is deliberate rather than a gap. The gate sits where configuration actually
+lands on a device, which is the moment worth guarding; a merge-approval rule
+would guard a door that is not the entrance. It also means the ruleset's name
+must describe what it enforces — it was called `main: reviewed changes only`
+until 2026-08-16, which promised a review it did not require, and is now
+`main: PR + green checks`.
 
 `approvers[].via` distinguishes `pull_request_review` (reviewed the proposed
 change) from `deployment_gate` (released the deployment). **One person doing
