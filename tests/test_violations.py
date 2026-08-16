@@ -39,11 +39,16 @@ def test_the_classes_are_distinct_and_named():
     them. `malformed` in particular is worse than an honest stranger: it CLAIMS
     this platform's provenance while tracing to no request, so it would pass any
     check that only looked for the marker."""
-    assert set(CLASSES) == {"unmanaged", "malformed", "orphaned", "reordered"}
-    # `reordered` is the quietest of them: every rule is authorised and
-    # unmodified, so nothing looks wrong on inspection while the EFFECTIVE
-    # policy has changed. It ranks second for that reason.
-    assert CLASSES.index("reordered") == 1
+    assert set(CLASSES) == {"modified", "malformed", "reordered", "missing",
+                            "unmanaged", "orphaned"}
+    # `modified` ranks FIRST: the rule is authorised, correctly named and
+    # correctly tagged, so every provenance check passes while it does something
+    # nobody approved. A widened destination is indistinguishable from the
+    # original by inspection.
+    assert CLASSES.index("modified") == 0
+    # `reordered` stays ahead of the classes where something is visibly out of
+    # place — every rule involved is authorised and unmodified.
+    assert CLASSES.index("reordered") < CLASSES.index("unmanaged")
     with pytest.raises(ValueError):
         build(cls="suspicious", kind="security-rule", scope="GitOps",
               name="x", tags=[], run_url=RUN, at=T1)

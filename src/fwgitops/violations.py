@@ -20,6 +20,12 @@ authorisation, and they are NOT interchangeable in a report:
     rule produces — it inherits both tags, so only the name gives it away.
   * `orphaned` — a managed object still live in SCM whose request is gone from
     Git. Authorised once, no longer declared.
+  * `modified` — a managed rule's live config differs from what Git declares.
+    Ranked FIRST: the rule is authorised, correctly named and correctly tagged,
+    so every provenance check passes while it does something nobody approved.
+    A widened destination is indistinguishable from the original by inspection.
+  * `missing` — a rule Git declares is absent from SCM. Somebody deleted
+    approved policy; if it was a deny, a path is now open that nothing reports.
   * `reordered` — a managed rule sits somewhere other than its deployed
     position. No rule was added, removed or edited, and every one of them is
     authorised; what changed is which rule matches FIRST, which is the policy.
@@ -50,7 +56,8 @@ SCHEMA = "fw-violation/v1"
 #: authorised and unmodified, so nothing looks wrong on inspection, while the
 #: EFFECTIVE policy has changed — a permissive rule moved above a restrictive
 #: one passes traffic the restrictive one was written to stop.
-CLASSES = ("malformed", "reordered", "unmanaged", "orphaned")
+CLASSES = ("modified", "malformed", "reordered", "missing", "unmanaged",
+           "orphaned")
 
 _UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
