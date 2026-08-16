@@ -1255,3 +1255,34 @@ def test_apply_routes_an_unattended_run_to_the_UNGATED_environment():
     assert "inputs.unattended" in env_line
     assert "firewall-apply-auto" in env_line and "firewall-apply'" in env_line, (
         "a non-unattended run must still route by risk tier")
+
+
+def test_a_caller_grants_every_permission_the_called_workflow_declares():
+    """A called workflow cannot be granted more than its caller holds.
+
+    `apply.yml` needs `id-token: write` for the OIDC exchange to the Terraform
+    state backend. `remediate.yml` calls it and did not grant that, so the run
+    was rejected at STARTUP: no jobs, no log, and an error naming nothing.
+
+    Nothing local catches this — both files are valid YAML and each workflow is
+    valid alone. It only fails when one calls the other.
+    """
+    import yaml
+
+    order = {"read": 1, "write": 2}
+    for wf_path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        doc = yaml.safe_load(wf_path.read_text())
+        caller = doc.get("permissions") or {}
+        for job in (doc.get("jobs") or {}).values():
+            uses = str(job.get("uses", ""))
+            if not uses.startswith("./.github/workflows/"):
+                continue
+            # `lstrip("./")` strips CHARACTERS, not a prefix, so it eats the
+            # dot of `.github` too. Slice the known prefix instead.
+            called = yaml.safe_load((REPO_ROOT / uses[2:]).read_text())
+            for perm, level in (called.get("permissions") or {}).items():
+                have = caller.get(perm)
+                assert have is not None and order.get(str(have), 0) >= order.get(str(level), 0), (
+                    f"{wf_path.name} calls {uses} which needs {perm}: {level}, "
+                    f"but the caller grants {have!r} — the run is rejected at "
+                    f"startup with no usable error")
