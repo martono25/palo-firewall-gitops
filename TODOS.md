@@ -775,6 +775,43 @@ is relied on.
 is the anchored-move problem again)
 **Priority:** P3
 
+### Deregister is not implemented, and a stale registration INHERITS POLICY
+
+**Known since onboard.py was written; the consequence was not.** `SCM does not
+delete devices` — `DELETE /devices/{serial}` returns 403 because it is
+UNSUPPORTED, not permission-gated. `fwgitops deregister` calls it anyway and is
+documented as a placeholder.
+
+What was missed is what the leftover DOES. `terraform destroy` removes the EC2
+instance; the SCM registration stays, sitting under its folder and INHERITING
+THAT FOLDER'S ZONES, ROUTES AND RULES. `007955000901881` has been registered
+under `prod-edge` since the rebuild — its instance terminated — and nothing
+detected it until `verify-catalog` learned to look SCM -> catalog on 2026-08-15.
+
+Had that serial ever been re-registered to a live box, it would have received
+production policy silently.
+
+**The teardown that actually works is two operations:**
+
+* **UNASSIGN** — move the device to "Available Devices", clearing its folder.
+  This is the half that MATTERS: an unassigned device inherits nothing. The API
+  is likely a device PUT that clears `folder`; it is not yet identified. Doable
+  in the SCM console today.
+* **DELETE** — via the CSP (Customer Support Portal) API, a different service.
+  Tidiness only.
+
+**A dispatch workflow was added on 2026-08-15 and removed the same day**: it
+wrapped `fwgitops deregister`, which its own docstring says does not work, and
+it 403'd on first use. A workflow that always fails is worse than none. Its
+guards were sound and worth keeping if this is implemented — serial typed twice,
+and a refusal if the catalog still declares the device.
+
+**Until unassign is wired**, `verify-catalog` flags an undeclared device as
+BLOCKING, and clearing it is a console action.
+
+**Effort:** M (find and wire the unassign API)
+**Priority:** P2 — it is the difference between a detected problem and a fixable one
+
 ## Drift
 
 ### State-based drift cannot tell an orphan from a hand-added object
