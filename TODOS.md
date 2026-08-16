@@ -20,6 +20,44 @@ a cross-model challenge invalidated two of its load-bearing assumptions.
    ZoneRequest loop" without interfaces does not produce a working zone.
 
 
+## Objects inside a hand-made SNIPPET are not checked
+
+Object drift (`fwgitops objects drift`, shipped 2026-08-16) treats an object as
+SCM-provided when it carries a `snippet` field. That is what makes the check
+work without an allowlist: SCM marks its own defaults — `Palo Alto Networks
+Sinkhole` as `snippet: default`, the predefined services as
+`snippet: predefined-snippet` — so provenance is read live and there is nothing
+on disk a user could add a name to.
+
+**But snippets are a construct users can also create.** An object placed in a
+hand-made snippet that is attached to a managed folder carries a `snippet` value
+and therefore reads as SCM-provided. It is not detected.
+
+Rated deliberately, not dismissed:
+
+  * it needs MORE than console access — someone must create a snippet and attach
+    it to a folder, which is not the accidental path a hand-made object is;
+  * an address or service alone opens nothing. It is inert until a rule
+    references it, and an unmanaged RULE is caught by the tag engine regardless
+    of where its objects live;
+  * so this is a gap in the completeness of the claim, not an open door.
+
+To close it, the check would have to distinguish SCM's own snippets from
+user-created ones. Two candidate signals, neither verified:
+
+  1. whether SCM exposes a snippet listing (`/config/setup/v1/snippets` or
+     similar) that marks predefined ones — probe before designing, the way
+     `snippet` itself was found (run 31934912556);
+  2. failing that, treating any snippet NOT on SCM's predefined list as managed
+     surface, which needs that list to come from the API rather than from a file
+     — a file would be the editable allowlist rejected when this was designed,
+     for the same reason.
+
+Until then the limit is stated in `docs/assessor-guide.md` under "What is
+checked, and what is not", so the claim is bounded where an assessor will read
+it rather than only in a code comment.
+
+
 ## Completed
 
 ### Human-approval gate — DONE v2.1.0
