@@ -6,9 +6,11 @@
   "kind": "security-rule",
   "name": "test-unmanaged-2",
   "object_id": "0839ed48-372e-479c-8204-33985f2f85d7",
+  "provenance": "reconstructed",
   "reason": "Unmanaged rule created directly in SCM to exercise the detect-delete-evidence flow. No request authorised it; ADR-0011 deletes unmanaged drift rather than adopting it. Open violation recorded at evidence/violations/GitOps-security-rule-test-unmanaged-2.json, first seen run 31930662415.",
-  "record_written_by": "RECONSTRUCTED FROM THE RUN LOG on 2026-08-16. The DELETE succeeded and the record step then crashed on NameError: _json, so the workflow wrote nothing and its pull-request step was skipped. An irreversible action left no evidence \u2014 the exact failure this workflow exists to prevent. object_id and tags come from the log line 'deleting security-rule ... (id=...) tags=none'; 'at' is the timestamp of the 'OK \u2014 deleted' line. Fixed in the same commit.",
+  "reconstructed_from": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31930920345 \u2014 the run log of the delete that succeeded while its record step crashed. NOTE: CI logs expire; this record's only primary source is perishable.",
+  "reconstruction_note": "RECONSTRUCTED FROM THE RUN LOG on 2026-08-16. The DELETE succeeded and the record step then crashed on NameError: _json, so the workflow wrote nothing and its pull-request step was skipped. An irreversible action left no evidence \u2014 the exact failure this workflow exists to prevent. object_id and tags come from the log line 'deleting security-rule ... (id=...) tags=none'; 'at' is the timestamp of the 'OK \u2014 deleted' line. Fixed in the same commit.",
   "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31930920345",
-  "schema": "fw-manual-action/v1",
+  "schema": "fw-manual-action/v2",
   "tags_at_deletion": []
 }

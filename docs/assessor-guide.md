@@ -165,7 +165,29 @@ Two properties worth testing, because both are places this could quietly lie:
   read as a clean bill of health — and this failed exactly that way until
   2026-08-16, when an empty checked-set skipped the guard entirely.
 
-What it does **not** yet carry: an owner or a due date. Routing a finding to a
+### Who wrote the record
+
+Deleting an object that GitOps does not own produces a `fw-manual-action/v2`
+record under `evidence/manual-actions/`. Every one carries **`provenance`**, and
+it is required — a record cannot be written without it:
+
+| `provenance` | Meaning |
+|---|---|
+| `workflow` | the pipeline wrote it as the action happened |
+| `reconstructed` | a human rebuilt it afterwards, and `reconstructed_from` names the source |
+
+There is one `reconstructed` record, and it is worth understanding rather than
+skipping. On 2026-08-16 a deletion succeeded and the record step crashed, so an
+irreversible act briefly had no record at all; it was rebuilt from the run log
+and marked as such. **Its only primary source is a CI log, which expires** —
+`reconstructed_from` says so in the record itself.
+
+The field has no default, deliberately. Defaulting it to `workflow` would let a
+reconstruction that forgot to declare itself claim machine authorship, which is
+the confusion the field exists to prevent. It removes the accident; it cannot
+prevent a false statement, and does not claim to.
+
+What these records do **not** yet carry: an owner or a due date. Routing a finding to a
 person and holding a remediation deadline is a process this repository does not
 model — treat these records as the detection record, not the case file.
 
