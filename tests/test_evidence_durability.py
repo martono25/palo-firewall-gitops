@@ -367,21 +367,35 @@ def test_the_sweep_cannot_fail_the_apply():
 
 
 # ── the drift schedule is gated on the firewall being up ──────────────────
-def test_the_drift_SCHEDULE_is_gated_but_a_dispatch_is_not():
-    """The pilot is suspended in AWS between test sessions. With it stopped every
-    nightly run fails on device-sync and the SCM reads — and a red run each
-    morning for a known-absent firewall is how a real alert gets ignored. This
-    job's FAILURE IS THE ALERT, so its signal is worth more than its cadence.
+def test_the_drift_schedule_is_NOT_gated_on_the_firewall():
+    """REVERSED 2026-08-15, on evidence rather than preference.
 
-    A manual dispatch must still run unconditionally: needing to flip a variable
-    first would put friction in front of the check exactly when someone wants
-    it."""
+    This test previously asserted the opposite, and its reasoning was sound
+    given what it believed:
+
+        "With it stopped every nightly run fails on device-sync and the SCM
+         reads — and a red run each morning for a known-absent firewall is how a
+         real alert gets ignored."
+
+    The belief was wrong. NOTHING in the job touches the firewall: `device-sync`
+    reads /config/operations/v1/config-versions/{running,candidate} from SCM and
+    has no ssh path at all. Verified with the pilot STOPPED — the whole job,
+    device-sync included, ran green.
+
+    The gate cost five consecutive skipped nights from 2026-08-11, during which
+    a rule added directly into SCM would have gone unreported — against a repo
+    whose central claim is that GitOps is the source of truth and direct changes
+    are flagged.
+
+    A dispatch still runs unconditionally, which it always did.
+    """
     import yaml
+
     wf = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text())
-    cond = wf["jobs"]["drift"]["if"]
-    assert "workflow_dispatch" in cond, "a deliberate dispatch must always run"
-    assert "FIREWALL_ONLINE" in cond, "the schedule must be gated on the firewall being up"
-    assert "schedule" in wf[True], "the cron itself stays — only the job is gated"
+    assert "schedule" in wf[True], "the cron stays"
+    assert "if" not in wf["jobs"]["drift"], (
+        "no job-level condition may make the nightly drift check skippable — "
+        "nothing in it requires the firewall to be up")
 
 
 # ── tier routing: the approval policy is the pipeline, not a claim ────────
@@ -832,3 +846,26 @@ def test_every_registered_kind_is_covered_by_SOME_drift_engine_in_the_workflow()
             assert f"fwgitops snapshot {handler.kind}" in wf, (
                 f"{handler.kind} uses the TAG engine and no step snapshots it, "
                 f"so its drift is never checked")
+
+
+def test_drift_detection_RUNS_ON_A_SCHEDULE():
+    """A check that does not run is not a control.
+
+    `FIREWALL_ONLINE` gated the whole job on the pilot being up, and it was
+    skipped five consecutive nights from 2026-08-11 — during which a rule added
+    straight into SCM would have gone unreported, while the repo's claim is that
+    GitOps is the source of truth and direct changes are flagged.
+
+    The premise was false: nothing in the job touches the firewall. `device-sync`
+    is SCM-only. Verified with the pilot stopped — the whole job ran green.
+    """
+    import yaml
+
+    wf_text = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+    wf = yaml.safe_load(wf_text)
+    trigger = wf.get("on") or wf.get(True)
+
+    assert "schedule" in trigger, "drift must run on a schedule, not only on demand"
+    assert "FIREWALL_ONLINE" not in wf_text.split("# NO FIREWALL_ONLINE GATE")[-1].split("steps:")[0], (
+        "no job-level gate may make the nightly drift check conditional again — "
+        "nothing in it needs the firewall")
