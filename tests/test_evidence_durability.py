@@ -961,23 +961,29 @@ def test_deleting_an_UNOWNED_object_leaves_a_record():
     """The deletion cannot go through Git, so the record is the only trace.
 
     An unmanaged object has no representation in Git — that is what makes it
-    unmanaged — so removing it is an out-of-band action by necessity. What it
+    unmanaged (ADR-0011) — so removing it is out-of-band by necessity. What it
     can be is auditable, which is the value the source-of-truth rule actually
     delivers here.
 
-    Shipped without this on 2026-08-16: the workflow's own guard text cited "no
-    record" as the reason to refuse MANAGED objects, while leaving no record for
-    the unmanaged ones it deleted. Five mentions of the word evidence, all
-    prose.
+    Shipped without any record on 2026-08-16: the workflow's own guard text
+    cited "no record" as grounds to refuse MANAGED objects, while leaving none
+    for the unmanaged ones it deleted.
+
+    This owns the WIRING. The record's SHAPE is `test_evidence.py`'s, which is
+    the point of it no longer living in a heredoc.
     """
     wf = (REPO_ROOT / ".github" / "workflows" / "delete-scm-object.yml").read_text()
 
-    assert "fw-manual-action/v1" in wf, (
-        "the record needs its own schema — NOT an evidence bundle, which is "
-        "keyed on a request id this object never had; borrowing that shape "
-        "would imply an authorisation that did not exist")
-    for field in ("reason", "dispatched_by", "run_url", "tags_at_deletion"):
-        assert field in wf, f"the record must capture {field}"
+    assert "build_manual_action" in wf, (
+        "the record must be built by tested code, not inline — two defects "
+        "survived review while it lived in the heredoc: an unsanitised filename, "
+        "and a record that existed only on the runner")
+    assert "MANUAL ACTION RECORD:" in wf, (
+        "and be printed IN FULL before the commit, because the commit can fail "
+        "after the object is already irreversibly gone")
+    i_print = wf.index("MANUAL ACTION RECORD:")
+    i_commit = wf.index("git commit")
+    assert i_print < i_commit, "the fallback copy must exist before the fragile step"
     assert "gh pr create" in wf, (
         "and land by PR like every other record — main takes no direct push")
 

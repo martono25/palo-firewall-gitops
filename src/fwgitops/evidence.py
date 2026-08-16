@@ -58,6 +58,8 @@ CONDITIONAL, because a listed control is a claim it was OPERATING:
 
 from __future__ import annotations
 
+import re
+
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -510,3 +512,60 @@ def _iso(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ── Manual actions ─────────────────────────────────────────────────────────
+#
+# An object this platform never created cannot be removed through the pipeline:
+# Git has no representation of it, so there is nothing to delete FROM Git
+# (ADR-0011). The removal is out-of-band by necessity — but auditable is
+# available, and auditable is what the source-of-truth rule actually buys here.
+
+MANUAL_ACTION_SCHEMA = "fw-manual-action/v1"
+
+#: Anything outside this becomes `_` in a record FILENAME. SCM object names may
+#: contain spaces, slashes and dots; a slash would silently write the record
+#: into a directory that does not exist, and the shipped version did exactly
+#: that until 2026-08-16.
+_UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def build_manual_action(*, action: str, kind: str, folder: str, name: str,
+                        object_id: Optional[str], tags: Sequence[str],
+                        reason: str, actor: str, run_url: str,
+                        at: Optional[str] = None) -> Dict[str, Any]:
+    """A record of something done to SCM directly, outside the pipeline.
+
+    DELIBERATELY NOT AN EVIDENCE BUNDLE. Those are keyed on a request id from an
+    intent, and an unmanaged object has none — borrowing that shape would imply
+    an authorisation that never existed. This says what it is: a manual action,
+    with who did it and why.
+    """
+    return {
+        "schema": MANUAL_ACTION_SCHEMA,
+        "action": action,
+        "kind": kind,
+        "folder": folder,
+        "name": name,
+        "object_id": object_id,
+        "tags_at_deletion": list(tags),
+        "reason": reason,
+        "dispatched_by": actor,
+        "run_url": run_url,
+        "at": at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
+def manual_action_path(record: Dict[str, Any], root: Path) -> Path:
+    """Where a manual-action record lands. The name is SANITISED — see
+    `_UNSAFE_IN_FILENAME`."""
+    stamp = str(record["at"]).replace(":", "").replace("-", "")
+    safe = _UNSAFE_IN_FILENAME.sub("_", str(record["name"])).strip("._-") or "object"
+    return Path(root) / "manual-actions" / f"{stamp}-{record['kind']}-{safe}.json"
+
+
+def write_manual_action(record: Dict[str, Any], root: Path) -> Path:
+    out = manual_action_path(record, root)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out

@@ -368,3 +368,64 @@ def test_approvers_are_coerced_however_the_context_is_built():
 def test_pr_url_is_read_from_the_environment():
     """It was hard-coded to None, so no code path could ever have filled it."""
     assert CIContext.from_env({"GITHUB_PR_URL": "https://gh/pr/7"}).pr_url == "https://gh/pr/7"
+
+
+# ── manual actions (ADR-0011) ──────────────────────────────────────────────
+
+def test_a_manual_action_is_NOT_shaped_like_an_evidence_bundle():
+    """An unmanaged object has no request id. Borrowing the bundle shape would
+    imply an authorisation that never existed, so this record says plainly what
+    it is: something done to SCM by hand, with who and why."""
+    from fwgitops.evidence import MANUAL_ACTION_SCHEMA, build_manual_action
+
+    r = build_manual_action(action="delete", kind="security-rule", folder="GitOps",
+                            name="Testing-unmmanaged", object_id="abc",
+                            tags=[], reason="unauthorised", actor="martono25",
+                            run_url="https://example/run/1")
+    assert r["schema"] == MANUAL_ACTION_SCHEMA != "fw-evidence/v2"
+    assert "req_id" not in r, "no request authorised this; do not imply one"
+    for k in ("reason", "dispatched_by", "run_url", "tags_at_deletion", "object_id"):
+        assert k in r, f"a manual action must record {k}"
+
+
+def test_the_record_FILENAME_cannot_escape_its_directory(tmp_path):
+    """SCM object names may contain slashes and spaces. The shipped version
+    interpolated the name straight into the path, so a name with a slash wrote
+    into a directory that does not exist — losing the record of an irreversible
+    deletion, silently."""
+    from fwgitops.evidence import build_manual_action, write_manual_action
+
+    r = build_manual_action(action="delete", kind="address", folder="GitOps",
+                            name="../../etc/passwd", object_id="x", tags=[],
+                            reason="r", actor="a", run_url="u",
+                            at="2026-08-16T05:00:00Z")
+    out = write_manual_action(r, tmp_path)
+
+    assert out.is_file()
+    # THE RECORD LANDS DIRECTLY IN manual-actions/, nowhere else. Two weaker
+    # assertions were tried first and both passed with the sanitisation
+    # deleted: `tmp_path in out.parents` compares LEXICALLY and `..` is never
+    # normalised, and even resolving it, `../..` from manual-actions/ lands at
+    # tmp_path/etc/passwd.json — still inside the root, so "did it escape the
+    # root" was the wrong question. "Is it where it belongs" is the right one.
+    assert out.resolve().parent == (tmp_path / "manual-actions").resolve(), (
+        f"the record was written outside its directory: {out.resolve()}")
+    assert "/" not in out.name and ".." not in out.name
+    # The RECORD still carries the true name — only the filename is sanitised.
+    import json as _json
+    assert _json.loads(out.read_text())["name"] == "../../etc/passwd"
+
+
+def test_two_deletions_in_the_same_second_do_not_overwrite_each_other(tmp_path):
+    """Different objects, same timestamp — the name is part of the filename for
+    exactly this reason."""
+    from fwgitops.evidence import build_manual_action, write_manual_action
+
+    paths = set()
+    for n in ("rule-a", "rule-b"):
+        r = build_manual_action(action="delete", kind="security-rule",
+                                folder="GitOps", name=n, object_id="x", tags=[],
+                                reason="r", actor="a", run_url="u",
+                                at="2026-08-16T05:00:00Z")
+        paths.add(write_manual_action(r, tmp_path))
+    assert len(paths) == 2

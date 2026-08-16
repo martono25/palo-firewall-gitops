@@ -125,37 +125,30 @@ jobs:
               sys.exit(3)
           print(f"OK — deleted {kind} {name!r} from {folder!r}")
 
-          # THE RECORD. This deletion cannot go through Git — Git has no
-          # representation of an object it never created — so it is an
-          # out-of-band action by necessity. What it CAN be is auditable, which
-          # is the value the source-of-truth rule actually delivers here.
-          #
-          # Deliberately NOT an evidence bundle: those are keyed on a request id
-          # from an intent, and this object had none. Claiming that shape would
-          # imply an authorisation that never existed.
-          import datetime
-          import json as _json
-          import pathlib as _pathlib
+          # THE RECORD, built by `fwgitops.evidence` rather than inline here.
+          # It lived in this heredoc until 2026-08-16, where it could not be
+          # unit-tested — and two defects survived review as a result: the object
+          # NAME was interpolated straight into a filename (SCM names may contain
+          # slashes, which wrote the record into a directory that does not
+          # exist), and the record existed ONLY in the runner's filesystem, so a
+          # failure in the PR step below lost the only trace of an irreversible
+          # deletion.
+          from fwgitops.evidence import build_manual_action, write_manual_action
 
-          rec = {
-              "schema": "fw-manual-action/v1",
-              "action": "delete",
-              "kind": kind,
-              "folder": folder,
-              "name": name,
-              "object_id": obj.get("id"),
-              "tags_at_deletion": list(tags),
-              "reason": os.environ.get("REASON", ""),
-              "dispatched_by": os.environ.get("ACTOR", ""),
-              "run_url": os.environ.get("RUN_URL", ""),
-              "at": datetime.datetime.now(datetime.timezone.utc)
-                    .strftime("%Y-%m-%dT%H:%M:%SZ"),
-          }
-          out = _pathlib.Path("evidence/manual-actions")
-          out.mkdir(parents=True, exist_ok=True)
-          stamp = rec["at"].replace(":", "").replace("-", "")
-          f = out / f"{stamp}-{kind}-{name}.json"
-          f.write_text(_json.dumps(rec, indent=2, sort_keys=True) + "\n")
+          rec = build_manual_action(
+              action="delete", kind=kind, folder=folder, name=name,
+              object_id=obj.get("id"), tags=tags,
+              reason=os.environ.get("REASON", ""),
+              actor=os.environ.get("ACTOR", ""),
+              run_url=os.environ.get("RUN_URL", ""),
+          )
+          # PRINTED FIRST, and in full. The commit below can fail — an expired
+          # token, a protected branch, a push race — and the object is already
+          # gone by then. The log is the fallback copy of a record for something
+          # that cannot be undone.
+          print("MANUAL ACTION RECORD:")
+          print(_json.dumps(rec, indent=2, sort_keys=True))
+          f = write_manual_action(rec, _pathlib.Path("evidence"))
           print(f"recorded: {f}")
           PY
 
