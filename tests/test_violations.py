@@ -277,3 +277,23 @@ def test_two_findings_CANNOT_COLLAPSE_INTO_ONE_RECORD(tmp_path):
     with pytest.raises(ValueError, match="already holds the finding"):
         write([(record_path(tmp_path, scope="GitOps", kind="security-rule",
                             name="web 1"), b)])
+
+
+def test_a_violation_record_CANNOT_be_hand_authored_with_a_provenance_flag():
+    """ADR-0012, pinned where someone would try to undo it.
+
+    Manual-action records carry `provenance` so a reconstruction cannot pass as
+    machine-written. The symmetry argument — "violations should have one too" —
+    is persuasive and wrong: a violation asserts that something was OBSERVED by
+    a named run, so creating one after the fact claims a detection that never
+    happened. There is no hand-authored case to mark, and adding the field would
+    invite one.
+    """
+    rec = build(cls="reordered", kind="security-rule-order", scope="prod-edge",
+                name="REQ-2026-0725", tags=[], run_url=RUN, at=T1)
+    assert "provenance" not in rec, (
+        "a violation cannot be reconstructed, so it has nothing to declare — "
+        "see docs/adr/0012-what-may-be-reconstructed.md before adding this")
+    assert rec["first_seen_run"] == RUN, (
+        "every violation names the run that saw it; that is what makes it "
+        "impossible to write after the fact")

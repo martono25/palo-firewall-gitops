@@ -281,7 +281,15 @@ irreversible act briefly had no record at all; it was rebuilt from the run log
 and marked as such. **Its only primary source is a CI log, which expires** —
 `reconstructed_from` says so in the record itself.
 
-The field has no default, deliberately. Defaulting it to `workflow` would let a
+A **violation** record carries no such field, and cannot: it asserts that
+something was OBSERVED by a named CI run, so it has no hand-authored form to
+mark. Reconstructing one would claim a detection that never happened
+(ADR-0012). Where you see a remediation with no linked finding, that is the
+honest shape of a control that shipped alongside the action it was meant to
+observe — the action record's `reconstructed_from` names independent evidence of
+the underlying fact.
+
+The provenance field has no default, deliberately. Defaulting it to `workflow` would let a
 reconstruction that forgot to declare itself claim machine authorship, which is
 the confusion the field exists to prevent. It removes the accident; it cannot
 prevent a false statement, and does not claim to.
