@@ -10,5 +10,7 @@
   "reason": "Disposable fixture created by create-test-fixture.yml run 31931515036 to prove the delete+record path after #245. RFC 5737 TEST-NET-1 address, unmanaged by design.",
   "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31931544625",
   "schema": "fw-manual-action/v2",
-  "tags_at_deletion": []
+  "tags_at_deletion": [],
+  "unlinked_reason": "No detected violation. This object was created by create-test-fixture.yml and deleted within the same hour, entirely between two drift runs, so the platform never saw it and filed nothing. Recorded rather than left blank: a deletion with no corresponding detection is exactly the case worth stating out loud.",
+  "violation_id": null
 }

@@ -51,6 +51,33 @@ def _safe(value: str) -> str:
     return _UNSAFE_IN_FILENAME.sub("_", str(value)).strip("._-") or "object"
 
 
+def violation_id(*, scope: str, name: str, first_seen: str) -> str:
+    """A stable, readable handle for one finding: `VIOL-2026-0816-GitOps-web-1`.
+
+    DERIVED, NOT ALLOCATED. A sequential counter would read better in a meeting,
+    but it needs a source of truth to increment against, and two overlapping runs
+    (a schedule firing during a dispatch) can both mint the same number and land
+    conflicting records. Deriving it from what the finding already IS removes the
+    allocator, and the id is therefore identical every run without coordination.
+
+    NOT A HASH, deliberately — the point is that a human reading
+    `Remediate unauthorised change — VIOL-2026-0816-GitOps-test-unmanaged-2` can
+    see what it refers to without looking it up.
+
+    THE SCOPE IS PART OF IT because the scope is part of the IDENTITY. The same
+    object name in two folders is two different findings, and giving them one id
+    would silently merge them in the join this exists to make possible.
+
+    Stable across a resolve-and-return cycle: `first_seen` is never overwritten,
+    so a finding that comes back keeps the id it was first known by.
+    """
+    # `.replace("-", "", 1)` drops the FIRST hyphen and yields 202608-16.
+    # Split on the parts instead of trimming characters off a string.
+    y, m, d = str(first_seen)[:10].split("-")           # 2026-08-16 -> 2026-0816
+    day = f"{y}-{m}{d}"
+    return f"VIOL-{day}-{_safe(scope)}-{_safe(name)}"
+
+
 def record_path(root: Path, *, scope: str, kind: str, name: str) -> Path:
     """Stable path per VIOLATION IDENTITY (scope + kind + name).
 
@@ -68,6 +95,7 @@ def build(*, cls: str, kind: str, scope: str, name: str,
         raise ValueError(f"unknown violation class {cls!r}; expected one of {CLASSES}")
     return {
         "schema": SCHEMA,
+        "id": violation_id(scope=scope, name=name, first_seen=at),
         "class": cls,
         "kind": kind,
         "scope": scope,
@@ -179,9 +207,58 @@ def write(changed: Iterable[Tuple[Path, Dict[str, Any]]]) -> List[Path]:
     written = []
     for p, rec in changed:
         p.parent.mkdir(parents=True, exist_ok=True)
+        _assert_id_is_unique(p, rec)
         p.write_text(json.dumps(rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         written.append(p)
     return written
+
+
+def _assert_id_is_unique(path: Path, rec: Dict[str, Any]) -> None:
+    """One file, one finding — and one id, one finding.
+
+    Both record FILENAMES and ids are built from sanitised text, so `web/1` and
+    `web 1` collapse to the same `web_1`. Two different SCM objects then share
+    one record file, and the second silently OVERWRITES the first: a finding
+    disappears with nothing to show it ever existed. That predates ids —
+    `record_path` has always sanitised — and was invisible precisely because the
+    result is one file where there should be two.
+
+    Checked in both directions here: this path must not already hold a DIFFERENT
+    identity, and no other file may already claim this id.
+    """
+    rid = rec.get("id")
+    identity = (rec.get("scope"), rec.get("kind"), rec.get("name"))
+    if path.exists():
+        try:
+            prior = json.loads(path.read_text())
+        except (OSError, ValueError):
+            prior = None
+        if prior is not None:
+            prior_identity = (prior.get("scope"), prior.get("kind"), prior.get("name"))
+            if prior_identity != identity:
+                raise ValueError(
+                    f"{path.name} already holds the finding for "
+                    f"{prior_identity[0]}/{prior_identity[2]!r}, and "
+                    f"{identity[0]}/{identity[2]!r} sanitises to the same "
+                    f"filename. Writing would erase a finding — two objects "
+                    f"whose names differ only in characters this strips need "
+                    f"two records, not one.")
+    if not rid:
+        return
+    for other in sorted(path.parent.glob("*.json")):
+        if other == path:
+            continue
+        try:
+            existing = json.loads(other.read_text())
+        except (OSError, ValueError):
+            continue
+        if existing.get("id") == rid:
+            raise ValueError(
+                f"violation id {rid!r} is already used by {other.name} for "
+                f"{existing.get('scope')}/{existing.get('name')}, and would now "
+                f"also mean {rec.get('scope')}/{rec.get('name')}. Two findings "
+                f"cannot share one id — a remediation record pointing at it "
+                f"would not say which change it removed.")
 
 
 def summarise(records: Iterable[Dict[str, Any]]) -> str:

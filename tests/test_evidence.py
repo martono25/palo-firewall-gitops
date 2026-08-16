@@ -382,7 +382,8 @@ def test_a_manual_action_is_NOT_shaped_like_an_evidence_bundle():
                             name="Testing-unmmanaged", object_id="abc",
                             tags=[], reason="unauthorised", actor="martono25",
                             run_url="https://example/run/1",
-                            provenance="workflow")
+                            provenance="workflow", violation_id=None,
+                            unlinked_reason="unit test")
     assert r["schema"] == MANUAL_ACTION_SCHEMA != "fw-evidence/v2"
     assert "req_id" not in r, "no request authorised this; do not imply one"
     for k in ("reason", "dispatched_by", "run_url", "tags_at_deletion", "object_id"):
@@ -399,7 +400,8 @@ def test_the_record_FILENAME_cannot_escape_its_directory(tmp_path):
     r = build_manual_action(action="delete", kind="address", folder="GitOps",
                             name="../../etc/passwd", object_id="x", tags=[],
                             reason="r", actor="a", run_url="u",
-                            provenance="workflow", at="2026-08-16T05:00:00Z")
+                            provenance="workflow", violation_id=None,
+                            unlinked_reason="unit test", at="2026-08-16T05:00:00Z")
     out = write_manual_action(r, tmp_path)
 
     assert out.is_file()
@@ -427,7 +429,8 @@ def test_two_deletions_in_the_same_second_do_not_overwrite_each_other(tmp_path):
         r = build_manual_action(action="delete", kind="security-rule",
                                 folder="GitOps", name=n, object_id="x", tags=[],
                                 reason="r", actor="a", run_url="u",
-                                provenance="workflow",
+                                provenance="workflow", violation_id=None,
+                                unlinked_reason="unit test",
                                 at="2026-08-16T05:00:00Z")
         paths.add(write_manual_action(r, tmp_path))
     assert len(paths) == 2
@@ -450,7 +453,8 @@ def test_a_manual_action_must_SAY_how_it_came_to_exist():
     with pytest.raises(ValueError, match="provenance"):
         build_manual_action(action="delete", kind="address", folder="GitOps",
                             name="x", object_id="i", tags=[], reason="r",
-                            actor="a", run_url="u", provenance="")
+                            actor="a", run_url="u", provenance="",
+                            violation_id=None, unlinked_reason="t")
 
 
 def test_provenance_has_NO_DEFAULT_so_a_reconstruction_cannot_pass_as_machine_written():
@@ -480,11 +484,13 @@ def test_a_reconstruction_must_name_WHAT_it_was_rebuilt_from():
     with pytest.raises(ValueError, match="rebuilt from"):
         build_manual_action(action="delete", kind="address", folder="GitOps",
                             name="x", object_id="i", tags=[], reason="r",
-                            actor="a", run_url="u", provenance="reconstructed")
+                            actor="a", run_url="u", provenance="reconstructed",
+                            violation_id=None, unlinked_reason="t")
 
     ok = build_manual_action(action="delete", kind="address", folder="GitOps",
                              name="x", object_id="i", tags=[], reason="r",
                              actor="a", run_url="u", provenance="reconstructed",
+                             violation_id=None, unlinked_reason="t",
                              reconstructed_from="https://example/run/9 log")
     assert ok["reconstructed_from"].startswith("https://")
 
@@ -500,6 +506,7 @@ def test_an_UNDECLARED_record_cannot_REACH_DISK(tmp_path):
     rec = build_manual_action(action="delete", kind="address", folder="GitOps",
                               name="x", object_id="i", tags=[], reason="r",
                               actor="a", run_url="u", provenance="workflow",
+                              violation_id=None, unlinked_reason="unit test",
                               at="2026-08-16T05:00:00Z")
     del rec["provenance"]           # e.g. a v1 record from before the field
     with pytest.raises(ValueError, match="provenance"):
@@ -522,3 +529,70 @@ def test_every_record_ON_DISK_declares_its_provenance():
         rec = json.loads(f.read_text())
         assert rec["schema"] == MANUAL_ACTION_SCHEMA, f"{f.name} was not migrated"
         validate_manual_action(rec)
+
+
+def test_a_deletion_must_SAY_WHICH_violation_it_remediates():
+    """The link is the whole point of giving violations an id.
+
+    Until 2026-08-16 the connection between an unauthorised change and the act
+    that removed it existed only as prose someone typed into `reason`. Nothing
+    could join the two directories, so "show me every unauthorised change and
+    what remediated it" was a manual read. On the record it is a query.
+    """
+    from fwgitops.evidence import build_manual_action
+
+    rec = build_manual_action(action="delete", kind="security-rule",
+                              folder="GitOps", name="x", object_id="i", tags=[],
+                              reason="r", actor="a", run_url="u",
+                              provenance="workflow",
+                              violation_id="VIOL-2026-0816-GitOps-x")
+    assert rec["violation_id"] == "VIOL-2026-0816-GitOps-x"
+    assert "unlinked_reason" not in rec, "nothing to explain when it IS linked"
+
+
+def test_a_deletion_that_remediates_NOTHING_must_say_so_out_loud():
+    """Deleting something the platform never flagged is legitimate — both test
+    fixtures were created and destroyed between drift runs. It is also exactly
+    the case worth stating, so an empty field cannot pass as an oversight."""
+    from fwgitops.evidence import build_manual_action
+
+    with pytest.raises(ValueError, match="unlinked_reason"):
+        build_manual_action(action="delete", kind="address", folder="GitOps",
+                            name="f", object_id="i", tags=[], reason="r",
+                            actor="a", run_url="u", provenance="workflow",
+                            violation_id=None)
+
+
+def test_a_link_that_resolves_to_NOTHING_is_refused():
+    """A plausible-looking id nobody can look up is worse than no id: it reads
+    as provenance while pointing nowhere."""
+    from fwgitops.evidence import build_manual_action
+
+    with pytest.raises(ValueError, match="violation id"):
+        build_manual_action(action="delete", kind="address", folder="GitOps",
+                            name="f", object_id="i", tags=[], reason="r",
+                            actor="a", run_url="u", provenance="workflow",
+                            violation_id="see the ticket")
+
+
+def test_every_committed_deletion_resolves_to_a_REAL_violation_or_declares_none():
+    """The committed evidence, joined. This is the query the id exists to make
+    possible, run against what is actually on disk."""
+    import glob
+    from pathlib import Path
+
+    from fwgitops.evidence import validate_manual_action
+
+    root = Path(__file__).resolve().parents[1] / "evidence"
+    known = {json.loads(p.read_text())["id"]
+             for p in (root / "violations").glob("*.json")}
+
+    actions = sorted((root / "manual-actions").glob("*.json"))
+    assert actions, "the committed records are the thing being checked"
+    for a in actions:
+        rec = json.loads(a.read_text())
+        validate_manual_action(rec)
+        if rec["violation_id"] is not None:
+            assert rec["violation_id"] in known, (
+                f"{a.name} remediates {rec['violation_id']}, which no violation "
+                f"record claims — a dangling link is worse than none")
