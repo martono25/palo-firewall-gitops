@@ -1,0 +1,114 @@
+# ─────────────────────────────────────────────────────────────────────────
+# AUTOMATIC REMEDIATION — deletes config nobody authorised.
+#
+# This is the only scheduled job here that DESTROYS things. Everything else
+# reports. Read `docs/cli-reference.md#remediate` before changing it.
+#
+# THE POLICY (2026-08-16): GitOps is the source of truth, so config no request
+# authorised does not survive to the next day. One rule decides what goes —
+# does Git DECLARE it? — and it applies to every drift class:
+#
+#   unmanaged                          -> delete, nothing declares it
+#   orphaned                           -> delete, its request is gone from Git
+#   malformed, name not declared       -> delete, a console copy
+#   malformed, name IS declared        -> LEFT ALONE; `apply` repairs its tags
+#
+# EMERGENCY CHANGES HAVE A WINDOW. A hand-made fix survives until this job runs
+# and no longer. That is a timing constraint the operator must know about, not a
+# reason to keep deletion manual — it is in the runbook beside the emergency
+# procedure. Note that raising the AccessRequest creates a NEW rule under its
+# request id; the hand-made one is still unmanaged and is still deleted, which
+# is the intended end state.
+#
+# RUNS AFTER DRIFT, not with it. Drift is read-only by design and stays that
+# way. Remediation re-detects rather than reading drift's records: acting on a
+# record written an hour earlier would delete on a stale observation.
+# ─────────────────────────────────────────────────────────────────────────
+name: remediate
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # daily 03:00 UTC, one hour after drift-detect
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what WOULD be deleted, delete nothing"
+        type: boolean
+        default: true
+
+permissions:
+  # `write` to land the record of what was removed. Nothing is pushed to main
+  # directly.
+  contents: write
+  pull-requests: write
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    env:
+      SCM_CLIENT_ID: ${{ secrets.SCM_CLIENT_ID }}
+      SCM_CLIENT_SECRET: ${{ secrets.SCM_CLIENT_SECRET }}
+      SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+
+      - name: Remove what nobody authorised
+        run: |
+          set -euo pipefail
+          # DRY RUN UNLESS THE SCHEDULE SAYS OTHERWISE. A manual dispatch
+          # defaults to reporting, so someone checking the blast radius cannot
+          # destroy anything by leaving the box alone.
+          flag="--apply"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+             && [ "${{ inputs.dry_run }}" != "false" ]; then
+            flag=""
+            echo "::notice::DRY RUN — nothing will be deleted"
+          fi
+          removed=0
+          for dir in terraform/*/; do
+            folder=$(basename "$dir")
+            case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
+            [ -f "$dir/main.tf" ] || continue
+            echo "::group::remediate $folder"
+            rc=0
+            fwgitops remediate "$folder" $flag || rc=$?
+            echo "::endgroup::"
+            case "$rc" in
+              0) ;;
+              3) echo "::warning::removed unauthorised config in '$folder'"; removed=1 ;;
+              *) echo "::error::remediation failed for '$folder' (rc=$rc)"; exit 1 ;;
+            esac
+          done
+          echo "REMOVED=$removed" >> "$GITHUB_ENV"
+
+      # THE RECORD OF A DELETION OUTLIVES THE RUN. `if: always()` because a
+      # failure partway through has usually already removed something, and that
+      # is exactly the record worth keeping.
+      - name: Land the removal records
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git add -A evidence/manual-actions 2>/dev/null || true
+          if git diff --cached --quiet -- evidence/manual-actions; then
+            echo "nothing removed — no record to land"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="remediation/run-${GITHUB_RUN_ID}"
+          git checkout -B "$branch" origin/main
+          git add -A evidence/manual-actions
+          git commit -m "record: removed unauthorised config (run ${GITHUB_RUN_ID})"
+          git push -f origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "record: removed unauthorised config (run ${GITHUB_RUN_ID})" \
+            --body "Automatic remediation deleted configuration that no request authorised. Each file under \`evidence/manual-actions/\` names what was removed, why, and the violation it remediates. THIS PR IS THE RECORD, not the decision — the deletion has already happened. See \`docs/adr/0011-unmanaged-drift-is-deleted.md\`." \
+            || gh pr view "$branch" --json url >/dev/null
+          gh pr merge "$branch" --squash --auto --delete-branch || true

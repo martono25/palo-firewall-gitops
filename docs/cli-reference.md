@@ -192,6 +192,60 @@ operation as the rule change that released the tag** — that ordering is the fi
 it, reads references from SCM rather than inferring them, and sweeps nothing if
 that read fails.
 
+### `remediate`
+
+**Deletes config nobody authorised.** The most destructive command here, and the
+only one that removes things unattended.
+
+```sh
+fwgitops remediate prod-edge            # dry run — reports, deletes nothing
+fwgitops remediate prod-edge --apply    # actually deletes
+```
+
+**Dry run by default.** `--apply` is required to destroy anything, so a
+mis-wired schedule reports instead of deleting, and the job can be watched for
+as long as it takes to trust it.
+
+One rule decides what goes, and it is source-of-truth, not a risk judgement:
+
+| State | Action | Why |
+|---|---|---|
+| `unmanaged` | **delete** | nothing declares it |
+| `orphaned` | **delete** | its request is gone from Git; nothing declares it |
+| `malformed`, name matches no declared request | **delete** | a console copy — not declared under its own name |
+| `malformed`, name IS a declared request | **repaired by `apply`** | Git says it should exist; its tags are damaged. Deleting it is an outage caused by a labelling defect |
+
+**It deletes OBJECTS, never a field inside a rule.** A hand-made address object
+is removed; a managed rule whose destination someone edited in the console is
+not — that is `terraform plan` drift, and `apply` restores the field. Deleting an
+authorised rule to fix an edited field would be absurd.
+
+**Rules are deleted before objects**, the referrer before the referent: a
+hand-made rule arrives with hand-made addresses, and SCM refuses to delete an
+object a rule still references (`409 NON_ZERO_REFS`). An object still in use is
+reported and left, not treated as a failure — it can be held by a managed rule
+someone edited to point at it, in which case `apply` releases it and the next
+pass removes it.
+
+It **re-detects** rather than reading violation records: acting on a record
+written hours earlier would delete based on a stale observation.
+
+It refuses, always: anything SCM provides (`snippet`), anything inherited from
+an ancestor folder, anything this platform minted, and anything whose id SCM did
+not report — a delete addressed by anything but the id of the row that was
+classified is a different object.
+
+**The guard keys on the object's own NAME, never on a `gitops:req` tag.** Keying
+on the tag looked like belt-and-braces and protected the forgery: a console copy
+inherits the original's tag, so it was shielded by wearing the original's label.
+A managed rule is named after its request, and a name is the one claim a copy
+cannot inherit.
+
+**Emergency changes have a window.** A hand-made fix survives only until the next
+remediation run, so it must be raised and applied as an AccessRequest before
+then. Note that this creates a NEW rule under its request id — the hand-made one
+is still unmanaged and is still deleted, which is the intended end state.
+
 ### `objects`
 
 Create the address and service objects a rule references; remove unreferenced

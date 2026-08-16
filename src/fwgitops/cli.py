@@ -2404,6 +2404,151 @@ def run_object_drift(
     return 0 if report.is_clean else 3
 
 
+def run_remediate(
+    scope_dir: str,
+    intent_root: Path = Path("intent"),
+    env_map_path: Path = Path("catalog/environments.yaml"),
+    *,
+    service_catalog_path: Path = Path("catalog/services.yaml"),
+    app_catalog_path: Path = Path("catalog/apps.yaml"),
+    apply: bool = False,
+    session=None,
+    out=None,
+    err=None,
+) -> int:
+    """Delete what nobody authorised. Exit 0 nothing to do · 3 removals made.
+
+    DRY RUN BY DEFAULT. `--apply` is required to delete anything, so the job can
+    be watched for as long as it takes to trust it, and a mis-wired schedule
+    reports instead of destroying.
+
+    RE-DETECTS, never reads the violation records. Acting on a record written
+    hours earlier would delete based on a stale observation.
+    """
+    from fwgitops.clients import ScmPushClient  # noqa: F401  (auth stack)
+    from fwgitops.compiler import Scope
+    from fwgitops.drift import ActualRule, detect_drift, of_kind
+    from fwgitops.evidence import build_manual_action, write_manual_action
+    from fwgitops.objectdrift import detect as detect_objects
+    from fwgitops.objectsweep import KIND_PATHS
+    from fwgitops.remediate import (
+        path_for, removals_for_objects, removals_for_rules,
+    )
+    from fwgitops.scmapi import ScmApiError, ScmConfigError, ScmCredentials, ScmSession
+    from fwgitops import violations as _v
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    cats, ok = _load_catalogs(service_catalog_path, app_catalog_path, err)
+    if not ok:
+        return 1
+    items, code = _compile_intents(intent_root, env_map_path, cats, err)
+    if items is None:
+        return code
+
+    scope = Scope.from_dirname(scope_dir)
+    params = {"folder": scope.value} if scope.kind == "folder" else {"device": scope.value}
+
+    try:
+        session = session or ScmSession(ScmCredentials.from_env())
+        per_kind, ids = {}, {}
+        for kind in ("address", "service"):
+            payload = session.request("GET", KIND_PATHS[kind],
+                                      params={**params, "limit": 500})
+            rows = [r for r in (payload.get("data") or []) if isinstance(r, dict)]
+            per_kind[kind] = rows
+            ids.update({str(r["name"]): str(r.get("id", "")) for r in rows
+                        if r.get("name")})
+        payload = session.request("GET", "/config/security/v1/security-rules",
+                                  params={**params, "limit": 500})
+        rule_rows = [r for r in (payload.get("data") or []) if isinstance(r, dict)]
+    except ScmConfigError as e:
+        print(f"error: SCM credentials not usable: {e}", file=err)
+        return 1
+    except ScmApiError as e:
+        print(f"error: SCM read failed: {e}", file=err)
+        return 1
+
+    obj_report = detect_objects(per_kind, scope=scope.key)
+    actual = [ActualRule(folder=str(r.get("folder") or scope.value),
+                         name=str(r["name"]),
+                         tags=tuple(t for t in (r.get("tag") or r.get("tags") or [])
+                                    if isinstance(t, str)),
+                         scope=scope.key)
+              for r in rule_rows if r.get("name")]
+    rule_report = detect_drift(
+        of_kind([ch for _, _, ch in items], "AccessRequest"), actual)
+
+    # EVERY DRIFT CLASS, gated on whether Git declares the object. A malformed
+    # rule NAMED after a declared request is authorised config with damaged
+    # tags — apply repairs it; deleting it would be an outage caused by a
+    # labelling defect.
+    declared = sorted({ch.rule.name for _p, _r, ch in items if hasattr(ch, "rule")})
+    drifted = [r.name for r in (rule_report.unmanaged + rule_report.orphaned
+                                + rule_report.malformed)]
+    # RULES FIRST, THEN OBJECTS. The referrer before the referent.
+    #
+    # A hand-made rule usually comes with hand-made addresses, and SCM refuses
+    # to delete an object a rule still references — `409 NON_ZERO_REFS`, the
+    # same conflict the object sweep exists to order around. Deleting objects
+    # first fails on the 409, and the RULE never gets deleted either, so an
+    # unauthorised path survives a job that reported an error about an address.
+    removals = (
+        removals_for_rules(rule_rows, scope=scope.key,
+                           drifted_names=drifted, declared=declared)
+        + removals_for_objects(obj_report.unmanaged, ids, declared)
+    )
+    if not removals:
+        print(f"{scope.key}: nothing unauthorised to remove", file=out)
+        return 0
+
+    known = {(r.get("kind"), r.get("name")): r.get("id")
+             for r in _v.load(Path("evidence/violations")).values()
+             if r.get("status") == "open" and r.get("scope") == scope.key}
+
+    for rem in removals:
+        if not apply:
+            print(f"WOULD DELETE {rem.kind} {rem.name!r} (id={rem.object_id})", file=out)
+            continue
+        try:
+            session.request("DELETE", f"{path_for(rem.kind)}/{rem.object_id}")
+        except ScmApiError as e:
+            # STILL REFERENCED IS NOT A FAILURE OF THIS JOB. An unmanaged object
+            # can be held by a MANAGED rule someone edited in the console to
+            # point at it: the edit is plan drift, `apply` restores the rule,
+            # and only then does the reference go away. Failing here would turn
+            # a condition that resolves itself into a red run every night, and
+            # would abandon the removals still queued behind it.
+            if "NON_ZERO_REFS" in str(e) or "409" in str(e):
+                print(f"::warning::{rem.name!r} is still referenced — leaving it. "
+                      f"Run apply to restore whatever points at it, then this "
+                      f"job removes it on the next pass.", file=out)
+                continue
+            print(f"::error::DELETE failed for {rem.name!r}: {e}", file=err)
+            return 1
+        vid = known.get((rem.kind, rem.name)) or known.get(("security-rule", rem.name))
+        rec = build_manual_action(
+            action="delete", kind=rem.kind, folder=scope.value, name=rem.name,
+            object_id=rem.object_id, tags=list(rem.tags),
+            reason=("Automatic remediation: this object was in a managed scope, "
+                    "no request authorised it, and GitOps is the source of "
+                    "truth (ADR-0011). Emergency changes must be raised as an "
+                    "AccessRequest before this job runs."),
+            actor="github-actions[bot]",
+            run_url=os.environ.get("RUN_URL", ""),
+            provenance="workflow",
+            violation_id=vid,
+            unlinked_reason=("" if vid else
+                             "No open violation record matched. Detected and "
+                             "removed within the same run, before any drift job "
+                             "had recorded it."),
+        )
+        print(f"DELETED {rem.kind} {rem.name!r} -> "
+              f"{write_manual_action(rec, Path('evidence'))}", file=out)
+
+    return 3
+
+
 def run_objects(
     action: str,
     scope_dir: str,
@@ -3377,6 +3522,20 @@ def build_parser() -> argparse.ArgumentParser:
                          "unaccounted-for object")
     ob.add_argument("--run-url", default=None, help="drift only: recorded on each violation")
 
+    rm = sub.add_parser("remediate",
+                        help="DELETE unmanaged objects and rules in a scope (ADR-0011). "
+                             "Dry run unless --apply.")
+    rm.add_argument("scope_dir",
+                    help="a Terraform root DIRECTORY name (`prod-edge` or `device-<serial>`)")
+    rm.add_argument("intent_root", nargs="?", default=Path("intent"), type=Path)
+    rm.add_argument("--env-map", default=Path("catalog/environments.yaml"), type=Path)
+    rm.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
+    rm.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+    rm.add_argument("--apply", action="store_true",
+                    help="actually delete. WITHOUT THIS NOTHING IS DESTROYED — the "
+                         "default is a dry run so a mis-wired schedule reports "
+                         "instead of destroying.")
+
     p = sub.add_parser("push", help="push a folder's or firewall's staged config to SCM (T13)")
     p.add_argument("folder", nargs="?", default=None, help="SCM folder to push")
     p.add_argument("--device", default=None,
@@ -3583,6 +3742,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.action, args.scope_dir, args.intent_root, args.env_map,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
             dry_run=args.dry_run,
+        )
+    if args.command == "remediate":
+        return run_remediate(
+            args.scope_dir, args.intent_root, args.env_map,
+            service_catalog_path=args.service_catalog,
+            app_catalog_path=args.app_catalog, apply=args.apply,
         )
     if args.command == "objects":
         if args.action == "drift":
