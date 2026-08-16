@@ -72,6 +72,8 @@ def run_compile(
     require_terraform_root: bool = True,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
+    record_violations: Optional[Path] = None,
+    run_url: Optional[str] = None,
     out=None,
     err=None,
 ) -> int:
@@ -1130,6 +1132,8 @@ def run_drift(
     state_snapshot_paths: Optional[List[Path]] = None,
     service_catalog_path: Path = Path("catalog/services.yaml"),
     app_catalog_path: Path = Path("catalog/apps.yaml"),
+    record_violations: Optional[Path] = None,
+    run_url: Optional[str] = None,
     out=None,
     err=None,
 ) -> int:
@@ -1289,6 +1293,33 @@ def run_drift(
         of_kind([ch for _, _, ch in items], "AccessRequest"), actual
     )
     print(report.summary(), file=out)
+
+    # RECORD THE FINDING, not just the failure. Detection failed the run and
+    # left nothing behind: the classification existed here and never reached
+    # disk, so a violation could not be aged, counted, routed into a follow-up
+    # process, or produced for an assessor later. CI logs expire.
+    if record_violations is not None:
+        from fwgitops import violations as _v
+
+        found = [
+            {"cls": cls, "kind": "security-rule",
+             "scope": r.scope or r.folder, "name": r.name, "tags": list(r.tags)}
+            for cls, rules in (("unmanaged", report.unmanaged),
+                               ("orphaned", report.orphaned),
+                               ("malformed", report.malformed))
+            for r in rules
+        ]
+        # Only scopes this run actually READ may have their findings resolved —
+        # a scope we could not look at must not be reported as clean.
+        checked = sorted({(r.scope or r.folder) for r in actual})
+        changed = _v.reconcile(found=found, existing=_v.load(record_violations),
+                               root=record_violations, run_url=run_url or "",
+                               scopes_checked=checked)
+        for path in _v.write(changed):
+            print(f"violation record: {path}", file=out)
+        print(_v.summarise(
+            [rec for rec in _v.load(record_violations).values()]), file=out)
+
     return 0 if (report.is_clean and not drifted) else 3
 
 

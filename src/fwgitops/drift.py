@@ -131,7 +131,21 @@ def detect_drift(
         except ValueError:
             malformed.append(r)  # managed marker but no gitops:req tag
             continue
-        if meta is None or (r.folder, meta.req_id) not in declared:
+        # THE NAME MUST BE THE REQUEST. Every managed rule is named after its
+        # request id — `security_rules[ch.rule.name]` is the for_each key and
+        # `name = ar.metadata.id` — so a managed object whose NAME differs from
+        # the request it claims did not come from this pipeline.
+        #
+        # Checking `meta.req_id` alone let a console DUPLICATE through
+        # completely: copy a managed rule and the copy inherits
+        # `gitops:req:REQ-...`, which is declared, so it was not unmanaged, not
+        # malformed and not orphaned — it was reported as no drift, while being
+        # free to carry any contents at all. Found 2026-08-16 by asking what
+        # `malformed` is actually for.
+        if meta is None or meta.req_id != r.name:
+            malformed.append(r)  # claims a request it is not named after
+            continue
+        if (r.folder, r.name) not in declared:
             orphaned.append(r)   # managed, but not in the current declared set
     return DriftReport(tuple(unmanaged), tuple(orphaned), tuple(malformed),
                        tuple(inherited))
