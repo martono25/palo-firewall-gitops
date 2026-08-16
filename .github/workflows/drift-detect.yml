@@ -267,7 +267,16 @@ jobs:
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          branch="violations/run-${GITHUB_RUN_ID}"
+          # ONE PULL REQUEST, UPDATED — not one per run.
+          #
+          # `violations/run-<id>` opened a NEW pull request every run, and the
+          # records are recomputed from `main` each time, so an unmerged one is
+          # re-derived and re-filed on the next run: #246 and #250 are the same
+          # two-line resolution, filed twice, because #246 had not been merged
+          # yet. Left alone that is unbounded noise on exactly the queue that
+          # must stay readable. A stable branch force-pushes into the SAME pull
+          # request instead.
+          branch="violations/pending"
           # CUT THE BRANCH FROM `main`, NOT FROM WHATEVER REF THIS RUN USED.
           #
           # `git checkout -B` from the current ref carried every commit on it
@@ -289,13 +298,17 @@ jobs:
             echo "records already on main — nothing to land"
             exit 0
           fi
-          git commit -m "record: policy violations seen in run ${GITHUB_RUN_ID}"
+          git commit -m "record: policy violations, as of run ${GITHUB_RUN_ID}"
           git push -f origin "$branch"
           # Never auto-merged. A violation is an UNAUTHORISED CHANGE, and the
           # pull request is where a human acknowledges it — merging it for them
           # would file the finding and close the loop with nobody in it.
+          # No run id in the TITLE: the pull request outlives any one run, and a
+          # title naming the run that first opened it goes stale on the next
+          # force-push. `gh pr create` fails harmlessly when one is already
+          # open — the push above has already updated it.
           gh pr create --base main --head "$branch" \
-            --title "record: policy violations (run ${GITHUB_RUN_ID})" \
+            --title "record: policy violations pending review" \
             --body "Drift detection found configuration in SCM that no request authorised. Each file under \`evidence/violations/\` is one finding, keyed on the object — reappearing nightly updates \`last_seen\` rather than filing a duplicate. Review, act, and merge to accept the record. See \`docs/adr/0011-unmanaged-drift-is-deleted.md\`." \
             || gh pr view "$branch" --json url >/dev/null
 
