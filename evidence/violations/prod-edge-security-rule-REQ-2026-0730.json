@@ -1,0 +1,15 @@
+{
+  "class": "modified",
+  "first_seen": "2026-08-16T10:53:43Z",
+  "first_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31942824687",
+  "id": "VIOL-2026-0816-prod-edge-REQ-2026-0730",
+  "kind": "security-rule",
+  "last_seen": "2026-08-16T10:53:43Z",
+  "last_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31942824687",
+  "name": "REQ-2026-0730",
+  "resolved_at": "2026-08-16T10:53:57Z",
+  "schema": "fw-violation/v1",
+  "scope": "prod-edge",
+  "status": "resolved",
+  "tags_observed": []
+}
