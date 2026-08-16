@@ -1287,3 +1287,34 @@ def test_a_caller_grants_every_permission_the_called_workflow_declares():
                     f"{wf_path.name} calls {uses} which needs {perm}: {level}, "
                     f"but the caller grants {have!r} — the run is rejected at "
                     f"startup with no usable error")
+
+
+def test_a_job_that_CALLS_a_workflow_repeats_its_concurrency_group():
+    """Workflow-level `concurrency` does not carry across a reusable call.
+
+    `apply.yml` serialises applies with `fw-apply-<ref>` so two never contend
+    for Terraform state. Called from `remediate.yml`, the caller's run owns the
+    group and apply.yml's declaration is not in force — so the unattended
+    restore ran OUTSIDE the guard and failed on a state lock the first time it
+    ran, leaving a rule denying traffic it should permit.
+
+    Nothing local catches this: both files are valid, and the group is only
+    absent at runtime.
+    """
+    import yaml
+
+    for wf_path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        doc = yaml.safe_load(wf_path.read_text())
+        for job_name, job in (doc.get("jobs") or {}).items():
+            uses = str(job.get("uses", ""))
+            if not uses.startswith("./.github/workflows/"):
+                continue
+            called = yaml.safe_load((REPO_ROOT / uses[2:]).read_text())
+            want = (called.get("concurrency") or {}).get("group")
+            if not want:
+                continue
+            got = (job.get("concurrency") or {}).get("group")
+            assert got == want, (
+                f"{wf_path.name}:{job_name} calls {uses}, which serialises on "
+                f"{want!r} — but a called workflow's concurrency does not apply. "
+                f"Repeat the group on the calling job or the two can collide.")
