@@ -418,8 +418,24 @@ def test_anything_that_is_not_LOW_routes_to_the_REVIEWED_environment():
     tier the expression does not know must land on 'a human looks at it' — never
     on the unreviewed environment."""
     env = _workflow()["jobs"]["apply"]["environment"]
-    assert "== 'LOW' && 'firewall-apply-auto' || 'firewall-apply'" in env, (
-        "only an exact LOW may reach the unreviewed environment")
+
+    # THE PROPERTY, not the literal expression. A second legitimate route to the
+    # unreviewed environment was added on 2026-08-16 — `inputs.unattended`, the
+    # scheduled restore, whose own gate is the `already-applied` guard in
+    # remediate.yml. Pinning the exact string made this fail for a change that
+    # preserved everything it cares about, so it now asserts the two things that
+    # actually matter.
+    assert "needs.classify.outputs.tier == 'LOW'" in env, (
+        "tier routing must test EXACT equality with LOW — `!= 'CRITICAL'` or a "
+        "substring match would let an unknown tier through unreviewed")
+    assert env.rstrip().endswith("'firewall-apply' }}"), (
+        "the fallback must be the REVIEWED environment: a failed classify, an "
+        "empty output or a tier nobody anticipated lands on 'a human looks at it'")
+    unattended_ok = "inputs.unattended" in env
+    assert env.count("firewall-apply-auto") == 1 and (
+        unattended_ok or "||" in env), (
+        "there is exactly one path to the unreviewed environment besides LOW, "
+        "and it is the unattended restore")
 
 
 def test_the_tier_job_does_not_touch_the_firewall():
@@ -1188,3 +1204,42 @@ def test_remediation_runs_AFTER_detection_with_a_gap():
     assert remediate == detect + 1, (
         f"remediation runs at {remediate}:00 UTC and detection at {detect}:00 — "
         f"remediation must follow detection by an hour")
+
+
+def test_the_unattended_restore_CANNOT_deploy_unapproved_intent():
+    """The bypass this guard exists to close.
+
+    `restore` applies `main` with the approval gate OFF, which is right for
+    putting back config somebody changed by hand. Without a precondition it is
+    also a way to skip the gate entirely: merge a CRITICAL intent, leave
+    `firewall-apply` unapproved, and the nightly restore applies it for you.
+
+    A successful apply for the SAME commit is the proof that main's policy has
+    been through its gate.
+    """
+    import yaml
+
+    wf = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "remediate.yml").read_text())
+    restore = wf["jobs"]["restore"]
+
+    assert "already-applied" in restore["needs"], (
+        "restore must depend on the guard, or the gate can be skipped by "
+        "merging and waiting")
+    assert "needs.already-applied.outputs.ok == 'true'" in restore["if"], (
+        "depending on the guard is not enough — the result must be REQUIRED")
+    assert restore["with"]["unattended"] is True
+
+    guard = wf["jobs"]["already-applied"]["steps"][0]["run"]
+    assert "headSha" in guard and "success" in guard, (
+        "the guard must check for a SUCCESSFUL apply of THIS commit")
+
+
+def test_apply_routes_an_unattended_run_to_the_UNGATED_environment():
+    """Otherwise the restore waits for a reviewer that the whole design says is
+    not needed — the approval happened when the intent was merged."""
+    wf = (REPO_ROOT / ".github" / "workflows" / "apply.yml").read_text()
+    env_line = next(ln for ln in wf.splitlines() if ln.strip().startswith("environment:"))
+    assert "inputs.unattended" in env_line
+    assert "firewall-apply-auto" in env_line and "firewall-apply'" in env_line, (
+        "a non-unattended run must still route by risk tier")

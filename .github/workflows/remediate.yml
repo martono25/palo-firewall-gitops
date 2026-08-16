@@ -115,3 +115,52 @@ jobs:
             --body "Automatic remediation deleted configuration that no request authorised. Each file under \`evidence/manual-actions/\` names what was removed, why, and the violation it remediates. THIS PR IS THE RECORD, not the decision — the deletion has already happened. See \`docs/adr/0011-unmanaged-drift-is-deleted.md\`." \
             || gh pr view "$branch" --json url >/dev/null
           gh pr merge "$branch" --squash --auto --delete-branch || true
+
+  # IS THERE ANY NEW POLICY WAITING FOR A HUMAN?
+  #
+  # The restore below applies `main` with the approval gate OFF. That is correct
+  # for putting back config somebody changed by hand, and it would be a BYPASS
+  # for anything else: merge a CRITICAL intent, leave `firewall-apply`
+  # unapproved, and the nightly restore would apply it for you.
+  #
+  # An apply run that already SUCCEEDED for this exact commit is the proof that
+  # main's declared state has been through its gate. Without one, this refuses
+  # to run and says so — the drift stays until someone approves the pending
+  # apply, which is the right order.
+  already-applied:
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="${GITHUB_SHA}"
+          n=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=apply.yml \
+                --json headSha,conclusion \
+                --jq "[.[] | select(.headSha==\"$sha\" and .conclusion==\"success\")] | length")
+          if [ "${n:-0}" -gt 0 ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "an apply succeeded for $sha — main's policy is through its gate"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No successful apply for $sha. Refusing to restore: an \
+          unattended apply now could deploy intent still waiting at the approval \
+          gate. Approve the pending apply first."
+          fi
+
+  # RESTORE WHAT WAS EDITED, DELETED OR REORDERED — unattended.
+  #
+  # Deletion above handles config Git does not declare. This handles the other
+  # half: a managed rule someone EDITED in the console, one they DELETED, and a
+  # rulebase they REORDERED. The remedy for all three is to re-assert the
+  # declared state, which is what `apply` does.
+  restore:
+    needs: [remediate, already-applied]
+    if: github.event_name == 'schedule' && needs.already-applied.outputs.ok == 'true'
+    uses: ./.github/workflows/apply.yml
+    with:
+      unattended: true
+    secrets: inherit
