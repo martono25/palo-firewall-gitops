@@ -1145,3 +1145,24 @@ def test_the_drift_job_CHECKS_OUT_FULL_HISTORY():
     assert (checkout.get("with") or {}).get("fetch-depth") == 0, (
         "the drift job must clone full history, or the rule-order check has "
         "nothing to compare against")
+
+
+def test_a_violation_record_LANDS_ON_ITS_OWN():
+    """Holding it for a human broke the lifecycle and evidenced nothing.
+
+    `main` requires zero approving reviews, so "waiting for a human" waited for
+    someone to click merge — indistinguishable from a reflex merge. Meanwhile
+    records are recomputed from `main` every run, so an unmerged finding is
+    re-derived and re-filed (#250 duplicated #246), and a finding that never
+    landed cannot be RESOLVED at all: #244 had to be merged by hand before the
+    object could be deleted, or the resolution had nothing to resolve.
+
+    The record is a fact. The DECISION is what to do about it, and that lives in
+    the delete workflow and the apply, both of which gate properly.
+    """
+    wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+    step = wf.split("Land any violation records by pull request", 1)[1]
+    step = step.split("\n      - name:", 1)[0]
+    assert "gh pr merge" in step and "--auto" in step, (
+        "the violation record must merge on its own, like every other record — "
+        "a finding stuck in a PR cannot be resolved and gets re-filed nightly")

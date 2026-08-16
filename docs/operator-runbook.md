@@ -122,10 +122,15 @@ each detector exited on its first finding and skipped the ones after it, so a
 night with more drift reported less of it.
 
 **The finding also outlives the run.** Every violation the nightly job detects
-is written to `evidence/violations/` and lands on a branch as a pull request
-titled `record: policy violations (run <id>)`. Review it, act on the finding,
-then merge to accept the record. Nothing auto-merges: a violation is an
-unauthorised change, and the pull request is where a human acknowledges it.
+is written to `evidence/violations/` and lands on `main` by pull request, which
+merges itself. **That PR is the record, not the decision** — do not treat its
+merge as having handled anything. What to do about the finding is
+`delete-scm-object.yml` for an object, or re-running the apply for rule order.
+
+It merged only on a human click until 2026-08-16, which evidenced nothing (`main`
+requires no approving reviews) and broke the lifecycle: a finding that has not
+landed on `main` gets re-derived and re-filed on the next run, and cannot be
+marked resolved when you fix it.
 
 Read the records rather than the log — CI logs expire:
 
