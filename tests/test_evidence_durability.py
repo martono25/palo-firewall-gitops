@@ -1194,16 +1194,17 @@ def test_remediation_runs_AFTER_detection_with_a_gap():
     """
     import re
 
-    def _hour(name):
+    def _at(name):
         wf = (REPO_ROOT / ".github" / "workflows" / name).read_text()
-        m = re.search(r'cron:\s*"0 (\d+) \* \* \*"', wf)
+        m = re.search(r'cron:\s*"(\d+) (\d+) \* \* \*"', wf)
         assert m, f"{name} has no daily cron"
-        return int(m.group(1))
+        return int(m.group(2)) * 60 + int(m.group(1))     # minutes past midnight
 
-    detect, remediate = _hour("drift-detect.yml"), _hour("remediate.yml")
-    assert remediate == detect + 1, (
-        f"remediation runs at {remediate}:00 UTC and detection at {detect}:00 — "
-        f"remediation must follow detection by an hour")
+    detect, remediate = _at("drift-detect.yml"), _at("remediate.yml")
+    assert remediate - detect == 60, (
+        f"remediation is {remediate - detect} minutes after detection; it must "
+        f"be exactly 60 — that hour is the window in which a finding can still "
+        f"be fixed by hand before anything is destroyed")
 
 
 def test_the_unattended_restore_CANNOT_deploy_unapproved_intent():
