@@ -106,6 +106,38 @@ class EnrichResult:
         return {"folder": self.folder, "records": [r.to_evidence() for r in self.records]}
 
 
+def restore_deployment_order(
+    client: RuleClient, folder: str, expected: Sequence[str],
+    rulebase: str = "pre",
+) -> List[str]:
+    """Put managed rules back into deployment order. Returns the rules moved.
+
+    THE REVERT HALF of order drift. Detection lives in the read-only nightly
+    job; the write lives here, behind the same human gate as every other change
+    to a live firewall.
+
+    Anchored to the PREVIOUS managed rule rather than moved to `bottom`: moving
+    each in turn to the bottom would also drag the whole managed block beneath
+    any unmanaged rule sitting below it, changing this platform's relationship
+    to config it does not own in the name of fixing our own internal order.
+
+    Idempotent by construction — re-anchoring a rule already in place is a no-op
+    at the API, so an apply against a correct rulebase changes nothing.
+    `expected` is authoritative; a rule missing from the folder is skipped
+    rather than failing, because absence is a DIFFERENT finding the tag engine
+    already reports, and failing here would block the apply that fixes it.
+    """
+    ids = client.rule_ids_by_name(folder)
+    moved: List[str] = []
+    for i, name in enumerate(expected):
+        if i == 0 or name not in ids or expected[i - 1] not in ids:
+            continue
+        client.move_rule(ids[name], destination="after", rulebase=rulebase,
+                         target=ids[expected[i - 1]])
+        moved.append(name)
+    return moved
+
+
 def enrich_folder(
     client: RuleClient, folder: str, changes: Sequence[CompiledChange]
 ) -> EnrichResult:

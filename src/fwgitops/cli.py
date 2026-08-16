@@ -1295,6 +1295,42 @@ def run_drift(
     )
     print(report.summary(), file=out)
 
+    # RULE ORDER, from the snapshot already taken — no extra API call, because
+    # `snapshot` writes rows in rulebase order and this reads that order.
+    #
+    # Order IS policy: a permissive rule moved above a restrictive one changes
+    # what traffic passes without editing any rule. Nothing checked it until
+    # 2026-08-16 — the tag engine compares presence, `terraform plan` sees a
+    # null position on every rule, and enrich skips rules that declare none.
+    from fwgitops.orderdrift import (
+        OrderHistoryUnavailable, detect_order, expected_order,
+    )
+
+    scopes_in_snapshot = {(r.scope or r.folder) for r in actual}
+    order_drifted = False
+    for scope_key in sorted(scopes_in_snapshot):
+        declared_here = {
+            ch.rule.name: path
+            for path, _req, ch in items
+            if hasattr(ch, "rule") and handler_for_request(_req).scope_of(ch).key == scope_key
+        }
+        if len(declared_here) < 2:
+            continue          # order is meaningless below two rules
+        try:
+            expected = expected_order(declared_here)
+        except OrderHistoryUnavailable as e:
+            # FAIL, never assume. Without history every rule looks deployed at
+            # once and the expected order collapses to alphabetical, which would
+            # report confident drift on rules nobody touched.
+            print(f"error: {e}", file=err)
+            return 1
+        actual_names = [r.name for r in actual
+                        if (r.scope or r.folder) == scope_key]
+        order = detect_order(scope=scope_key, expected=expected,
+                             actual_rulebase=actual_names)
+        print(order.summary(), file=out)
+        order_drifted = order_drifted or not order.is_clean
+
     # RECORD THE FINDING, not just the failure. Detection failed the run and
     # left nothing behind: the classification existed here and never reached
     # disk, so a violation could not be aged, counted, routed into a follow-up
@@ -1325,7 +1361,7 @@ def run_drift(
         print(_v.summarise(
             [rec for rec in _v.load(record_violations).values()]), file=out)
 
-    return 0 if (report.is_clean and not drifted) else 3
+    return 0 if (report.is_clean and not drifted and not order_drifted) else 3
 
 
 
@@ -2648,7 +2684,29 @@ def run_enrich(
             print(f"error: {e}", file=err)
             return 1
     try:
-        result = enrich_folder(ScmRuleClient(session), folder, changes)
+        client = ScmRuleClient(session)
+        result = enrich_folder(client, folder, changes)
+
+        # RE-ASSERT DEPLOYMENT ORDER. Intents carry no position, so a rule lands
+        # at the bottom and the expected order is simply the order rules were
+        # deployed — read from git, not from a file anyone can edit. Without
+        # this a console reorder was permanent: enrich only ever moved rules
+        # that DECLARED a position, and none do.
+        from fwgitops.enrich import restore_deployment_order
+        from fwgitops.orderdrift import OrderHistoryUnavailable, expected_order
+
+        paths = {ch.rule.name: path for path, _req, ch in (items or [])
+                 if hasattr(ch, "rule") and ch.rule.name in
+                 {c.rule.name for c in changes}}
+        if len(paths) >= 2:
+            try:
+                order = expected_order(paths)
+            except OrderHistoryUnavailable as e:
+                print(f"ENRICH FAILED: {e}", file=err)
+                return 3
+            moved = restore_deployment_order(client, folder, order)
+            print(f"deployment order re-asserted over {len(moved)} rule(s): "
+                  f"{' -> '.join(order)}", file=out)
     except (EnrichError, ScmApiError) as e:
         print(f"ENRICH FAILED: {e}", file=err)
         return 3

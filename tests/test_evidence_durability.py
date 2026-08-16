@@ -1124,3 +1124,24 @@ def test_records_are_LANDED_AFTER_every_step_that_writes_one():
     assert max(writers) < land_i, (
         f"{names[max(writers)]!r} writes violation records AFTER the landing "
         f"step, so they are never committed")
+
+
+def test_the_drift_job_CHECKS_OUT_FULL_HISTORY():
+    """Rule order is compared against DEPLOYMENT order — when each intent first
+    landed on main — which only git history can answer.
+
+    `actions/checkout` defaults to `fetch-depth: 1`, so without this the drift
+    job has no commits to read. `orderdrift` refuses rather than guessing, so
+    the symptom is a hard failure rather than a silent wrong answer — but it is
+    a failure of the CHECKOUT, and someone reading the error would go looking in
+    the wrong module. Pinned here, next to the job it configures.
+    """
+    import yaml
+
+    wf = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text())
+    checkout = next(s for s in wf["jobs"]["drift"]["steps"]
+                    if str(s.get("uses", "")).startswith("actions/checkout"))
+    assert (checkout.get("with") or {}).get("fetch-depth") == 0, (
+        "the drift job must clone full history, or the rule-order check has "
+        "nothing to compare against")

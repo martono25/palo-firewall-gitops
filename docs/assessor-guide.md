@@ -206,6 +206,30 @@ create. An object placed in a hand-made snippet attached to the folder reads as
 SCM-provided. Closing that needs snippet-level management, which this repository
 does not have.
 
+### Rule order
+
+Order is part of the policy — a permissive rule above a restrictive one changes
+what traffic passes without either rule being edited — and until 2026-08-16
+nothing checked it.
+
+The expected order is not declared anywhere and is not a choice: an intent
+carries no position, so a new rule lands at the bottom, and the order is simply
+**the order rules were deployed**. That is read from Git — the commit that first
+added each intent — so there is no manifest to maintain and nothing on disk to
+edit. Only managed rules are compared with each other; a device-local rule may
+sit anywhere between them.
+
+Detection is in the read-only nightly job; the correction is in `apply`, behind
+the same human gate as any other change to a live firewall.
+
+**Bounded honestly:** "append at bottom" is only deterministic one rule at a
+time. Several rules deployed in a single apply land in whatever order the
+provider creates them, so ties are broken by name. Three of the pilot's rules
+were created together on 2026-07-26, before the `-parallelism=1` guard existed,
+and sat reversed — whether from parallel creation or a console reorder is
+unknowable, because nothing was watching. They were re-stacked to deployment
+order when this shipped.
+
 ### Joining a deletion to what justified it
 
 Every finding carries an **`id`** — `VIOL-2026-0816-GitOps-test-unmanaged-2` —

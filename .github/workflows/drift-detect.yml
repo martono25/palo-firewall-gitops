@@ -62,6 +62,12 @@ jobs:
       SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # FULL HISTORY. Rule order is checked against DEPLOYMENT order — when
+          # each intent first landed on main — and a shallow clone has no
+          # commits to read. `orderdrift` refuses rather than guessing, so at
+          # depth 1 the whole drift job fails; the fix is here, not there.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v7
         with:
