@@ -7,9 +7,9 @@
   "last_seen": "2026-08-16T14:03:08Z",
   "last_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31951532867",
   "name": "REQ-2026-0725",
-  "resolved_at": null,
+  "resolved_at": "2026-08-16T18:28:14Z",
   "schema": "fw-violation/v1",
   "scope": "prod-edge",
-  "status": "open",
+  "status": "resolved",
   "tags_observed": []
 }
