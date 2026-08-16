@@ -164,11 +164,19 @@ jobs:
               echo "::error::plan failed for '$folder' (rc=$rc)"; exit 1
             fi
           done
+          # A FINDING IS NOT A REASON TO STOP LOOKING. This step records its
+          # verdict and exits 0; the gate at the end of the job turns the
+          # collected verdicts into the single failure that alerts. Exiting 1
+          # here skipped every check BELOW it — proven on runs 31926302117 and
+          # 31924264360, where rule drift failed and state drift shows
+          # `skipped`. A genuine ERROR still exits 1 immediately (above): a
+          # broken check and a detected violation are different things.
           if [ "$drift" = "1" ]; then
-            echo "::error::Drift detected — a managed folder's SCM config no longer matches Git. Reconcile via the (human-approved) apply workflow."
-            exit 1
+            echo "Drift detected — a managed folder's SCM config no longer matches Git. Reconcile via the (human-approved) apply workflow." \
+              >> "$RUNNER_TEMP/drift-verdicts"
+          else
+            echo "No plan drift — managed config in SCM matches the declared policy."
           fi
-          echo "No drift — SCM matches the declared policy."
 
       # State-based drift for objects that CANNOT carry gitops: tags. scm_zone
       # has no `tag` attribute (only 14 of the provider's resources do), so the
@@ -219,22 +227,33 @@ jobs:
               *) echo "::error::rule drift check failed for '$folder' (rc=$rc)"; exit 1 ;;
             esac
           done
-          # EXIT NON-ZERO, like the two drift checks either side of this one.
+          # THE JOB STILL FAILS ON THIS — at the gate, not here.
+          #
           # Added 2026-08-15 warning-only, which made it the odd one out: a rule
-          # someone added straight into SCM produced a YELLOW ANNOTATION ON A
-          # GREEN RUN, in a job whose whole premise is that its FAILURE is the
-          # alert. Nobody is notified about a green run.
+          # added straight into SCM produced a YELLOW ANNOTATION ON A GREEN RUN,
+          # in a job whose whole premise is that its FAILURE is the alert.
+          # Nobody is notified about a green run. Making it `exit 1` fixed that
+          # and created the defect this note replaces: it began skipping the
+          # state-drift check behind it, so a night with MORE drift reported
+          # LESS of it. Both properties are wanted, and they are separable —
+          # record here, fail at the gate.
           if [ "$drift" = "1" ]; then
-            echo "::error::Rule drift detected — a security rule exists in SCM that Git never declared, or a declared one was removed out of band. Terraform will NOT reconcile it: an unmanaged rule is not in its state, so it persists until someone adopts it into Git or deletes it in SCM."
-            exit 1
+            echo "Rule drift detected — a security rule exists in SCM that Git never declared, or a declared one was removed out of band. Terraform will NOT reconcile it: an unmanaged rule is not in its state, so it persists until someone adopts it into Git or deletes it in SCM." \
+              >> "$RUNNER_TEMP/drift-verdicts"
           fi
 
       # A VIOLATION OUTLIVES THE RUN THAT FOUND IT.
       #
-      # `if: always()` is the whole point: the step above EXITS 1 when it finds
-      # drift, so a step without it would run only on the nights that found
-      # nothing. Every record worth landing would have been skipped, and this
-      # subsystem would have looked wired while writing a record exactly never.
+      # `if: always()` no longer exists for the reason it was added. It was
+      # written when the step above EXITED 1 on a finding, which would have run
+      # this only on the nights that found NOTHING — wired, and writing a record
+      # exactly never. Findings now go to the gate, so the normal path reaches
+      # here anyway.
+      #
+      # It stays for the ERROR path: a check that fails partway has usually
+      # already written records for the folders it got through, and those are
+      # worth landing. The step is a no-op when nothing changed, so running it
+      # after an unrelated failure costs nothing.
       - name: Land any violation records by pull request
         if: always()
         env:
@@ -249,7 +268,27 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="violations/run-${GITHUB_RUN_ID}"
-          git checkout -B "$branch"
+          # CUT THE BRANCH FROM `main`, NOT FROM WHATEVER REF THIS RUN USED.
+          #
+          # `git checkout -B` from the current ref carried every commit on it
+          # into the pull request. On the schedule that is main and harmless; on
+          # a `workflow_dispatch --ref <branch>` it produced a PR TITLED AS A
+          # RECORD that quietly contained code changes — seen on #242, which
+          # carried this workflow's own diff. A record must be reviewable as
+          # exactly what it claims to be, so the records are carried across to a
+          # branch cut from main and nothing else comes with them.
+          tmp=$(mktemp -d)
+          cp -R evidence/violations/. "$tmp"/ 2>/dev/null || true
+          git reset
+          git fetch origin main
+          git checkout -B "$branch" origin/main
+          mkdir -p evidence/violations
+          cp -R "$tmp"/. evidence/violations/ 2>/dev/null || true
+          git add -A evidence/violations
+          if git diff --cached --quiet -- evidence/violations; then
+            echo "records already on main — nothing to land"
+            exit 0
+          fi
           git commit -m "record: policy violations seen in run ${GITHUB_RUN_ID}"
           git push -f origin "$branch"
           # Never auto-merged. A violation is an UNAUTHORISED CHANGE, and the
@@ -295,7 +334,44 @@ jobs:
             esac
           done
           if [ "$drift" = "1" ]; then
-            echo "::error::State drift detected — an object exists in SCM that Git never declared, or a declared one has been changed or removed out of band."
-            exit 1
+            echo "State drift detected — an object exists in SCM that Git never declared, or a declared one has been changed or removed out of band." \
+              >> "$RUNNER_TEMP/drift-verdicts"
+          else
+            echo "No state drift."
           fi
-          echo "No state drift."
+
+      # ONE NIGHT, ONE ALERT, EVERY FINDING IN IT.
+      #
+      # The three checks above each USED to `exit 1` the moment they found
+      # something, which skipped every check below — so the first thing to fire
+      # was the only thing reported. On a night when a managed rule was edited
+      # AND an unmanaged zone appeared, you heard about the rule; the zone
+      # surfaced the following night and read as a new event rather than
+      # something that had been there all along. A detector whose premise is
+      # "the failure is the alert" was systematically least complete on the
+      # nights with the most to say. Confirmed on runs 31926302117 and
+      # 31924264360: `Detect state drift` = SKIPPED.
+      #
+      # It also silently disarmed the violation RECORDS: those are written by
+      # the rule-drift step, so any earlier failure meant a night produced no
+      # records at all.
+      #
+      # No `if:` — a detection step that ERRORS (rather than finds) still fails
+      # the job on its own and correctly skips this gate. A broken check must
+      # not be reported as "no drift".
+      - name: Alert on everything this run found
+        run: |
+          set -euo pipefail
+          f="$RUNNER_TEMP/drift-verdicts"
+          if [ ! -s "$f" ]; then
+            echo "No drift of any kind — SCM matches the declared policy."
+            exit 0
+          fi
+          echo "::error::DRIFT DETECTED — $(wc -l < "$f" | tr -d ' ') finding(s) this run:"
+          n=0
+          while IFS= read -r line; do
+            n=$((n + 1))
+            echo "::error::  [$n] $line"
+          done < "$f"
+          echo "Violation records (where the finding outlives this log): evidence/violations/"
+          exit 1

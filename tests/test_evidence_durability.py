@@ -880,15 +880,62 @@ def test_EVERY_drift_check_fails_the_run_not_just_warns():
     which is the same as not detecting it.
 
     Asserted for all three so a fourth engine cannot be added warning-only.
+
+    WHAT THIS PINS IS THE PROPERTY, NOT THE MECHANISM. It asserted `exit 1`
+    beside each message until 2026-08-16, which turned out to pin the very thing
+    that had to change: exiting there skipped every check BELOW it, so the first
+    detector to fire was the only one that reported. Each check now RECORDS its
+    finding and a single gate fails the run. The guarantee is unchanged — drift
+    still cannot end in a green run — so this now asserts exactly that, in a way
+    both shapes could satisfy.
     """
     wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
 
     for marker in ("Drift detected —", "Rule drift detected —", "State drift detected —"):
-        assert marker in wf, f"missing the error for {marker!r}"
+        assert marker in wf, f"missing the finding for {marker!r}"
         after = wf.split(marker, 1)[1][:400]
-        assert "exit 1" in after, (
-            f"{marker!r} must FAIL the run — a warning on a green run reaches "
-            f"nobody")
+        assert "exit 1" in after or "drift-verdicts" in after, (
+            f"{marker!r} must reach the alert — either by failing on the spot "
+            f"or by recording a verdict for the gate. A warning on a green run "
+            f"reaches nobody")
+
+    # ...and the gate must actually turn a recorded verdict INTO the failure,
+    # or the line above just proved findings are written to a file nobody reads.
+    gate = wf.split("Alert on everything this run found", 1)
+    assert len(gate) == 2, "the recorded verdicts need a step that acts on them"
+    assert "exit 1" in gate[1], "the gate must FAIL the run when a verdict exists"
+
+
+def test_the_drift_gate_cannot_be_SKIPPED_by_an_earlier_failure():
+    """The defect this whole shape exists to fix, pinned so it cannot return.
+
+    A detector that exits on its first finding skips every step after it. Adding
+    `if: always()` to the gate would look like the fix and would be worse: the
+    gate would then report on a job whose checks never ran, and an infrastructure
+    failure would print "no drift". The gate must carry NO condition, and the
+    detectors must not exit on a finding — that combination is what makes one
+    night produce one alert containing everything.
+    """
+    import yaml
+
+    wf = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text())
+    steps = wf["jobs"]["drift"]["steps"]
+    names = [s.get("name", "") for s in steps]
+
+    gate_i = names.index("Alert on everything this run found")
+    assert gate_i == len(steps) - 1, "the gate must be LAST — it reports on all of them"
+    assert "if" not in steps[gate_i], (
+        "the gate must carry no condition: `if: always()` would report on checks "
+        "that never ran, and a broken job would read as 'no drift'")
+
+    detectors = [s for s in steps[:gate_i] if s.get("name", "").startswith("Detect ")]
+    assert len(detectors) == 3, f"expected 3 detectors, found {len(detectors)}"
+    for d in detectors:
+        # A finding is recorded; only a genuine ERROR still exits on the spot.
+        assert "drift-verdicts" in d["run"], (
+            f"{d['name']!r} must record its verdict for the gate, not exit on it "
+            f"— exiting skips every detector after it")
 
 
 def test_the_drift_job_COMPILES_before_it_plans():
@@ -996,3 +1043,25 @@ def test_the_delete_workflow_requires_a_REASON():
         (REPO_ROOT / ".github" / "workflows" / "delete-scm-object.yml").read_text())
     inputs = wf[True]["workflow_dispatch"]["inputs"]
     assert "reason" in inputs and inputs["reason"]["required"] is True
+
+
+def test_a_violation_record_PR_contains_ONLY_records():
+    """A pull request titled `record:` must be exactly that.
+
+    The landing step cut its branch with `git checkout -B` from whatever ref the
+    run used. On the nightly schedule that is `main` and harmless. On a
+    `workflow_dispatch --ref <branch>` it carried every commit on that branch
+    into a pull request auto-titled as a RECORD — observed on #242, which
+    contained this workflow's own diff. A reviewer merging what looks like a
+    filed finding would have merged code with it.
+    """
+    wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+    step = wf.split("Land any violation records by pull request", 1)[1][:2500]
+
+    assert 'git checkout -B "$branch" origin/main' in step, (
+        "the record branch must be cut from main, so the PR carries the records "
+        "and nothing else")
+    assert step.index("git fetch origin main") < step.index(
+        'git checkout -B "$branch" origin/main'), "fetch main before branching off it"
+    assert "git commit -a" not in step and "git add -A\n" not in step, (
+        "only evidence/violations may be staged")
