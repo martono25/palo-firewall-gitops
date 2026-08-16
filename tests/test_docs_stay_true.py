@@ -947,11 +947,12 @@ def test_the_runbook_says_an_UNMANAGED_object_is_never_fixed_by_an_apply():
     # the live object, so deleting it is not an alternative to adopting — it is
     # required either way. The test encoded the wrong model as faithfully as the
     # prose did.
-    assert "If the effect is wanted" in runbook, (
-        "reproducing a legitimate change under management is still an option")
-    assert "it is always step two" in runbook, (
-        "but deleting the original is NOT the other option — it is unavoidable, "
-        "because an intent creates a new rule and leaves the old one live")
+    assert "The object is always deleted" in runbook, (
+        "ADR-0011: unmanaged drift is deleted, never adopted")
+    assert "Deleting first opens a coverage gap" in runbook, (
+        "and the ORDER is the part that bites — the permanent rule must land "
+        "before the hand-made one is removed, or traffic is uncovered in "
+        "between, at the worst possible moment")
     assert "does not decay, expire" in runbook, (
         "and that it persists until someone acts, since nothing else says so")
 
@@ -1035,5 +1036,16 @@ def test_the_runbook_does_not_claim_an_intent_ADOPTS_a_live_object():
         "is already live")
     assert "creates a second rule" in runbook, (
         "and say concretely what happens instead — a duplicate, not an adoption")
-    assert "it is always step two" in runbook, (
-        "deleting the original is not one of two choices; it is unavoidable")
+    assert "The object is always deleted" in runbook, (
+        "ADR-0011 settled it: deleting is not one of two choices, it is the "
+        "policy — adoption was never an operation that existed")
+
+
+def test_the_runbook_warns_that_a_replacement_rule_LOSES_ITS_POSITION():
+    """The permanent rule is a new object at the bottom of the pre-rulebase, not
+    where the emergency rule sat. Nothing tracks order (see the assessor guide),
+    so nothing will warn that the replacement evaluates somewhere else — and on
+    a first-match-wins firewall that can change what it does."""
+    runbook = _flat(DOCS / "operator-runbook.md").replace("*", "").replace("`", "")
+    assert "lands at the bottom of the pre-rulebase" in runbook
+    assert "If order mattered to the fix, say so with position:" in runbook
