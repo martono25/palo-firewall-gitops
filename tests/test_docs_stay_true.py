@@ -955,3 +955,25 @@ def test_the_runbook_no_longer_claims_drift_is_SKIPPED_when_the_pilot_is_down():
     impossible while the pilot is stopped, which is now exactly backwards."""
     runbook = _flat(DOCS / "operator-runbook.md")
     assert "the job is skipped rather than failed" not in runbook
+
+
+def test_the_runbook_says_APPLY_means_the_workflow_not_the_terraform_command():
+    """Asked in earnest: "does the user just go into git and execute terraform
+    apply?" The runbook said "re-run the apply" and never defined it.
+
+    Running Terraform by hand skips eleven of the twelve steps around it — most
+    seriously the PUSH, so SCM holds the change and the firewall does not, and
+    the evidence bundle, so nothing records that the change happened at all. The
+    operator would see `Apply complete!` and reasonably believe they were done.
+    """
+    runbook = _flat(DOCS / "operator-runbook.md").replace("*", "").replace("`", "")
+
+    assert "means the WORKFLOW, never terraform apply" in runbook, (
+        "the runbook must define what 'the apply' is, since the phrase reads as "
+        "an instruction to run Terraform")
+    assert "gh workflow run apply.yml" in runbook
+    assert "the config never reaches the firewall" in runbook, (
+        "and must name the consequence that matters most — a local apply leaves "
+        "SCM and the device disagreeing")
+    assert "No version bump" in runbook, (
+        "reconciling drift bumps no version; versions move in a release PR")

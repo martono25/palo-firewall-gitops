@@ -123,6 +123,38 @@ gh run view --log --job <job-id> | grep -E "DRIFT|::warning|::error"
 gh run view --log --job <job-id> | grep -E "DRIFT|::warning|::error"
 ```
 
+### "Re-run the apply" means the WORKFLOW, never `terraform apply`
+
+Nobody runs Terraform by hand against this estate, and there is no version to
+bump to reconcile drift. "The apply" is the GitHub Actions **apply workflow**,
+triggered one of two ways:
+
+```bash
+# 1. merge a PR touching intent/, catalog/, terraform/ or src/fwgitops/
+# 2. or, when nothing needs to change in Git — which is the drift case:
+gh workflow run apply.yml
+```
+
+`terraform apply` is ONE STEP inside a twelve-step job. Running it yourself
+skips the rest, and the rest is what makes a change real and recorded:
+
+| skipped | consequence |
+|---|---|
+| `compile intents` | Terraform runs against stale or absent tfvars |
+| `objects ensure` | rules reference address/service objects that do not exist yet; SCM rejects the write |
+| `enrich` | before/after rule ordering never applied |
+| **`push`** | **the config never reaches the firewall.** SCM holds it; the device does not |
+| tag + object sweeps | released objects accumulate |
+| evidence bundle | **no audit record that the change happened, or who approved it** |
+| tier gate | no LOW/HIGH routing, so no approval where one was required |
+
+You would see `Apply complete!` and reasonably believe you were finished. The
+credentials make the point too: they are OIDC and GitHub secrets, so a local
+`terraform apply` has nothing to authenticate with.
+
+**No version bump.** Versions move in a release PR, never as part of applying or
+reconciling. A drift fix changes no version.
+
 ### The one thing that decides your response
 
 **Does the change exist in Terraform's state?** Everything else follows from it.
