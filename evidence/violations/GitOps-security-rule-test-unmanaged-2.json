@@ -1,0 +1,14 @@
+{
+  "class": "unmanaged",
+  "first_seen": "2026-08-16T06:01:33Z",
+  "first_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31930360441",
+  "kind": "security-rule",
+  "last_seen": "2026-08-16T06:01:33Z",
+  "last_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31930360441",
+  "name": "test-unmanaged-2",
+  "resolved_at": null,
+  "schema": "fw-violation/v1",
+  "scope": "GitOps",
+  "status": "open",
+  "tags_observed": []
+}
