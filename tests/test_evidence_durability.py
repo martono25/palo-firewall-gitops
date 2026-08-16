@@ -1065,3 +1065,31 @@ def test_a_violation_record_PR_contains_ONLY_records():
         'git checkout -B "$branch" origin/main'), "fetch main before branching off it"
     assert "git commit -a" not in step and "git add -A\n" not in step, (
         "only evidence/violations may be staged")
+
+
+def test_the_violations_branch_is_STABLE_so_one_PR_is_updated_not_many():
+    """An unmerged record PR must not breed.
+
+    Records are recomputed from `main` every run, so a resolution that has not
+    been merged yet is re-derived and re-filed on the NEXT run. With a
+    per-run branch that meant a new pull request each night saying the same two
+    lines — #246 and #250 were the identical resolution, filed twice within
+    twenty minutes. Unbounded noise on the one queue that has to stay readable.
+    """
+    wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+    # To the NEXT step, not a fixed character count. A 2500-char window sat 466
+    # characters short of `--title` and the test died on IndexError instead of
+    # checking anything.
+    step = wf.split("Land any violation records by pull request", 1)[1]
+    step = step.split("\n      - name:", 1)[0]
+
+    assert 'branch="violations/pending"' in step, (
+        "the violations branch must be stable, so a force-push updates the "
+        "OPEN pull request rather than opening another one")
+    # The ASSIGNMENT, not any mention — the comment above it explains the old
+    # `violations/run-<id>` scheme by name, and a test that forbids naming the
+    # thing it guards against forbids explaining it.
+    assert 'branch="violations/run-' not in step, (
+        "a per-run branch files a duplicate every run")
+    assert "${GITHUB_RUN_ID}" not in step.split("--title", 1)[1][:120], (
+        "the title outlives any single run; naming one goes stale immediately")
