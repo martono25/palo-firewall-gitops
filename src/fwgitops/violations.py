@@ -127,7 +127,8 @@ def build(*, cls: str, kind: str, scope: str, name: str,
 
 def reconcile(*, found: Iterable[Dict[str, Any]], existing: Dict[Path, Dict[str, Any]],
               root: Path, run_url: str, at: Optional[str] = None,
-              scopes_checked: Sequence[str] = ()) -> List[Tuple[Path, Dict[str, Any]]]:
+              scopes_checked: Sequence[str] = (),
+              kinds_checked: Sequence[str] = ()) -> List[Tuple[Path, Dict[str, Any]]]:
     """Merge this run's findings with the records already on disk.
 
     `found` is `{cls, kind, scope, name, tags}` per current violation.
@@ -179,6 +180,16 @@ def reconcile(*, found: Iterable[Dict[str, Any]], existing: Dict[Path, Dict[str,
 
     for p, rec in existing.items():
         if p in seen_paths or rec.get("status") != "open":
+            continue
+        # SCOPE ALONE IS NOT ENOUGH, and assuming it was closed six real
+        # findings. Several detectors run over the same scope, each knowing
+        # about one KIND: the object checker reports addresses and services, the
+        # tag and content checkers report security rules. Resolving on scope
+        # alone meant the object checker — whose `found` list can never contain
+        # a rule — silently closed every open RULE finding in the folder it had
+        # just looked at. A finding that closes itself because a DIFFERENT
+        # detector ran is worse than one never raised.
+        if kinds_checked and rec.get("kind") not in kinds_checked:
             continue
         if rec.get("scope") not in scopes_checked:
             # NOT LOOKED AT — NOT RESOLVED, and an EMPTY set means nothing was

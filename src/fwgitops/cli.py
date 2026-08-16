@@ -1395,7 +1395,9 @@ def run_drift(
                          | set(scopes_checked or ()))
         changed = _v.reconcile(found=found, existing=_v.load(record_violations),
                                root=record_violations, run_url=run_url or "",
-                               scopes_checked=checked)
+                               scopes_checked=checked,
+                               kinds_checked=["security-rule",
+                                              "security-rule-order"])
         for path in _v.write(changed):
             print(f"violation record: {path}", file=out)
         print(_v.summarise(
@@ -2428,7 +2430,11 @@ def run_object_drift(
                  for o in report.unmanaged]
         changed = _v.reconcile(found=found, existing=_v.load(record_violations),
                                root=record_violations, run_url=run_url or "",
-                               scopes_checked=[scope.key])
+                               scopes_checked=[scope.key],
+                               # THIS CHECKER SEES OBJECTS ONLY. Without saying
+                               # so it closed every open security-rule finding
+                               # in the folder it had just read.
+                               kinds_checked=["address", "service"])
         for path in _v.write(changed):
             print(f"violation record: {path}", file=out)
 
