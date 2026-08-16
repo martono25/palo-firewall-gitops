@@ -1,0 +1,123 @@
+# Delete an object in SCM that GITOPS DOES NOT OWN. Manual dispatch only.
+#
+# WHY THIS EXISTS. The runbook's treatment for an unmanaged object is "remove it
+# in SCM — there is no pipeline path, because the pipeline only deletes what it
+# created". True, and it made the documented remedy a console click with no
+# record. Drift can now find these (the tag engine); this is how you act on one
+# without leaving the platform.
+#
+# WHAT IT REFUSES, and why each guard is here rather than in a comment:
+#
+#   * a name that does not match `confirm` — typed twice, the cheapest guard
+#     against deleting the wrong object;
+#   * anything carrying `gitops:req` — that object belongs to an intent, and the
+#     way to remove it is to delete the intent (`removing-things.md`), which
+#     produces evidence and an approval. Deleting it here would strip a live
+#     rule with no record and leave Terraform's state pointing at nothing;
+#   * anything named in intent/ — same reason, caught by text before the API.
+#
+# It does NOT delete tags. `gitops:managed` is shared by every managed object in
+# a folder, and the one place still declaring it (spike/smoke) is being fixed
+# separately.
+name: delete-scm-object
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "What to delete"
+        required: true
+        type: choice
+        options: [security-rule, address, service]
+      folder:
+        description: "SCM folder holding it"
+        required: true
+      name:
+        description: "Exact object name"
+        required: true
+      confirm:
+        description: "Type the SAME name again to confirm"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    env:
+      SCM_CLIENT_ID: ${{ secrets.SCM_CLIENT_ID }}
+      SCM_CLIENT_SECRET: ${{ secrets.SCM_CLIENT_SECRET }}
+      SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+
+      - name: Guards
+        env:
+          NAME: ${{ inputs.name }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          [ "$NAME" = "$CONFIRM" ] || { echo "::error::name and confirm differ — refusing"; exit 1; }
+          if grep -rq "$NAME" intent/ 2>/dev/null; then
+            echo "::error::'$NAME' appears in intent/ — this repo declares it. Remove the intent instead (docs/removing-things.md), which produces evidence and an approval."
+            exit 1
+          fi
+          echo "guards passed for '$NAME'"
+
+      - name: Delete
+        env:
+          KIND: ${{ inputs.kind }}
+          FOLDER: ${{ inputs.folder }}
+          NAME: ${{ inputs.name }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
+
+          PATHS = {
+              "security-rule": "/config/security/v1/security-rules",
+              "address": "/config/objects/v1/addresses",
+              "service": "/config/objects/v1/services",
+          }
+          kind, folder, name = os.environ["KIND"], os.environ["FOLDER"], os.environ["NAME"]
+          path = PATHS[kind]
+          session = ScmSession(ScmCredentials.from_env())
+
+          rows = (session.request("GET", path, params={"folder": folder, "limit": 500})
+                  or {}).get("data", [])
+          hits = [r for r in rows if isinstance(r, dict) and r.get("name") == name]
+          if not hits:
+              print(f"::error::no {kind} named {name!r} in folder {folder!r}")
+              sys.exit(1)
+          obj = hits[0]
+
+          # DEFINED HERE, NOT INHERITED. A folder read returns ancestors' objects
+          # too, and deleting one of those from a child scope is somebody else's
+          # config.
+          if obj.get("folder") not in (None, folder):
+              print(f"::error::{name!r} is defined in {obj['folder']!r}, not {folder!r} — "
+                    f"it is inherited here. Delete it where it is defined.")
+              sys.exit(1)
+
+          tags = obj.get("tag") or obj.get("tags") or []
+          owned = [t for t in tags if isinstance(t, str) and t.startswith("gitops:req")]
+          if owned:
+              print(f"::error::{name!r} carries {owned} — an intent owns it. Remove the "
+                    f"intent instead (docs/removing-things.md), which leaves evidence.")
+              sys.exit(1)
+
+          print(f"deleting {kind} {name!r} (id={obj.get('id')}) tags={tags or 'none'}")
+          try:
+              session.request("DELETE", f"{path}/{obj['id']}")
+          except ScmApiError as e:
+              print(f"::error::DELETE failed: {e}")
+              sys.exit(3)
+          print(f"OK — deleted {kind} {name!r} from {folder!r}")
+          PY
