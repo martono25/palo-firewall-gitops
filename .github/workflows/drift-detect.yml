@@ -179,7 +179,15 @@ jobs:
               *) echo "::error::rule drift check failed for '$folder' (rc=$rc)"; exit 1 ;;
             esac
           done
-          [ "$drift" -eq 0 ] || echo "::warning::rule drift detected — see groups above"
+          # EXIT NON-ZERO, like the two drift checks either side of this one.
+          # Added 2026-08-15 warning-only, which made it the odd one out: a rule
+          # someone added straight into SCM produced a YELLOW ANNOTATION ON A
+          # GREEN RUN, in a job whose whole premise is that its FAILURE is the
+          # alert. Nobody is notified about a green run.
+          if [ "$drift" = "1" ]; then
+            echo "::error::Rule drift detected — a security rule exists in SCM that Git never declared, or a declared one was removed out of band. Terraform will NOT reconcile it: an unmanaged rule is not in its state, so it persists until someone adopts it into Git or deletes it in SCM."
+            exit 1
+          fi
 
       - name: Detect state drift (kinds that cannot carry tags)
         run: |

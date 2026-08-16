@@ -119,21 +119,58 @@ The nightly job failed. That failure **is** the alert.
 gh run view --log --job <job-id> | grep -E "DRIFT|::warning|::error"
 ```
 
-Three engines report differently:
+```bash
+gh run view --log --job <job-id> | grep -E "DRIFT|::warning|::error"
+```
+
+### The one thing that decides your response
+
+**Does the change exist in Terraform's state?** Everything else follows from it.
+
+| What drifted | Does re-applying fix it? | Treatment |
+|---|---|---|
+| A **managed** object was edited in SCM | **Yes** — it is in state, so the next apply overwrites the edit | re-run the apply; the human approval on it is the record of the correction |
+| A **managed** object was deleted in SCM | **Yes** — apply recreates it | re-run the apply |
+| A **managed** object is live but no longer declared in Git (`orphaned`) | **Yes** — apply destroys it | re-run the apply, having checked the removal was intended |
+| An **unmanaged** object was ADDED in SCM | **NO. Never.** | see below — this is the one that needs a person |
+
+**An unmanaged object is invisible to Terraform.** It is not in state, so no
+apply will touch it, however many times you run one. It does not decay, expire
+or get cleaned up. It stays until a human acts, enforcing traffic that no
+request authorised and no evidence bundle records.
+
+There are exactly two ways to end that state:
+
+1. **Adopt it** — write the intent that describes it, open a PR, let it apply.
+   The object becomes managed, gains its `gitops:` tags, and acquires the ticket
+   and approval it never had. Use this when the change was legitimate — a
+   break-glass fix at 3am is a normal reason for this to happen.
+2. **Remove it in SCM** — when it should not have been made. There is no
+   pipeline path for this, because the pipeline only deletes what it created.
+   Record why in the ticket that would otherwise have authorised it.
+
+Adopting is not automated: you write the `AccessRequest` (or other kind) by hand
+to match what is live. `fwgitops where` and the snapshot the drift job wrote are
+the fastest way to read exactly what you are matching.
+
+### What each engine reports
 
 | Message | Means | First move |
 |---|---|---|
 | `DRIFT in '<folder>'` | `terraform plan` sees managed config changed in SCM | read the plan; someone edited a managed object out of band |
-| `ZONE DRIFT` / state drift | an object exists that Git never declared, or a declared one changed | `fwgitops snapshot <kind> --scope-dir <dir> --out /tmp/s.json` and read it |
+| `RULE DRIFT in '<folder>'` | a security rule was added directly in SCM (`unmanaged`), or a managed one is live but no longer declared (`orphaned`) | read the group above it — it names each rule and its class |
+| `ZONE DRIFT` / state drift | a zone/route/interface exists that Git never declared, or a declared one changed | `fwgitops snapshot <kind> --scope-dir <dir> --out /tmp/s.json` and read it |
 | `device-sync` failure | SCM and the **firewall** disagree | the change never reached the device; re-push the scope |
+| `firewall '<serial>' … NOTHING in catalog/folders.yaml declares it` | a firewall is registered under a folder this repo manages and Git does not know about it — it inherits that folder's policy | unassign it in SCM (move to *Available Devices*), or declare it |
 
 **Reconcile through the pipeline, never by hand.** The fix is a PR that either
 declares what someone added or re-applies what Git says. Editing SCM to match
 Git leaves no record of either the drift or the correction.
 
-**If the firewall is suspended**, the job is skipped rather than failed, on
-purpose — a red run every morning for a known-absent firewall is how a real
-alert gets ignored. A manual dispatch always runs.
+**Inherited objects are not drift.** A folder read returns everything that
+applies to it, including rules defined in ancestors (`All/default`,
+`ngfw-shared/Auto-VPN-Default-Snippet`). Those belong to whoever owns the
+ancestor folder; the checks report how many they skipped and why.
 
 ---
 
