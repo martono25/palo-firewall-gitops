@@ -79,6 +79,23 @@ on:
   # CRITICAL made the gate mean nothing. It existed only because tier routing
   # did not, and it was removed in v2.1.0 when routing replaced it.
   workflow_dispatch: {}
+  # CALLED BY `remediate.yml` to put back what somebody changed by hand.
+  #
+  # `unattended` forces the NO-APPROVAL environment. That is not a loosening of
+  # the gate: every rule a restore re-asserts was approved when its intent was
+  # merged, and asking for a second approval to put back what was already
+  # approved would leave unauthorised config in place while a request sat in a
+  # queue. The gate exists for NEW policy, and a restore introduces none.
+  #
+  # The caller is responsible for proving there IS no new policy — see the
+  # `already-applied` guard in remediate.yml. Without it this input would be a
+  # bypass: merge a CRITICAL intent, leave the gate unapproved, and wait for the
+  # nightly restore to apply it for you.
+  workflow_call:
+    inputs:
+      unattended:
+        type: boolean
+        default: false
 
 permissions:
   # WRITE so the run can push its evidence bundles to a branch — NOT to main,
@@ -202,7 +219,7 @@ jobs:
     # Fail-safe by construction: any tier that is not exactly LOW routes to the
     # REVIEWED environment. A classify job that failed, an empty output, or a
     # tier this expression does not know all land on "a human looks at it".
-    environment: ${{ needs.classify.outputs.tier == 'LOW' && 'firewall-apply-auto' || 'firewall-apply' }}
+    environment: ${{ (inputs.unattended || needs.classify.outputs.tier == 'LOW') && 'firewall-apply-auto' || 'firewall-apply' }}
     # SCM auth for BOTH the scm Terraform provider and `fwgitops push`. Each does
     # its own client_credentials -> JWT exchange, so no separate token step.
     env:

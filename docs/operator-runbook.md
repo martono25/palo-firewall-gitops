@@ -136,6 +136,25 @@ To see what would be removed without removing it:
 gh workflow run remediate.yml -f dry_run=true
 ```
 
+## The nightly cycle, end to end
+
+| Time (SGT) | Job | Does |
+|---|---|---|
+| 02:00 | `drift-detect` | reads SCM, records every finding, fails the run |
+| 03:00 | `remediate` | **deletes** what Git does not declare, then **restores** what it does |
+
+Deletion and restoration are two halves of one rule: config Git does not declare
+is removed, config Git declares is put back. Neither asks for approval — the
+approval happened when the intent was merged, and requiring a second one would
+leave unauthorised config in place while a request sat in a queue.
+
+**The restore refuses to run if `main` holds intent that has never been applied.**
+An unattended apply is only safe for putting back what was already approved; if
+a change is still waiting at the `firewall-apply` gate, an unattended apply would
+deploy it and skip the gate entirely. In that case the restore is skipped with a
+warning and the drift stays until the pending apply is approved — approve it,
+and the next cycle restores everything.
+
 ## Drift fired
 
 The nightly job failed. That failure **is** the alert.
