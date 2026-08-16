@@ -144,3 +144,28 @@ def test_every_env_var_a_block_reads_is_actually_passed_to_it(wf, job, step, src
         f"{wf} step {step!r} reads {missing} from the environment, but the step "
         f"does not pass them. `.get` returns \"\" rather than raising, so this "
         f"fails SILENTLY — REASON reached the deletion record empty this way.")
+
+
+def test_no_expression_reads_a_HYPHENATED_job_id_with_dot_notation():
+    """`needs.some-job.outputs.x` is a SUBTRACTION to GitHub's parser.
+
+    The whole workflow is rejected before any job starts: `startup_failure`,
+    zero jobs, and no message pointing at the cause. It cost a full
+    dispatch-and-investigate cycle on 2026-08-16. Bracket notation works;
+    underscores in job ids avoid the trap entirely.
+    """
+    import re
+
+    bad = []
+    for wf_path in sorted(WORKFLOWS.glob("*.yml")):
+        text = wf_path.read_text()
+        doc = yaml.safe_load(text)
+        for job_id in (doc.get("jobs") or {}):
+            if "-" not in job_id:
+                continue
+            if re.search(rf"needs\.{re.escape(job_id)}\b", text):
+                bad.append(f"{wf_path.name}: needs.{job_id}")
+    assert not bad, (
+        f"hyphenated job id read with dot notation: {bad}. GitHub parses the "
+        f"hyphen as minus and rejects the file at startup — rename the job or "
+        f"use needs['the-job']")

@@ -116,6 +116,12 @@ jobs:
             || gh pr view "$branch" --json url >/dev/null
           gh pr merge "$branch" --squash --auto --delete-branch || true
 
+  # NOTE THE UNDERSCORE. A job id with a HYPHEN cannot be read in an expression
+  # with dot notation: GitHub parses `needs.already-applied.outputs.ok` as a
+  # SUBTRACTION, rejects the whole file, and the run fails at startup with no
+  # jobs and no message worth reading. `needs['already-applied']` would work;
+  # an underscore avoids the trap entirely.
+  #
   # IS THERE ANY NEW POLICY WAITING FOR A HUMAN?
   #
   # The restore below applies `main` with the approval gate OFF. That is correct
@@ -134,7 +140,7 @@ jobs:
   # successful apply. If it has not, the running config is already what main
   # declares and re-applying can only put back drift. If it has, something is
   # waiting at the gate and this must not pre-empt it.
-  already-applied:
+  already_applied:
     runs-on: ubuntu-latest
     outputs:
       ok: ${{ steps.check.outputs.ok }}
@@ -179,8 +185,8 @@ jobs:
   # rulebase they REORDERED. The remedy for all three is to re-assert the
   # declared state, which is what `apply` does.
   restore:
-    needs: [remediate, already-applied]
-    if: github.event_name == 'schedule' && needs.already-applied.outputs.ok == 'true'
+    needs: [remediate, already_applied]
+    if: github.event_name == 'schedule' && needs.already_applied.outputs.ok == 'true'
     uses: ./.github/workflows/apply.yml
     with:
       unattended: true

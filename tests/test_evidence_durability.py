@@ -1223,14 +1223,14 @@ def test_the_unattended_restore_CANNOT_deploy_unapproved_intent():
         (REPO_ROOT / ".github" / "workflows" / "remediate.yml").read_text())
     restore = wf["jobs"]["restore"]
 
-    assert "already-applied" in restore["needs"], (
+    assert "already_applied" in restore["needs"], (
         "restore must depend on the guard, or the gate can be skipped by "
         "merging and waiting")
-    assert "needs.already-applied.outputs.ok == 'true'" in restore["if"], (
+    assert "needs.already_applied.outputs.ok == 'true'" in restore["if"], (
         "depending on the guard is not enough — the result must be REQUIRED")
     assert restore["with"]["unattended"] is True
 
-    steps = wf["jobs"]["already-applied"]["steps"]
+    steps = wf["jobs"]["already_applied"]["steps"]
     guard = next(st["run"] for st in steps if st.get("run"))
     assert "conclusion==\"success\"" in guard, "it must find a SUCCESSFUL apply"
 
