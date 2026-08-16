@@ -123,32 +123,53 @@ jobs:
   # for anything else: merge a CRITICAL intent, leave `firewall-apply`
   # unapproved, and the nightly restore would apply it for you.
   #
-  # An apply run that already SUCCEEDED for this exact commit is the proof that
-  # main's declared state has been through its gate. Without one, this refuses
-  # to run and says so — the drift stays until someone approves the pending
-  # apply, which is the right order.
+  # THE QUESTION IS NOT "WAS THIS COMMIT APPLIED?". That was the first version
+  # and it was wrong within the hour: `apply.yml` triggers only on `intent/`,
+  # `catalog/`, `terraform/` and `src/fwgitops/`, so merging docs, tests or a
+  # workflow advances main WITHOUT an apply. The guard would then refuse for the
+  # rest of time, and the restore would silently never run — the failure this
+  # repository keeps finding.
+  #
+  # The real question is whether DECLARED STATE has changed since the last
+  # successful apply. If it has not, the running config is already what main
+  # declares and re-applying can only put back drift. If it has, something is
+  # waiting at the gate and this must not pre-empt it.
   already-applied:
     runs-on: ubuntu-latest
     outputs:
       ok: ${{ steps.check.outputs.ok }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          # Needed to diff against the last applied commit. At depth 1 there is
+          # no history and the diff cannot be computed.
+          fetch-depth: 0
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          sha="${GITHUB_SHA}"
-          n=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=apply.yml \
-                --json headSha,conclusion \
-                --jq "[.[] | select(.headSha==\"$sha\" and .conclusion==\"success\")] | length")
-          if [ "${n:-0}" -gt 0 ]; then
+          last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow=apply.yml \
+                   --limit 50 --json headSha,conclusion \
+                   --jq '[.[] | select(.conclusion=="success")][0].headSha' || true)
+          if [ -z "$last" ] || [ "$last" = "null" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No successful apply on record. Refusing to restore."
+            exit 0
+          fi
+          if ! git cat-file -e "$last^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$last" || true
+          fi
+          changed=$(git diff --name-only "$last"..HEAD -- \
+                      intent catalog terraform src/fwgitops || echo UNKNOWN)
+          if [ -z "$changed" ]; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
-            echo "an apply succeeded for $sha — main's policy is through its gate"
+            echo "declared state unchanged since ${last:0:8} — a restore can only put back drift"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No successful apply for $sha. Refusing to restore: an \
-          unattended apply now could deploy intent still waiting at the approval \
-          gate. Approve the pending apply first."
+            echo "::warning::Declared state changed since the last successful apply \
+          and may be waiting at the approval gate. Refusing to restore, so this \
+          cannot deploy it unattended. Files: $changed"
           fi
 
   # RESTORE WHAT WAS EDITED, DELETED OR REORDERED — unattended.
