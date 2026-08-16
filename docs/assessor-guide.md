@@ -156,6 +156,26 @@ releases. CRITICAL routes to the same reviewed environment as HIGH, so a
 CRITICAL change has one approver, not two. Genuine dual control needs a second
 human, not more code.
 
+**RULE ORDER IS NOT VERIFIED, AND REORDERING IS NOT DETECTED.** On a firewall,
+order is policy: evaluation is first-match-wins, so moving a broad `allow` above
+a narrow `deny` inverts both without altering a single field. Nothing in this
+platform sees that happen.
+
+Demonstrated 2026-08-16 on the live tenant. A rule was moved four places up the
+`prod-edge` pre-rulebase in the SCM console, and the full drift job — Terraform
+plan, tag-based rule drift, state drift, catalog check — reported **no drift and
+a green run**.
+
+It is not an unwired check; it cannot work as built. `relative_position` is a
+create/update INSTRUCTION that the provider never reads back, so a plan has
+nothing to diff. And `spec.position` is optional and unset on every rule
+currently declared, so Git states no order to compare against even in principle.
+
+What the evidence therefore supports: each rule's MATCH and ACTION were
+authorised, approved and applied as recorded. What it does not support: that the
+rulebase evaluates in the order anyone intended, or that the order has not been
+changed since.
+
 **`push.status: success` proves SCM accepted the change, not that the firewall
 is running it.** Measured 2026-08-06: a route disappeared from the device about
 40 seconds after the push reported success. The scheduled `device-sync` job

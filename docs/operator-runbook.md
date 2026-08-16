@@ -199,6 +199,14 @@ the fastest way to read exactly what you are matching.
 declares what someone added or re-applies what Git says. Editing SCM to match
 Git leaves no record of either the drift or the correction.
 
+**Reordering is not detected — by any engine.** Moving a rule in the SCM console
+changes which rule matches first and produces no drift anywhere: the plan has
+nothing to diff (`relative_position` is a write-only instruction) and the tag
+engine compares the SET of rules, never their sequence. Demonstrated 2026-08-16:
+a rule moved four places, full drift job green. If order matters to you, the
+only current check is to read it — `fwgitops snapshot AccessRequest --scope-dir
+<dir> --out /tmp/s.json`, or the console.
+
 **Inherited objects are not drift.** A folder read returns everything that
 applies to it, including rules defined in ancestors (`All/default`,
 `ngfw-shared/Auto-VPN-Default-Snippet`). Those belong to whoever owns the
