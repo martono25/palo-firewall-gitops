@@ -1,0 +1,20 @@
+{
+  "action": "delete",
+  "at": "2026-08-16T19:19:36Z",
+  "dispatched_by": "github-actions[bot]",
+  "folder": "prod-edge",
+  "kind": "security-rule",
+  "name": "REQ-2026-0725-copy-31953100402",
+  "object_id": "1d9ae3a9-adfc-48ea-9180-ff009c88945a",
+  "provenance": "workflow",
+  "reason": "Automatic remediation: this object was in a managed scope, no request authorised it, and GitOps is the source of truth (ADR-0011). Emergency changes must be raised as an AccessRequest before this job runs.",
+  "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31967218354",
+  "schema": "fw-manual-action/v2",
+  "tags_at_deletion": [
+    "gitops:managed",
+    "gitops:req:REQ-2026-0725",
+    "gitops:section:specific-allow",
+    "gitops:ticket:JIRA-20725"
+  ],
+  "violation_id": "VIOL-2026-0816-prod-edge-REQ-2026-0725-copy-31953100402"
+}
