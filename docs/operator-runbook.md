@@ -173,17 +173,42 @@ request authorised and no evidence bundle records.
 
 There are exactly two ways to end that state:
 
-1. **Adopt it** — write the intent that describes it, open a PR, let it apply.
-   The object becomes managed, gains its `gitops:` tags, and acquires the ticket
-   and approval it never had. Use this when the change was legitimate — a
-   break-glass fix at 3am is a normal reason for this to happen.
-2. **Remove it in SCM** — when it should not have been made. There is no
-   pipeline path for this, because the pipeline only deletes what it created.
-   Record why in the ticket that would otherwise have authorised it.
+**Deleting the object in SCM is unavoidable, and it is not one of the two
+choices — it is always step two.** The choice is only whether you also recreate
+its effect under management first.
 
-Adopting is not automated: you write the `AccessRequest` (or other kind) by hand
-to match what is live. `fwgitops where` and the snapshot the drift job wrote are
-the fastest way to read exactly what you are matching.
+1. **If the effect is wanted** — write an intent that reproduces it, open a PR,
+   let it apply. A 3am break-glass fix is a normal reason to be here.
+2. **Then delete the original in SCM**, whichever you chose in step 1.
+
+> **"Adopting" does NOT absorb the live object, and this runbook said it did
+> until 2026-08-16.** The compiler names a rule after its request id
+> (`REQ-2026-0901`), so an intent describing `Testing-unmmanaged` compiles to a
+> DIFFERENT rule. Applying it creates a second rule alongside the first, and the
+> original stays exactly where it is — still unmanaged, still drifting, now with
+> a duplicate beside it enforcing the same traffic.
+>
+> Making the live object genuinely managed would need `terraform import`, which
+> this platform has no path for. Until it does, step 2 is not optional.
+
+**Why step 2 cannot go through the pipeline.** Git has no representation of an
+object it never created, so there is nothing to delete FROM Git. GitOps is the
+source of truth for what this platform MANAGES; an unmanaged object sits outside
+that boundary by construction. The deletion is therefore an out-of-band action
+by necessity — which is why it is recorded (below) rather than pretended away.
+
+```bash
+gh workflow run delete-scm-object.yml \
+  -f kind=security-rule -f folder=<folder> \
+  -f name=<exact-name> -f confirm=<exact-name> -f reason='<why>'
+```
+
+That workflow refuses anything carrying `gitops:req` (an intent owns it — delete
+the intent instead) and anything inherited from an ancestor folder. It writes an
+evidence record of what it removed.
+
+You write the reproducing intent by hand; `fwgitops where` and the snapshot the
+drift job wrote are the fastest way to read exactly what you are matching.
 
 ### What each engine reports
 

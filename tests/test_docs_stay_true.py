@@ -942,9 +942,16 @@ def test_the_runbook_says_an_UNMANAGED_object_is_never_fixed_by_an_apply():
 
     assert "invisible to Terraform" in runbook or "not in state" in runbook, (
         "the runbook must say WHY an apply cannot fix an unmanaged object")
-    assert "Adopt it" in runbook and "Remove it in SCM" in runbook, (
-        "and must give both exits — adopting a legitimate break-glass change is "
-        "as valid as deleting an unauthorised one")
+    # CORRECTED 2026-08-16. This asserted the runbook offered "two exits",
+    # adopt OR remove. That framing was wrong: writing an intent does not absorb
+    # the live object, so deleting it is not an alternative to adopting — it is
+    # required either way. The test encoded the wrong model as faithfully as the
+    # prose did.
+    assert "If the effect is wanted" in runbook, (
+        "reproducing a legitimate change under management is still an option")
+    assert "it is always step two" in runbook, (
+        "but deleting the original is NOT the other option — it is unavoidable, "
+        "because an intent creates a new rule and leaves the old one live")
     assert "does not decay, expire" in runbook, (
         "and that it persists until someone acts, since nothing else says so")
 
@@ -1008,3 +1015,25 @@ def test_the_runbook_says_reordering_is_detected_by_NOTHING():
     unchanged — only that its contents are."""
     runbook = _flat(DOCS / "operator-runbook.md").replace("*", "").replace("`", "")
     assert "Reordering is not detected — by any engine" in runbook
+
+
+def test_the_runbook_does_not_claim_an_intent_ADOPTS_a_live_object():
+    """It said so until 2026-08-16, and the operation does not exist.
+
+    The compiler names a rule after its request id, so an intent describing
+    `Testing-unmmanaged` compiles to a DIFFERENT rule. Applying it creates a
+    second rule and leaves the original untouched — still unmanaged, still
+    drifting, now duplicated. An operator following the old wording would
+    believe they had resolved the drift and would have doubled it.
+
+    Genuine adoption needs `terraform import`, which does not exist here.
+    """
+    runbook = _flat(DOCS / "operator-runbook.md").replace("*", "").replace("`", "")
+
+    assert "does NOT absorb the live object" in runbook, (
+        "the runbook must correct the claim that writing an intent adopts what "
+        "is already live")
+    assert "creates a second rule" in runbook, (
+        "and say concretely what happens instead — a duplicate, not an adoption")
+    assert "it is always step two" in runbook, (
+        "deleting the original is not one of two choices; it is unavoidable")
