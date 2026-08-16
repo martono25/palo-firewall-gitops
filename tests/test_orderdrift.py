@@ -214,3 +214,32 @@ def test_restoring_SKIPS_a_rule_that_is_not_in_the_folder():
     assert "REQ-2026-0730" not in moved, (
         "0730 anchors to the missing 0727, so it cannot be placed either — "
         "guessing a different anchor would invent an order nobody declared")
+
+
+def test_the_evidence_bundles_CANNOT_order_anything():
+    """Pinned because it is the obvious "improvement" to make here.
+
+    Commit time records when an intent was MERGED; what one really wants is when
+    the rule was APPLIED, and the evidence bundle looks like it knows. It does
+    not — bundles are regenerated on every apply, so `generated_at` is the last
+    one. Every rule in the repository shares a single value, which would collapse
+    the expected order exactly as `--follow` did.
+    """
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "evidence" / "prod-edge"
+    # THE LIVE RULES ONLY. Bundles for requests that are gone keep whatever
+    # timestamp their last apply wrote, so the directory as a whole does hold
+    # several distinct values — checking all of them would "pass" for the wrong
+    # reason and prove nothing about the rules being ordered.
+    live = [root / f"{n}.json" for n in DEPLOYED]
+    present = [p for p in live if p.is_file()]
+    if len(present) < 2:
+        return                      # nothing to prove on a fresh checkout
+    stamps = {json.loads(p.read_text()).get("generated_at") for p in present}
+    assert len(stamps) == 1, (
+        "the bundles of currently-managed rules now carry distinct timestamps. "
+        "If that is a real per-rule FIRST-applied time rather than an artefact "
+        "of which rules the last apply happened to touch, orderdrift should use "
+        "it in place of commit time")

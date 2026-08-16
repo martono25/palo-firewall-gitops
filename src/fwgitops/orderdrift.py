@@ -15,6 +15,27 @@ in the order they were deployed. That is already recorded in Git as the commit
 that first added each intent, so there is nothing on disk to maintain and
 nothing for anyone to edit. A manifest was considered and was not needed.
 
+WHY NOT THE EVIDENCE BUNDLE'S TIMESTAMP, which is the obvious objection —
+git records when an intent was MERGED, and what actually matters is when the
+rule was APPLIED. The bundle looks like it knows. It does not: bundles are
+regenerated on every apply, so `generated_at` records the LAST one. Measured
+2026-08-16, all six of the pilot's rules read
+
+    generated_at = 2026-08-15T14:22:17Z
+
+identical to the second, while their commit times span 26 Jul to 12 Aug. There
+is no per-rule record of first deployment anywhere, so commit time is not a
+compromise — it is the only signal that exists. Do not "improve" this by
+reaching for the bundle.
+
+MERGE ORDER IS NOT CREATION ORDER, AND DOES NOT NEED TO BE. If two intents merge
+before an apply runs, that single apply creates both and Terraform decides their
+relative order, not git. The pilot's three oldest rules had distinct commit times
+(00:25, 08:59, 19:10 on 26 Jul) and still sat reversed in SCM. This does not
+break the model because apply RE-ASSERTS the order every run: the rulebase
+converges on commit order regardless of what the provider did while creating
+them. Batched merges self-heal on the next apply.
+
 THE ORDER OF RULES DEPLOYED TOGETHER IS NOT GUARANTEED. "Append at bottom" only
 yields a deterministic sequence when rules are created one at a time. Three of
 the pilot's rules were created in a single apply on 2026-07-26, before the
