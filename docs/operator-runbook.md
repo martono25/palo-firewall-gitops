@@ -115,6 +115,29 @@ summary is worth having in your head:
 
 The nightly job failed. That failure **is** the alert.
 
+**The finding also outlives the run.** Every violation the nightly job detects
+is written to `evidence/violations/` and lands on a branch as a pull request
+titled `record: policy violations (run <id>)`. Review it, act on the finding,
+then merge to accept the record. Nothing auto-merges: a violation is an
+unauthorised change, and the pull request is where a human acknowledges it.
+
+Read the records rather than the log — CI logs expire:
+
+```bash
+jq -r 'select(.status=="open") | "\(.class)\t\(.scope)/\(.name)\tsince \(.first_seen)"' evidence/violations/*.json
+```
+
+| In a record | Means |
+|---|---|
+| `class: unmanaged` | someone created this outside the pipeline; nothing authorised it |
+| `class: malformed` | it carries `gitops:managed` but traces to no request of its own — including a **console copy** of a managed rule, which inherits the tags and is given away only by its name |
+| `class: orphaned` | authorised once, no longer declared in Git |
+| `resolved_at: null` | still open. This is the field that answers "is it still there" — **not** `last_seen`, which records when the record last *changed* |
+
+A record is never deleted when the violation goes away; it is marked
+`resolved`, because "this was open for six days in August" is what a follow-up
+process needs afterwards.
+
 ```bash
 gh run view --log --job <job-id> | grep -E "DRIFT|::warning|::error"
 ```

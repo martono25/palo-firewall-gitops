@@ -146,6 +146,31 @@ collaborator, that is exactly what you will see.
 
 ---
 
+## Unauthorised changes are recorded too
+
+An evidence bundle proves an authorised change. `evidence/violations/` is the
+other half: configuration found in SCM that **no request authorised**, written
+as `fw-violation/v1` by the nightly drift job.
+
+It is deliberately shaped as **findings, not events**. One file per violation
+identity (scope + kind + name), so the same violation detected on ten nights is
+one record with `first_seen` — not ten log lines. That is what makes "open for
+six days" answerable at all.
+
+Two properties worth testing, because both are places this could quietly lie:
+
+- **A record is resolved, never deleted.** The history survives the fix.
+- **A scope that was not read cannot resolve its findings.** If a folder's SCM
+  read fails, its open violations stay open. An outage in the checker must not
+  read as a clean bill of health — and this failed exactly that way until
+  2026-08-16, when an empty checked-set skipped the guard entirely.
+
+What it does **not** yet carry: an owner or a due date. Routing a finding to a
+person and holding a remediation deadline is a process this repository does not
+model — treat these records as the detection record, not the case file.
+
+---
+
 ## What this does not claim
 
 Read this section as carefully as the last one. Each item is a real limit, not a

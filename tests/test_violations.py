@@ -68,8 +68,13 @@ def test_the_SAME_violation_on_ten_nights_is_ONE_record(tmp_path):
     assert len(files) == 1, "one violation, one record"
     rec = json.loads(files[0].read_text())
     assert rec["first_seen"] == T1, "when it appeared is the useful part"
-    assert rec["last_seen"] == T2
     assert rec["status"] == "open"
+    # `last_seen` deliberately does NOT advance on a re-detection that changed
+    # nothing: it advances on `now()` every run, so writing it would rewrite
+    # every record nightly and open a pull request that says nothing. It means
+    # "when this record last CHANGED". Whether a finding is still open is
+    # answered by `resolved_at` being null. See the two tests below.
+    assert rec["last_seen"] == T1
 
 
 def test_a_run_where_nothing_changed_writes_NOTHING(tmp_path):
@@ -164,3 +169,46 @@ def test_the_summary_leads_with_the_worst_class(tmp_path):
     assert out.index("malformed") < out.index("orphaned")
     assert "2 open violation(s)" in out
     assert summarise([]) == "no open violations"
+
+
+def test_an_EMPTY_checked_set_resolves_NOTHING(tmp_path):
+    """"We checked nothing" must never read as "we checked everything".
+
+    `fwgitops snapshot` writes a bare list of rows, so a folder whose SCM read
+    failed or returned nothing yields NO scopes at all. The guard used to be
+    `if scopes_checked and ...`, which skipped itself entirely on an empty set
+    and closed every open violation — turning an outage in the checker into a
+    clean bill of health. That is the one failure this module exists to prevent,
+    and it sat on the default path.
+    """
+    write(reconcile(found=[_found()], existing={}, root=tmp_path, run_url=RUN, at=T1))
+    changed = reconcile(found=[], existing=load(tmp_path), root=tmp_path,
+                        run_url=RUN, at=T2)          # nothing named as checked
+    assert changed == [], "no scope was named, so no finding may close"
+    assert json.loads(next(tmp_path.glob("*.json")).read_text())["status"] == "open"
+
+
+def test_a_LATER_run_finding_the_SAME_violation_still_writes_nothing(tmp_path):
+    """The stricter version of the test above, and the one that matters.
+
+    That test reuses a single timestamp, so it passes even when `last_seen`
+    alone counts as a change. In production `at` is `now()` and always differs —
+    so the same three findings would have rewritten their records and opened a
+    pull request EVERY NIGHT, each saying nothing new. Pull requests nobody
+    needs to read are how the ones that matter stop being read.
+    """
+    write(reconcile(found=[_found()], existing={}, root=tmp_path, run_url=RUN, at=T1))
+    changed = reconcile(found=[_found()], existing=load(tmp_path), root=tmp_path,
+                        run_url="https://example/run/2", at=T2)   # a LATER night
+    assert changed == [], "nothing about the violation changed, so nothing writes"
+
+
+def test_but_a_violation_that_CHANGES_CLASS_does_write(tmp_path):
+    """The suppression above must not swallow a real transition — someone
+    adding a `gitops:managed` marker to an unmanaged rule turns a stranger into
+    a forgery, and that is a different finding to act on."""
+    write(reconcile(found=[_found(cls="unmanaged")], existing={}, root=tmp_path,
+                    run_url=RUN, at=T1))
+    changed = reconcile(found=[_found(cls="malformed", tags=["gitops:managed"])],
+                        existing=load(tmp_path), root=tmp_path, run_url=RUN, at=T2)
+    assert len(changed) == 1 and changed[0][1]["class"] == "malformed"
