@@ -29,6 +29,16 @@ on:
       confirm:
         description: "Type CREATE-UNMANAGED-FIXTURE to confirm you mean to write to SCM outside the pipeline"
         required: true
+      scenario:
+        description: "Which unauthorised change to stage"
+        type: choice
+        default: address
+        options:
+          - address          # unmanaged object
+          - unmanaged-rule   # a rule nothing declares (action=deny: opens nothing)
+          - malformed-copy   # a copy of a managed rule, inheriting its tags
+          - edit-managed     # add a description to a declared rule
+          - all
 
 permissions:
   contents: read
@@ -57,9 +67,11 @@ jobs:
             exit 1
           fi
 
-      - name: Create
+      - name: Create the address fixture
+        if: inputs.scenario == 'address' || inputs.scenario == 'all'
         env:
           RUN_ID: ${{ github.run_id }}
+          SCENARIO: ${{ inputs.scenario }}
         run: |
           python - <<'PY'
           import os
@@ -93,6 +105,85 @@ jobs:
               sys.exit(1)
 
           print(f"created address {name!r} (id={(made or {}).get('id')}) in {FOLDER!r}")
-          print("::notice::Now run delete-scm-object.yml with "
-                f"kind=address folder={FOLDER} name={name}")
+          PY
+
+      - name: Stage the rule scenarios
+        if: inputs.scenario != 'address'
+        env:
+          RUN_ID: ${{ github.run_id }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
+
+          FOLDER = "prod-edge"
+          RULES = "/config/security/v1/security-rules"
+          scenario = os.environ["SCENARIO"]
+          run_id = os.environ["RUN_ID"]
+          session = ScmSession(ScmCredentials.from_env())
+
+          rows = (session.request("GET", RULES,
+                                  params={"folder": FOLDER, "limit": 500})
+                  or {}).get("data", [])
+          declared = [r for r in rows
+                      if isinstance(r, dict) and str(r.get("name", "")).startswith("REQ-")
+                      and r.get("folder") == FOLDER]
+          if not declared:
+              print("::error::no managed rule found to base the scenarios on")
+              sys.exit(1)
+          victim = sorted(declared, key=lambda r: str(r["name"]))[0]
+
+          def post(body, what):
+              try:
+                  made = session.request("POST", RULES, params={"folder": FOLDER},
+                                         body=body)
+              except ScmApiError as e:
+                  print(f"::error::{what} failed: {e}")
+                  sys.exit(1)
+              print(f"STAGED {what}: {body['name']} (id={(made or {}).get('id')})")
+
+          # ACTION=DENY THROUGHOUT. A staged rule must not be able to open a
+          # path even for the minutes it exists — a deny between zones that
+          # already exist changes nothing that was not already denied by the
+          # default.
+          base = dict(folder=FOLDER, action="deny", application=["any"],
+                      category=["any"], service=["any"], source_user=["any"],
+                      **{"from": victim.get("from") or ["any"],
+                         "to": victim.get("to") or ["any"]},
+                      source=["any"], destination=["any"])
+
+          if scenario in ("unmanaged-rule", "all"):
+              post(dict(base, name=f"console-hack-{run_id}"), "UNMANAGED rule")
+
+          if scenario in ("malformed-copy", "all"):
+              # Inherits the victim's tags — including gitops:req — under a name
+              # Git declares nowhere. This is the forgery the name-based guard
+              # exists for.
+              post(dict(base, name=f"{victim['name']}-copy-{run_id}",
+                        tag=list(victim.get("tag") or [])), "MALFORMED copy")
+
+          if scenario in ("edit-managed", "all"):
+              # `action`, NOT `description`.
+              #
+              # No intent declares a description, and an undeclared field is
+              # deliberately not compared — so editing it would stage a change
+              # the detector is designed to ignore, and the scenario would
+              # "pass" by proving nothing. `action` is declared on every rule.
+              #
+              # allow -> DENY, which is the fail-safe direction: if remediation
+              # never restores it, the rule denies traffic it used to permit.
+              # The reverse would leave a widened rule live on a failure.
+              body = {k: v for k, v in victim.items() if k not in ("id", "tfid")}
+              body["action"] = "deny"
+              try:
+                  session.request("PUT", f"{RULES}/{victim['id']}", body=body)
+              except ScmApiError as e:
+                  print(f"::error::edit failed: {e}")
+                  sys.exit(1)
+              print(f"STAGED EDIT on managed rule {victim['name']}: action -> deny")
+
+          print("::notice::Now run drift-detect.yml, then remediate.yml")
           PY
