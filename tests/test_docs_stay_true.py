@@ -923,3 +923,35 @@ def test_no_guide_claims_a_green_run_means_the_firewall_HAS_the_change():
         "a green run is acceptance by SCM, not proof the firewall is running it")
     assert "not the same as the firewall running it" in doc, (
         "the requester guide must say what green actually means")
+
+
+def test_the_runbook_says_an_UNMANAGED_object_is_never_fixed_by_an_apply():
+    """The fact that decides the whole response, and the one an operator is
+    most likely to get wrong.
+
+    "Reconcile through the pipeline" is right for managed drift — the object is
+    in Terraform's state, so the next apply overwrites it. It is WRONG for an
+    object someone added directly: that is not in state, no apply will ever
+    touch it, and it enforces traffic no request authorised until a person
+    adopts or removes it.
+
+    An operator who re-runs the apply and sees it succeed would reasonably
+    conclude the drift was resolved. It was not.
+    """
+    runbook = _flat(DOCS / "operator-runbook.md").replace("*", "").replace("`", "")
+
+    assert "invisible to Terraform" in runbook or "not in state" in runbook, (
+        "the runbook must say WHY an apply cannot fix an unmanaged object")
+    assert "Adopt it" in runbook and "Remove it in SCM" in runbook, (
+        "and must give both exits — adopting a legitimate break-glass change is "
+        "as valid as deleting an unauthorised one")
+    assert "does not decay, expire" in runbook, (
+        "and that it persists until someone acts, since nothing else says so")
+
+
+def test_the_runbook_no_longer_claims_drift_is_SKIPPED_when_the_pilot_is_down():
+    """That gate was removed on 2026-08-15 — nothing in the job touches the
+    firewall. Leaving the paragraph would tell an operator a red drift run is
+    impossible while the pilot is stopped, which is now exactly backwards."""
+    runbook = _flat(DOCS / "operator-runbook.md")
+    assert "the job is skipped rather than failed" not in runbook

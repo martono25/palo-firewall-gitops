@@ -869,3 +869,23 @@ def test_drift_detection_RUNS_ON_A_SCHEDULE():
     assert "FIREWALL_ONLINE" not in wf_text.split("# NO FIREWALL_ONLINE GATE")[-1].split("steps:")[0], (
         "no job-level gate may make the nightly drift check conditional again — "
         "nothing in it needs the firewall")
+
+
+def test_EVERY_drift_check_fails_the_run_not_just_warns():
+    """"Failure is the alert" only works if drift actually fails.
+
+    Rule drift shipped warning-only on 2026-08-15 while the two checks either
+    side of it exit 1. A rule added directly into SCM therefore produced a
+    yellow annotation on a GREEN run — and nobody is notified about a green run,
+    which is the same as not detecting it.
+
+    Asserted for all three so a fourth engine cannot be added warning-only.
+    """
+    wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+
+    for marker in ("Drift detected —", "Rule drift detected —", "State drift detected —"):
+        assert marker in wf, f"missing the error for {marker!r}"
+        after = wf.split(marker, 1)[1][:400]
+        assert "exit 1" in after, (
+            f"{marker!r} must FAIL the run — a warning on a green run reaches "
+            f"nobody")
