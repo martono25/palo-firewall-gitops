@@ -130,8 +130,23 @@ class OrderReport:
     actual: Sequence[str]
 
     @property
+    def _common(self) -> List[str]:
+        """Expected order, restricted to rules that are actually PRESENT.
+
+        A rule somebody DELETED is a `missing` finding with its own remedy. It
+        must not also be reported as an ordering problem: every rule after the
+        gap shifts index, so one deletion produced five `reordered` findings on
+        2026-08-16 — for rules nobody had touched, alongside the `missing`
+        finding that already described the real event.
+
+        Order is about the RELATIVE sequence of the rules that exist.
+        """
+        present = set(self.actual)
+        return [n for n in self.expected if n in present]
+
+    @property
     def is_clean(self) -> bool:
-        return list(self.expected) == list(self.actual)
+        return self._common == list(self.actual)
 
     @property
     def first_difference(self) -> Optional[int]:
@@ -142,9 +157,14 @@ class OrderReport:
             len(self.expected), len(self.actual))
 
     def moved(self) -> List[str]:
-        """Rules whose index changed — what a report should name."""
+        """Rules whose position among the PRESENT rules changed.
+
+        Indexed against `_common`, not `expected`: a missing rule shifts every
+        index after it, and indexing against the full expected list therefore
+        blamed rules nobody had touched.
+        """
         ai = {n: i for i, n in enumerate(self.actual)}
-        ei = {n: i for i, n in enumerate(self.expected)}
+        ei = {n: i for i, n in enumerate(self._common)}
         return sorted(n for n in ei if n in ai and ei[n] != ai[n])
 
     def summary(self) -> str:
@@ -156,7 +176,7 @@ class OrderReport:
         return "\n".join([
             f"{self.scope}: RULE ORDER DRIFT — managed rules are not in "
             f"deployment order",
-            f"  expected: {' -> '.join(self.expected)}",
+            f"  expected: {' -> '.join(self._common)}",
             f"  actual:   {' -> '.join(self.actual)}",
             f"  moved:    {', '.join(self.moved()) or '(membership differs)'}",
         ])
@@ -187,5 +207,5 @@ def moves_to_restore(report: OrderReport) -> List[Tuple[str, str]]:
     """
     if report.is_clean or not report.expected:
         return []
-    return [(name, report.expected[i - 1])
-            for i, name in enumerate(report.expected) if i > 0]
+    order = report._common or list(report.expected)
+    return [(name, order[i - 1]) for i, name in enumerate(order) if i > 0]
