@@ -149,6 +149,9 @@ jobs:
               reason=os.environ.get("REASON", ""),
               actor=os.environ.get("ACTOR", ""),
               run_url=os.environ.get("RUN_URL", ""),
+              # Stated, not defaulted. This IS the workflow, so it is the one
+              # caller entitled to say so.
+              provenance="workflow",
           )
           # PRINTED FIRST, and in full. The commit below can fail — an expired
           # token, a protected branch, a push race — and the object is already

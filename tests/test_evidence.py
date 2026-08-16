@@ -381,7 +381,8 @@ def test_a_manual_action_is_NOT_shaped_like_an_evidence_bundle():
     r = build_manual_action(action="delete", kind="security-rule", folder="GitOps",
                             name="Testing-unmmanaged", object_id="abc",
                             tags=[], reason="unauthorised", actor="martono25",
-                            run_url="https://example/run/1")
+                            run_url="https://example/run/1",
+                            provenance="workflow")
     assert r["schema"] == MANUAL_ACTION_SCHEMA != "fw-evidence/v2"
     assert "req_id" not in r, "no request authorised this; do not imply one"
     for k in ("reason", "dispatched_by", "run_url", "tags_at_deletion", "object_id"):
@@ -398,7 +399,7 @@ def test_the_record_FILENAME_cannot_escape_its_directory(tmp_path):
     r = build_manual_action(action="delete", kind="address", folder="GitOps",
                             name="../../etc/passwd", object_id="x", tags=[],
                             reason="r", actor="a", run_url="u",
-                            at="2026-08-16T05:00:00Z")
+                            provenance="workflow", at="2026-08-16T05:00:00Z")
     out = write_manual_action(r, tmp_path)
 
     assert out.is_file()
@@ -426,6 +427,98 @@ def test_two_deletions_in_the_same_second_do_not_overwrite_each_other(tmp_path):
         r = build_manual_action(action="delete", kind="security-rule",
                                 folder="GitOps", name=n, object_id="x", tags=[],
                                 reason="r", actor="a", run_url="u",
+                                provenance="workflow",
                                 at="2026-08-16T05:00:00Z")
         paths.add(write_manual_action(r, tmp_path))
     assert len(paths) == 2
+
+
+# ── provenance is STRUCTURAL, not a comment ─────────────────────────────────
+
+def test_a_manual_action_must_SAY_how_it_came_to_exist():
+    """The directory's whole value is that a machine wrote it.
+
+    On 2026-08-16 a deletion succeeded and the record step crashed, so the only
+    record of an irreversible act was rebuilt BY HAND from a CI log — and sat in
+    this directory distinguished from a genuine record by a free-text field that
+    nothing validated. Convention, not structure. A reader had to already know
+    which field to look at, and to trust that whoever rebuilt it chose to fill
+    it in.
+    """
+    from fwgitops.evidence import build_manual_action
+
+    with pytest.raises(ValueError, match="provenance"):
+        build_manual_action(action="delete", kind="address", folder="GitOps",
+                            name="x", object_id="i", tags=[], reason="r",
+                            actor="a", run_url="u", provenance="")
+
+
+def test_provenance_has_NO_DEFAULT_so_a_reconstruction_cannot_pass_as_machine_written():
+    """The design decision, pinned because it looks like an inconvenience.
+
+    Defaulting to "workflow" would be worse than having no field: a
+    reconstruction that simply forgot to say so would CLAIM machine authorship —
+    the exact confusion this exists to prevent. With no default, the accidental
+    path does not exist. It cannot stop someone stating it falsely, and makes no
+    claim to; it removes the accident, not the lie.
+    """
+    import inspect
+
+    from fwgitops.evidence import build_manual_action
+
+    sig = inspect.signature(build_manual_action)
+    prov = sig.parameters["provenance"]
+    assert prov.default is inspect.Parameter.empty, (
+        "provenance must be REQUIRED — a default would let a hand-written "
+        "record silently claim the workflow wrote it")
+
+
+def test_a_reconstruction_must_name_WHAT_it_was_rebuilt_from():
+    """Otherwise it is an assertion wearing the word "reconstructed"."""
+    from fwgitops.evidence import build_manual_action
+
+    with pytest.raises(ValueError, match="rebuilt from"):
+        build_manual_action(action="delete", kind="address", folder="GitOps",
+                            name="x", object_id="i", tags=[], reason="r",
+                            actor="a", run_url="u", provenance="reconstructed")
+
+    ok = build_manual_action(action="delete", kind="address", folder="GitOps",
+                             name="x", object_id="i", tags=[], reason="r",
+                             actor="a", run_url="u", provenance="reconstructed",
+                             reconstructed_from="https://example/run/9 log")
+    assert ok["reconstructed_from"].startswith("https://")
+
+
+def test_an_UNDECLARED_record_cannot_REACH_DISK(tmp_path):
+    """Validation at write time, not left to the caller.
+
+    A record that reaches disk has already become evidence — checking it
+    afterwards is checking something that is already being relied on.
+    """
+    from fwgitops.evidence import build_manual_action, write_manual_action
+
+    rec = build_manual_action(action="delete", kind="address", folder="GitOps",
+                              name="x", object_id="i", tags=[], reason="r",
+                              actor="a", run_url="u", provenance="workflow",
+                              at="2026-08-16T05:00:00Z")
+    del rec["provenance"]           # e.g. a v1 record from before the field
+    with pytest.raises(ValueError, match="provenance"):
+        write_manual_action(rec, tmp_path)
+    assert not list(tmp_path.rglob("*.json")), "nothing may land un-validated"
+
+
+def test_every_record_ON_DISK_declares_its_provenance():
+    """The migration, pinned. Two v1 records predate the field; both were
+    rewritten rather than grandfathered, because a directory where SOME records
+    declare authorship and others do not is no better than one where none do."""
+    from pathlib import Path
+
+    from fwgitops.evidence import MANUAL_ACTION_SCHEMA, validate_manual_action
+
+    root = Path(__file__).resolve().parents[1] / "evidence" / "manual-actions"
+    found = sorted(root.glob("*.json"))
+    assert found, "the committed records are the thing being checked"
+    for f in found:
+        rec = json.loads(f.read_text())
+        assert rec["schema"] == MANUAL_ACTION_SCHEMA, f"{f.name} was not migrated"
+        validate_manual_action(rec)

@@ -521,7 +521,13 @@ def _iso(dt: datetime) -> str:
 # (ADR-0011). The removal is out-of-band by necessity — but auditable is
 # available, and auditable is what the source-of-truth rule actually buys here.
 
-MANUAL_ACTION_SCHEMA = "fw-manual-action/v1"
+#: v2 ADDS A REQUIRED FIELD, so it is a new version rather than a v1 that
+#: sometimes carries `provenance`. A reader that trusts v1 must not silently
+#: accept a record whose authorship it cannot see.
+MANUAL_ACTION_SCHEMA = "fw-manual-action/v2"
+
+#: HOW THE RECORD CAME TO EXIST — see `build_manual_action`.
+PROVENANCE = ("workflow", "reconstructed")
 
 #: Anything outside this becomes `_` in a record FILENAME. SCM object names may
 #: contain spaces, slashes and dots; a slash would silently write the record
@@ -533,6 +539,7 @@ _UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 def build_manual_action(*, action: str, kind: str, folder: str, name: str,
                         object_id: Optional[str], tags: Sequence[str],
                         reason: str, actor: str, run_url: str,
+                        provenance: str, reconstructed_from: str = "",
                         at: Optional[str] = None) -> Dict[str, Any]:
     """A record of something done to SCM directly, outside the pipeline.
 
@@ -540,8 +547,38 @@ def build_manual_action(*, action: str, kind: str, folder: str, name: str,
     intent, and an unmanaged object has none — borrowing that shape would imply
     an authorisation that never existed. This says what it is: a manual action,
     with who did it and why.
+
+    `provenance` IS REQUIRED AND HAS NO DEFAULT, which is the point of it.
+
+    This directory's whole value is that a machine wrote it. On 2026-08-16 a
+    deletion succeeded and the record step crashed, so the only record of an
+    irreversible act was reconstructed BY HAND from a CI log — sitting in that
+    directory, distinguished from a genuine record by a free-text field nothing
+    validated. Convention, not structure.
+
+    Defaulting this to "workflow" would have been worse than leaving it out: a
+    reconstruction that simply forgot to say so would then CLAIM machine
+    authorship, which is the exact confusion the field exists to prevent. No
+    default means the accidental path does not exist — someone writing a
+    reconstruction has to type the word. Nothing here can stop a person stating
+    it falsely, and this does not pretend to: it removes the accident, not the
+    lie.
+
+    A `reconstructed` record must also say WHAT it was rebuilt from — a record
+    that cannot be traced to a source is not a reconstruction, it is an
+    assertion.
     """
-    return {
+    if provenance not in PROVENANCE:
+        raise ValueError(
+            f"provenance must be one of {PROVENANCE}, got {provenance!r}. Say how "
+            f"this record came to exist — a directory of machine-written records "
+            f"is only worth what the weakest claim in it is worth.")
+    if provenance == "reconstructed" and not reconstructed_from.strip():
+        raise ValueError(
+            "a reconstructed record must name what it was rebuilt from (a run "
+            "URL, a log, a console export). Without a source it is an assertion, "
+            "not a reconstruction.")
+    rec = {
         "schema": MANUAL_ACTION_SCHEMA,
         "action": action,
         "kind": kind,
@@ -552,8 +589,28 @@ def build_manual_action(*, action: str, kind: str, folder: str, name: str,
         "reason": reason,
         "dispatched_by": actor,
         "run_url": run_url,
+        "provenance": provenance,
         "at": at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if provenance == "reconstructed":
+        rec["reconstructed_from"] = reconstructed_from
+    return rec
+
+
+def validate_manual_action(record: Dict[str, Any]) -> None:
+    """Raise unless the record states, structurally, how it came to exist.
+
+    Enforced at WRITE time rather than left to callers: a record that reaches
+    disk without this has already become evidence.
+    """
+    prov = record.get("provenance")
+    if prov not in PROVENANCE:
+        raise ValueError(
+            f"manual-action record for {record.get('name')!r} has provenance "
+            f"{prov!r}; expected one of {PROVENANCE}")
+    if prov == "reconstructed" and not str(record.get("reconstructed_from", "")).strip():
+        raise ValueError(
+            f"reconstructed record for {record.get('name')!r} names no source")
 
 
 def manual_action_path(record: Dict[str, Any], root: Path) -> Path:
@@ -565,6 +622,7 @@ def manual_action_path(record: Dict[str, Any], root: Path) -> Path:
 
 
 def write_manual_action(record: Dict[str, Any], root: Path) -> Path:
+    validate_manual_action(record)      # a record on disk is already evidence
     out = manual_action_path(record, root)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
