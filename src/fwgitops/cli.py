@@ -25,7 +25,7 @@ from dataclasses import dataclass
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from fwgitops.compiler import (
     CompileError,
@@ -1134,6 +1134,7 @@ def run_drift(
     app_catalog_path: Path = Path("catalog/apps.yaml"),
     record_violations: Optional[Path] = None,
     run_url: Optional[str] = None,
+    scopes_checked: Optional[Sequence[str]] = None,
     out=None,
     err=None,
 ) -> int:
@@ -1311,7 +1312,11 @@ def run_drift(
         ]
         # Only scopes this run actually READ may have their findings resolved —
         # a scope we could not look at must not be reported as clean.
-        checked = sorted({(r.scope or r.folder) for r in actual})
+        # Union of what the snapshot SHOWS and what the caller SAYS it read.
+        # The rows alone are not enough: a folder that legitimately holds no
+        # rules yields no scopes, and nothing in it could ever be resolved.
+        checked = sorted({(r.scope or r.folder) for r in actual}
+                         | set(scopes_checked or ()))
         changed = _v.reconcile(found=found, existing=_v.load(record_violations),
                                root=record_violations, run_url=run_url or "",
                                scopes_checked=checked)
@@ -3079,6 +3084,20 @@ def build_parser() -> argparse.ArgumentParser:
                          "State-based drift, for kinds that cannot carry gitops: tags.")
     dr.add_argument("--service-catalog", default=Path("catalog/services.yaml"), type=Path)
     dr.add_argument("--app-catalog", default=Path("catalog/apps.yaml"), type=Path)
+    dr.add_argument("--record-violations", type=Path, metavar="DIR",
+                    help="write a fw-violation/v1 record per finding into DIR "
+                         "(one per violation IDENTITY, not per run). Without it "
+                         "a detected violation exists only in this log, which "
+                         "expires — nothing to age, count or follow up.")
+    dr.add_argument("--run-url", default=None,
+                    help="recorded on each violation as where it was seen")
+    dr.add_argument("--scope-checked", action="append", dest="scopes_checked",
+                    metavar="SCOPE",
+                    help="a scope this run READ, even if it returned nothing. "
+                         "Only a scope named here (or present in the snapshot) "
+                         "may have its violations resolved — an empty folder "
+                         "must still be able to close its findings, and a "
+                         "folder nobody read must not.")
 
     kd = sub.add_parser("kinds", help="list registered intent kinds (for scripting CI)")
     kd.add_argument("--state-drift", action="store_true",
@@ -3305,6 +3324,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.intent_root, args.env_map, args.snapshot,
             state_snapshot_paths=args.state_snapshots,
             service_catalog_path=args.service_catalog, app_catalog_path=args.app_catalog,
+            record_violations=args.record_violations, run_url=args.run_url,
+            scopes_checked=args.scopes_checked,
         )
     if args.command == "kinds":
         if args.order:

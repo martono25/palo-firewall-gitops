@@ -20,7 +20,11 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  # `write` because a detected violation is RECORDED, not just logged — the
+  # records land on a branch and open a pull request. Nothing is pushed to
+  # `main` directly, and nothing here writes to SCM: the reads stay read-only.
+  contents: write
+  pull-requests: write
   id-token: write # OIDC to cloud for the TF state backend
 
 jobs:
@@ -197,7 +201,14 @@ jobs:
             out="rules-$folder.json"
             fwgitops snapshot AccessRequest --scope-dir "$folder" --out "$out"
             rc=0
-            fwgitops drift --snapshot "$out" || rc=$?
+            # --scope-checked names the folder we READ even if it returned
+            # nothing, so an empty folder can still close its old findings while
+            # a folder nobody read cannot.
+            fwgitops drift --snapshot "$out" \
+              --record-violations evidence/violations \
+              --scope-checked "$folder" \
+              --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              || rc=$?
             echo "::endgroup::"
             case "$rc" in
               0) ;;
@@ -217,6 +228,37 @@ jobs:
             echo "::error::Rule drift detected — a security rule exists in SCM that Git never declared, or a declared one was removed out of band. Terraform will NOT reconcile it: an unmanaged rule is not in its state, so it persists until someone adopts it into Git or deletes it in SCM."
             exit 1
           fi
+
+      # A VIOLATION OUTLIVES THE RUN THAT FOUND IT.
+      #
+      # `if: always()` is the whole point: the step above EXITS 1 when it finds
+      # drift, so a step without it would run only on the nights that found
+      # nothing. Every record worth landing would have been skipped, and this
+      # subsystem would have looked wired while writing a record exactly never.
+      - name: Land any violation records by pull request
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git add -A evidence/violations 2>/dev/null || true
+          if git diff --cached --quiet -- evidence/violations; then
+            echo "no violation records changed — nothing to land"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="violations/run-${GITHUB_RUN_ID}"
+          git checkout -B "$branch"
+          git commit -m "record: policy violations seen in run ${GITHUB_RUN_ID}"
+          git push -f origin "$branch"
+          # Never auto-merged. A violation is an UNAUTHORISED CHANGE, and the
+          # pull request is where a human acknowledges it — merging it for them
+          # would file the finding and close the loop with nobody in it.
+          gh pr create --base main --head "$branch" \
+            --title "record: policy violations (run ${GITHUB_RUN_ID})" \
+            --body "Drift detection found configuration in SCM that no request authorised. Each file under \`evidence/violations/\` is one finding, keyed on the object — reappearing nightly updates \`last_seen\` rather than filing a duplicate. Review, act, and merge to accept the record. See \`docs/adr/0011-unmanaged-drift-is-deleted.md\`." \
+            || gh pr view "$branch" --json url >/dev/null
 
       - name: Detect state drift (kinds that cannot carry tags)
         run: |

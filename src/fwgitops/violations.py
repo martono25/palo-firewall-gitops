@@ -11,10 +11,13 @@ authorisation, and they are NOT interchangeable in a report:
 
   * `unmanaged` — an object exists that this platform never created and no
     request authorised. Someone changed the firewall outside the process.
-  * `malformed` — an object carries the `gitops:managed` marker but no
-    `gitops:req` tag. It CLAIMS this platform's provenance while tracing to no
-    request, which is worse than an honest stranger: it would pass a check that
-    only looked for the marker.
+  * `malformed` — an object carries the `gitops:managed` marker but does not
+    trace to the request it claims: either no `gitops:req` tag at all, or a
+    `gitops:req` naming a DIFFERENT request from the object's own name. It
+    CLAIMS this platform's provenance while tracing to no request of its own,
+    which is worse than an honest stranger: it would pass a check that only
+    looked for the marker. The second form is what a console COPY of a managed
+    rule produces — it inherits both tags, so only the name gives it away.
   * `orphaned` — a managed object still live in SCM whose request is gone from
     Git. Authorised once, no longer declared.
 
@@ -116,20 +119,48 @@ def reconcile(*, found: Iterable[Dict[str, Any]], existing: Dict[Path, Dict[str,
         rec["last_seen_run"] = run_url
         rec["tags_observed"] = list(f.get("tags", []))
         rec["class"] = f["cls"]
-        if rec != prior:
+        # A NIGHT WHERE NOTHING MOVED MUST WRITE NOTHING.
+        #
+        # `last_seen` alone advances on EVERY run — it is `now()` — so treating
+        # it as a change meant the same three violations reopened a pull request
+        # every night, saying nothing new. That is how the pull requests that DO
+        # matter stop being read. Only a real transition writes: a new finding,
+        # a reopening, a class change, or different tags observed.
+        #
+        # The consequence, deliberately: `last_seen` is "when this record last
+        # CHANGED", not "when we last looked". Whether a finding is still open
+        # is answered by `resolved_at` being null, never by the age of
+        # `last_seen`.
+        if _material(prior, rec):
             changed.append((p, rec))
 
     for p, rec in existing.items():
         if p in seen_paths or rec.get("status") != "open":
             continue
-        if scopes_checked and rec.get("scope") not in scopes_checked:
-            continue          # not looked at — not resolved
+        if rec.get("scope") not in scopes_checked:
+            # NOT LOOKED AT — NOT RESOLVED, and an EMPTY set means nothing was
+            # checked, never "everything was". `fwgitops snapshot` writes a bare
+            # list of rows, so a folder whose read failed or returned nothing
+            # yields no scopes at all — under the old `if scopes_checked and ...`
+            # that skipped the guard entirely and CLOSED EVERY OPEN VIOLATION.
+            # An outage in the checker would have read as a clean bill of health,
+            # which is the single failure this module exists to prevent.
+            continue
         closed = dict(rec)
         closed["status"] = "resolved"
         closed["resolved_at"] = at
         changed.append((p, closed))
 
     return changed
+
+
+_TOUCH_ONLY = ("last_seen", "last_seen_run")
+
+
+def _material(prior: Dict[str, Any], rec: Dict[str, Any]) -> bool:
+    """Did anything change beyond "we looked again and it is still there"?"""
+    return any(prior.get(k) != rec.get(k)
+               for k in set(prior) | set(rec) if k not in _TOUCH_ONLY)
 
 
 def load(root: Path) -> Dict[Path, Dict[str, Any]]:
