@@ -37,7 +37,8 @@ on:
           - address          # unmanaged object
           - unmanaged-rule   # a rule nothing declares (action=deny: opens nothing)
           - malformed-copy   # a copy of a managed rule, inheriting its tags
-          - edit-managed     # add a description to a declared rule
+          - edit-managed     # change a declared field on a declared rule
+          - delete-managed   # DELETE a declared rule — apply must recreate it
           - all
 
 permissions:
@@ -184,6 +185,25 @@ jobs:
                   print(f"::error::edit failed: {e}")
                   sys.exit(1)
               print(f"STAGED EDIT on managed rule {victim['name']}: action -> deny")
+
+          if scenario == "delete-managed":
+              # DELETES AN AUTHORISED RULE. The tag engine cannot see this at
+              # all — it classifies rules that ARE in SCM — so `missing` is the
+              # only thing that reports it, and `apply` is the only thing that
+              # puts it back.
+              #
+              # NOT part of `all`: it removes a rule rather than adding one, so
+              # it must not be mixed with scenarios whose remedy is deletion.
+              # Terraform still holds it in state, so the next apply recreates
+              # it; until then the rule is absent, which DENIES the traffic it
+              # used to permit — the fail-safe direction.
+              try:
+                  session.request("DELETE", f"{RULES}/{victim['id']}")
+              except ScmApiError as e:
+                  print(f"::error::delete failed: {e}")
+                  sys.exit(1)
+              print(f"STAGED DELETE of managed rule {victim['name']} "
+                    f"(id={victim['id']}) — apply must recreate it")
 
           print("::notice::Now run drift-detect.yml, then remediate.yml")
           PY
