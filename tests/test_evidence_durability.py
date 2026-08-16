@@ -930,7 +930,13 @@ def test_the_drift_gate_cannot_be_SKIPPED_by_an_earlier_failure():
         "that never ran, and a broken job would read as 'no drift'")
 
     detectors = [s for s in steps[:gate_i] if s.get("name", "").startswith("Detect ")]
-    assert len(detectors) == 3, f"expected 3 detectors, found {len(detectors)}"
+    # A LOWER BOUND, not an exact count. Pinning "3" only recorded how many
+    # existed the day it was written, and it failed the moment a FOURTH engine
+    # was added correctly — noise, where the invariant worth protecting is that
+    # no detector exits on a finding and none is quietly removed.
+    assert len(detectors) >= 4, (
+        f"only {len(detectors)} detectors: plan, rules, state and objects are "
+        f"all expected — one has been removed")
     for d in detectors:
         # A finding is recorded; only a genuine ERROR still exits on the spot.
         assert "drift-verdicts" in d["run"], (
@@ -1093,3 +1099,28 @@ def test_the_violations_branch_is_STABLE_so_one_PR_is_updated_not_many():
         "a per-run branch files a duplicate every run")
     assert "${GITHUB_RUN_ID}" not in step.split("--title", 1)[1][:120], (
         "the title outlives any single run; naming one goes stale immediately")
+
+
+def test_records_are_LANDED_AFTER_every_step_that_writes_one():
+    """Order of the landing step, pinned.
+
+    It sat between the rule check and the object check on the day objects were
+    added, so an unmanaged object would have been detected, its record written
+    to the workspace, and then never committed — the finding dying with the
+    runner while the job reported it correctly in the log. Silent, and only in
+    the case where a NEW class of violation is found.
+    """
+    import yaml
+
+    wf = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text())
+    steps = wf["jobs"]["drift"]["steps"]
+    names = [s.get("name", "") for s in steps]
+    land_i = names.index("Land any violation records by pull request")
+
+    writers = [i for i, s in enumerate(steps)
+               if "--record-violations" in (s.get("run") or "")]
+    assert writers, "nothing records violations; the wiring is gone"
+    assert max(writers) < land_i, (
+        f"{names[max(writers)]!r} writes violation records AFTER the landing "
+        f"step, so they are never committed")
