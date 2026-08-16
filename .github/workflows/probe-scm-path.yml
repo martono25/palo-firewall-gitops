@@ -37,6 +37,10 @@ on:
         description: "print returned names IN ORDER (rulebase order for a rules path)"
         required: false
         default: "false"
+      show_tags:
+        description: "print each object's gitops: tags (only that namespace)"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -61,6 +65,7 @@ jobs:
           SHOW_OUR_REFS: ${{ inputs.show_our_refs }}
           SHOW_PREDEFINED: ${{ inputs.show_predefined }}
           SHOW_ORDER: ${{ inputs.show_order }}
+          SHOW_TAGS: ${{ inputs.show_tags }}
         run: |
           python - <<'PY'
           import json
@@ -100,6 +105,19 @@ jobs:
                   blob = json.dumps(rows)
                   ours = sorted(set(re.findall(r"\b(?:addr|svc)-[A-Za-z0-9._-]+-[0-9a-f]{8}\b", blob)))
                   print(f"{'':<45} references our objects: {ours or 'NONE'}")
+              if os.environ.get("SHOW_TAGS", "").lower() == "true":
+                  # ONLY the gitops: namespace. Those values (REQ ids, tickets)
+                  # are already public in this repo; anything else on the object
+                  # is somebody's business and is not printed.
+                  for r in (rows or []):
+                      if not isinstance(r, dict):
+                          continue
+                      n = str(r.get("name", ""))
+                      tg = r.get("tag") or r.get("tags") or []
+                      ours = [t for t in tg if isinstance(t, str) and t.startswith("gitops:")]
+                      other = len([t for t in tg if isinstance(t, str)]) - len(ours)
+                      print(f"{'':<45} {n}: {ours or 'NO gitops: TAGS'}"
+                            + (f"  (+{other} other)" if other else ""))
               if os.environ.get("SHOW_ORDER", "").lower() == "true":
                   # Answers where SCM PLACES a rule we sent no position for.
                   # Only our own REQ ids and predefined names are printed; this
