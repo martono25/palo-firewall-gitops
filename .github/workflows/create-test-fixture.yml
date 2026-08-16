@@ -1,0 +1,98 @@
+# Create ONE disposable, deliberately-unmanaged object in SCM, so the
+# detect -> delete -> record path can be exercised against something real.
+#
+# WHY THIS IS DELIBERATELY CRIPPLED. Writing config into SCM outside the
+# pipeline is the exact thing this platform exists to prevent, so this is NOT a
+# general object-creation workflow and must never become one. Everything that
+# would make it useful for real config is fixed in this file rather than exposed
+# as an input:
+#
+#   * ADDRESS ONLY — it cannot create a rule, so it cannot open a path;
+#   * the VALUE is 192.0.2.1/32, TEST-NET-1 from RFC 5737, which is documented
+#     as non-routable and reserved for examples. An address object holding it
+#     cannot carry traffic even if someone later references it;
+#   * the NAME is `fixture-unmanaged-<run_id>`, not free text, so a fixture is
+#     always identifiable as one and two runs can never collide;
+#   * the FOLDER is fixed to the pilot's GitOps folder;
+#   * NO TAGS — the point is to look exactly like something a human made in the
+#     console, which is what drift must catch.
+#
+# It is drift BY DESIGN. The nightly job will report it as `unmanaged` and file
+# a violation record, and that is the workflow behaving correctly. Delete the
+# fixture with delete-scm-object.yml when finished, which is usually the very
+# thing being tested.
+name: create-test-fixture
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type CREATE-UNMANAGED-FIXTURE to confirm you mean to write to SCM outside the pipeline"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    env:
+      SCM_CLIENT_ID: ${{ secrets.SCM_CLIENT_ID }}
+      SCM_CLIENT_SECRET: ${{ secrets.SCM_CLIENT_SECRET }}
+      SCM_SCOPE: ${{ secrets.SCM_SCOPE }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+
+      - name: Confirm
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM" != "CREATE-UNMANAGED-FIXTURE" ]; then
+            echo "::error::confirm must be exactly CREATE-UNMANAGED-FIXTURE"
+            exit 1
+          fi
+
+      - name: Create
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+
+          from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
+
+          FOLDER = "GitOps"
+          # RFC 5737 TEST-NET-1: reserved for documentation, never routable.
+          VALUE = "192.0.2.1/32"
+          name = f"fixture-unmanaged-{os.environ['RUN_ID']}"
+
+          session = ScmSession(ScmCredentials.from_env())
+          try:
+              # `body=`, not `json=` — ScmSession.request takes a positional
+              # `body`. Written as `json=` first, which the static checks in
+              # tests/test_workflow_heredocs.py do NOT catch: they verify every
+              # name is bound and every env var is passed, not that a call
+              # matches its signature. One more reason logic does not belong in
+              # a heredoc.
+              made = session.request(
+                  "POST", "/config/objects/v1/addresses",
+                  params={"folder": FOLDER},
+                  body={"name": name, "folder": FOLDER, "ip_netmask": VALUE,
+                        "description": "Disposable fixture for the delete+record "
+                                       "path. Unmanaged ON PURPOSE — drift is "
+                                       "expected to flag it."},
+              )
+          except ScmApiError as e:
+              print(f"::error::create failed: {e}")
+              sys.exit(1)
+
+          print(f"created address {name!r} (id={(made or {}).get('id')}) in {FOLDER!r}")
+          print("::notice::Now run delete-scm-object.yml with "
+                f"kind=address folder={FOLDER} name={name}")
+          PY
