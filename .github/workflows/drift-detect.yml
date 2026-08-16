@@ -100,6 +100,19 @@ jobs:
       # COMPILE FIRST. The tfvars are generated artifacts, absent from a fresh
       # checkout — and without them the plan step below skipped every folder and
       # printed "No drift" having compared nothing. See its guard.
+      # BOTH producers, in apply.yml's order. Compiling alone is not enough:
+      # `$eth-*` folder interface variables come from `folder-interfaces`, and
+      # without them Terraform sees a resource in STATE with no config and plans
+      # to DESTROY IT. The first run after adding compile-only proposed
+      #
+      #   scm_ethernet_interface.this["$eth-dmz"] will be destroyed
+      #
+      # for a live interface. A drift report that tells an operator to delete a
+      # firewall's interface is worse than the silent one it replaced — and
+      # "reconcile via the apply workflow" would have carried it out.
+      - name: Materialise folder interface variables
+        run: fwgitops folder-interfaces
+
       - name: Compile intents (the plan needs something to compare against)
         run: fwgitops compile intent
 
