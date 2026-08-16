@@ -392,17 +392,36 @@ jobs:
           fi
           git commit -m "record: policy violations, as of run ${GITHUB_RUN_ID}"
           git push -f origin "$branch"
-          # Never auto-merged. A violation is an UNAUTHORISED CHANGE, and the
-          # pull request is where a human acknowledges it — merging it for them
-          # would file the finding and close the loop with nobody in it.
+          # AUTO-MERGED, like every other record here.
+          #
+          # It was held for a human until 2026-08-16, on the reasoning that "a
+          # violation is an unauthorised change, and the pull request is where a
+          # human acknowledges it". That does not survive contact: `main`
+          # requires ZERO approving reviews, so holding it waits for SOMEONE TO
+          # CLICK MERGE — indistinguishable from a reflex merge, and evidencing
+          # nothing.
+          #
+          # It also broke the lifecycle, twice. Records are recomputed from
+          # `main` every run, so an unmerged finding is re-derived and re-filed
+          # (#250 duplicated #246), and a violation that has not landed cannot
+          # be RESOLVED at all — #244 had to be merged by hand before deleting
+          # the object, or the resolution had nothing on main to resolve.
+          #
+          # A violation record is a machine-detected FACT with no decision
+          # pending at merge time. The decision is what to DO about it, and that
+          # lives in delete-scm-object.yml or apply, both of which gate properly.
+          # Genuine acknowledgement, if the process ever needs it, belongs in the
+          # RECORD as a field somebody sets — a git merge is not a signature.
+          #
           # No run id in the TITLE: the pull request outlives any one run, and a
           # title naming the run that first opened it goes stale on the next
           # force-push. `gh pr create` fails harmlessly when one is already
           # open — the push above has already updated it.
           gh pr create --base main --head "$branch" \
-            --title "record: policy violations pending review" \
-            --body "Drift detection found configuration in SCM that no request authorised. Each file under \`evidence/violations/\` is one finding, keyed on the object — reappearing nightly updates \`last_seen\` rather than filing a duplicate. Review, act, and merge to accept the record. See \`docs/adr/0011-unmanaged-drift-is-deleted.md\`." \
+            --title "record: policy violations" \
+            --body "Drift detection found configuration in SCM that no request authorised. Each file under \`evidence/violations/\` is one finding, keyed on the object — reappearing nightly updates it rather than filing a duplicate. THIS PR IS THE RECORD, not the decision: it merges on its own so the finding lands and can later be resolved. What to DO about the finding is delete-scm-object.yml (objects) or apply (rule order). See \`docs/adr/0011-unmanaged-drift-is-deleted.md\`." \
             || gh pr view "$branch" --json url >/dev/null
+          gh pr merge "$branch" --squash --auto --delete-branch || true
 
       # ONE NIGHT, ONE ALERT, EVERY FINDING IN IT.
       #
