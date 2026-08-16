@@ -97,6 +97,12 @@ jobs:
       - name: Verify the catalog against SCM
         run: fwgitops verify-catalog
 
+      # COMPILE FIRST. The tfvars are generated artifacts, absent from a fresh
+      # checkout — and without them the plan step below skipped every folder and
+      # printed "No drift" having compared nothing. See its guard.
+      - name: Compile intents (the plan needs something to compare against)
+        run: fwgitops compile intent
+
       # Read-only: plan with -detailed-exitcode (2 = drift) per managed folder.
       - name: Detect drift (terraform plan per folder)
         run: |
@@ -107,7 +113,17 @@ jobs:
             # Skip run-once bootstraps (local state) and the shared module dir.
             case "$folder" in bootstrap-* | github-oidc | modules) continue ;; esac
             [ -f "$dir/main.tf" ] || continue
-            [ -f "$dir/rules.auto.tfvars.json" ] || continue
+            # ANY compiled tfvars, not just RULES — the identical guard apply.yml
+            # carried until v1.39.2, where a scope holding only interfaces, zones
+            # or routes was skipped ENTIRELY while the job reported success. The
+            # fix was never carried here, and here it was worse: nothing compiled
+            # at all, so EVERY folder was skipped and this step reported "No
+            # drift" on every run since it was written. The check that catches a
+            # managed object edited in SCM had never once run.
+            shopt -s nullglob
+            set -- "$dir"*.auto.tfvars.json
+            shopt -u nullglob
+            [ "$#" -gt 0 ] || { echo "nothing compiled for $folder — skip"; continue; }
             echo "::group::plan $folder"
             ./terraform/make-backend.sh "$folder"
             terraform -chdir="$dir" init -input=false -backend-config=backend.hcl
