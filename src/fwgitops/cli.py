@@ -1295,6 +1295,36 @@ def run_drift(
     )
     print(report.summary(), file=out)
 
+    # CONTENT AND EXISTENCE of every managed rule, from the same snapshot.
+    #
+    # The tag engine asks "who owns this?" and never "does it still MATCH?", so
+    # an AUTHORISED rule edited in the console passed every check. And a rule
+    # somebody DELETED was invisible to it entirely: it classifies rules that
+    # are in SCM, so one that is gone is not there to classify.
+    from fwgitops.rulediff import carries_content, compare_all
+
+    # SAY SO WHEN THE SNAPSHOT CANNOT ANSWER. A `{folder, name, tags}` snapshot
+    # carries no config, so content drift is not checked — and a check that
+    # quietly does nothing is the failure this repository keeps finding.
+    if rows and not any(carries_content(r) for r in rows if isinstance(r, dict)):
+        print("note: snapshot carries no rule fields — content drift NOT "
+              "checked (use `fwgitops snapshot`, which records them)", file=out)
+
+    content_findings: List[Dict[str, Any]] = []
+    for scope_key in sorted({(r.scope or r.folder) for r in actual}):
+        mine = [ch.rule for _p, req, ch in items
+                if hasattr(ch, "rule")
+                and handler_for_request(req).scope_of(ch).key == scope_key]
+        live_here = [r for r in rows
+                     if isinstance(r, dict) and (r.get("scope") or r.get("folder")) == scope_key]
+        for d in compare_all(mine, live_here, scope=scope_key):
+            print(d.summary(), file=out)
+            content_findings.append(
+                {"cls": "missing" if d.missing else "modified",
+                 "kind": "security-rule", "scope": scope_key, "name": d.name,
+                 "tags": []})
+    content_drifted = bool(content_findings)
+
     # RULE ORDER, from the snapshot already taken — no extra API call, because
     # `snapshot` writes rows in rulebase order and this reads that order.
     #
@@ -1355,7 +1385,7 @@ def run_drift(
                                ("orphaned", report.orphaned),
                                ("malformed", report.malformed))
             for r in rules
-        ] + order_findings
+        ] + order_findings + content_findings
         # Only scopes this run actually READ may have their findings resolved —
         # a scope we could not look at must not be reported as clean.
         # Union of what the snapshot SHOWS and what the caller SAYS it read.
@@ -1371,7 +1401,8 @@ def run_drift(
         print(_v.summarise(
             [rec for rec in _v.load(record_violations).values()]), file=out)
 
-    return 0 if (report.is_clean and not drifted and not order_drifted) else 3
+    return 0 if (report.is_clean and not drifted and not order_drifted
+                 and not content_drifted) else 3
 
 
 
