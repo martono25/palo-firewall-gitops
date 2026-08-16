@@ -1,53 +1,57 @@
-# Part-B smoke test
+# Part-B smoke test — RETIRED 2026-08-16
 
-Creates one address object, one service, and one **disabled** rule in your lab
-folder — by calling the **real** `security_folder` module, so this validates the
-exact code that ships.
+**Do not run this. There is nothing left to run.** The Terraform was removed;
+this file is the record of what it proved and why it stopped being runnable.
 
-## Run
+## What it was for
 
-```bash
-export SCM_CLIENT_ID='...'
-export SCM_CLIENT_SECRET='...'
-export SCM_SCOPE='...'            # your TSG / client scope
+The first proof that the `scm` provider could create real objects in a real
+tenant, by calling the **actual** `security_folder` module rather than a
+parallel config. It created one address, one service and one **disabled**
+`any -> any` rule in the `GitOps` sandbox — disabled deliberately, so that even
+if a firewall had been attached it could not pass traffic.
 
-cd spike/smoke
-terraform init
-terraform plan  -var 'folder=YOUR_LAB_FOLDER'    # review first
-terraform apply -var 'folder=YOUR_LAB_FOLDER'
+It did its job: the provider worked, the module worked, and every pipeline since
+has rested on that.
+
+## Why it was retired
+
+**It stopped compiling against the module it exists to test.** ADR-0010 moved
+address and service objects out of Terraform entirely — they are created by
+`fwgitops objects ensure` before the apply and swept after the push, because
+Terraform ran an object DESTROY before the rule UPDATE that released it and
+409'd. The module no longer declares `address_objects` or `service_objects`, so
+this config fails at plan with "argument not expected".
+
+It could not be repaired in place. A self-contained module smoke test cannot
+create its own objects any more; it would have to run `objects ensure` first,
+at which point it is reimplementing the apply workflow, which runs against the
+real tenant several times a day and is a far better smoke test than this ever
+was.
+
+## What it left behind, and how that was found
+
+Its objects outlived it in SCM — `spike-test-rule`, `spike-test-addr`,
+`spike-test-svc` — for roughly four weeks. Nothing noticed until the tag-based
+drift engine was wired up on 2026-08-15 and immediately reported:
+
+```
+malformed GitOps/spike-test-rule
 ```
 
-Never put credentials in a `.tf` or `.tfvars` file — the provider reads them
-from the environment and does the OAuth exchange itself.
+**malformed**, not unmanaged: the spike hardcoded `gitops:managed` without a
+`gitops:req` tag, so the rule claimed this platform's provenance while being
+traceable to no request. That is exactly the case the classification is meant to
+fail closed on.
 
-## What to observe (the four Part-B answers)
+The three objects were deleted on 2026-08-16 via `delete-scm-object.yml`.
 
-1. **Commit/push model** — after `apply` succeeds, check SCM: is the config
-   *live*, or sitting as a **candidate / uncommitted** change awaiting a push?
-   → If a separate push is required, that is our atomic commit boundary and the
-   `SCM commit/push` step in `.github/workflows/apply.yml` becomes real.
-2. **Tag behavior** — did `gitops:managed` attach as a free-form tag, or did SCM
-   reject it because no matching `scm_tag` object exists?
-   → If rejected, the module needs an `scm_tag` `for_each` over distinct tags,
-   and `fwgitops.tags` may need a stricter charset.
-3. **Auth end-to-end** — did the client-credentials → JWT exchange work with the
-   scoped service account? (feeds T1)
-4. **Ordering** — did the address/service objects get created before the rule
-   referenced them (`depends_on`), with no ordering error?
+## The lesson worth keeping
 
-Also worth noting: whether object **names** are accepted as-is (our
-`addr-<hash>` / `svc-<hash>` deterministic naming) and whether the folder scope
-behaved as expected.
+A probe that creates objects in a live tenant needs a teardown that runs even
+when the probe fails, and something that notices if it does not. This one had
+neither, and the gap was invisible for a month because the check that would have
+seen it was not wired up.
 
-## Clean up (do this)
-
-```bash
-terraform destroy -var 'folder=YOUR_LAB_FOLDER'
-```
-
-Leaving the objects behind pollutes the folder and will show up later as drift.
-
-## Record the results
-
-Update `terraform/modules/security_folder/README.md` (the "Still open — Part B"
-section) and `docs/SPIKE-scm.md` deliverables with what you find.
+`spike/tag-destroy-ordering` hit the same problem and was fixed for it in
+`fix(spike): the tag-ordering probe left an orphan when it failed (#113)`.
