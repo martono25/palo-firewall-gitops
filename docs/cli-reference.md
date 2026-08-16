@@ -215,6 +215,18 @@ One rule decides what goes, and it is source-of-truth, not a risk judgement:
 | `malformed`, name matches no declared request | **delete** | a console copy — not declared under its own name |
 | `malformed`, name IS a declared request | **repaired by `apply`** | Git says it should exist; its tags are damaged. Deleting it is an outage caused by a labelling defect |
 
+**It deletes OBJECTS, never a field inside a rule.** A hand-made address object
+is removed; a managed rule whose destination someone edited in the console is
+not — that is `terraform plan` drift, and `apply` restores the field. Deleting an
+authorised rule to fix an edited field would be absurd.
+
+**Rules are deleted before objects**, the referrer before the referent: a
+hand-made rule arrives with hand-made addresses, and SCM refuses to delete an
+object a rule still references (`409 NON_ZERO_REFS`). An object still in use is
+reported and left, not treated as a failure — it can be held by a managed rule
+someone edited to point at it, in which case `apply` releases it and the next
+pass removes it.
+
 It **re-detects** rather than reading violation records: acting on a record
 written hours earlier would delete based on a stale observation.
 

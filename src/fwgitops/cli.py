@@ -2486,10 +2486,17 @@ def run_remediate(
     declared = sorted({ch.rule.name for _p, _r, ch in items if hasattr(ch, "rule")})
     drifted = [r.name for r in (rule_report.unmanaged + rule_report.orphaned
                                 + rule_report.malformed)]
+    # RULES FIRST, THEN OBJECTS. The referrer before the referent.
+    #
+    # A hand-made rule usually comes with hand-made addresses, and SCM refuses
+    # to delete an object a rule still references — `409 NON_ZERO_REFS`, the
+    # same conflict the object sweep exists to order around. Deleting objects
+    # first fails on the 409, and the RULE never gets deleted either, so an
+    # unauthorised path survives a job that reported an error about an address.
     removals = (
-        removals_for_objects(obj_report.unmanaged, ids, declared)
-        + removals_for_rules(rule_rows, scope=scope.key,
-                             drifted_names=drifted, declared=declared)
+        removals_for_rules(rule_rows, scope=scope.key,
+                           drifted_names=drifted, declared=declared)
+        + removals_for_objects(obj_report.unmanaged, ids, declared)
     )
     if not removals:
         print(f"{scope.key}: nothing unauthorised to remove", file=out)
@@ -2506,6 +2513,17 @@ def run_remediate(
         try:
             session.request("DELETE", f"{path_for(rem.kind)}/{rem.object_id}")
         except ScmApiError as e:
+            # STILL REFERENCED IS NOT A FAILURE OF THIS JOB. An unmanaged object
+            # can be held by a MANAGED rule someone edited in the console to
+            # point at it: the edit is plan drift, `apply` restores the rule,
+            # and only then does the reference go away. Failing here would turn
+            # a condition that resolves itself into a red run every night, and
+            # would abandon the removals still queued behind it.
+            if "NON_ZERO_REFS" in str(e) or "409" in str(e):
+                print(f"::warning::{rem.name!r} is still referenced — leaving it. "
+                      f"Run apply to restore whatever points at it, then this "
+                      f"job removes it on the next pass.", file=out)
+                continue
             print(f"::error::DELETE failed for {rem.name!r}: {e}", file=err)
             return 1
         vid = known.get((rem.kind, rem.name)) or known.get(("security-rule", rem.name))

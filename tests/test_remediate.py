@@ -135,3 +135,36 @@ def test_an_ORPHANED_rule_IS_deleted():
                              drifted_names=["REQ-2026-0699"],
                              declared=["REQ-2026-0725"])
     assert [r.name for r in out] == ["REQ-2026-0699"]
+
+
+def test_the_module_orders_RULES_BEFORE_OBJECTS():
+    """The referrer before the referent, or the 409 wins.
+
+    A hand-made rule arrives with hand-made addresses, and SCM refuses to delete
+    an object a rule still references — `409 NON_ZERO_REFS`, the same conflict
+    the object sweep is built to order around. Deleting objects first fails on
+    the 409 AND abandons the rule removal queued behind it, so an unauthorised
+    path survives a run that reported an error about an address.
+    """
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "fwgitops"
+           / "cli.py").read_text()
+    block = src.split("removals = (", 1)[1][:400]
+    assert block.index("removals_for_rules") < block.index("removals_for_objects"), (
+        "rules must be deleted before the objects they reference")
+
+
+def test_an_object_STILL_IN_USE_does_not_fail_the_run():
+    """An unmanaged object can be held by a MANAGED rule someone edited in the
+    console to point at it. That edit is plan drift; `apply` restores the rule
+    and the reference goes away. Failing here turns a self-resolving condition
+    into a red run every night, and abandons the removals queued behind it."""
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src" / "fwgitops"
+           / "cli.py").read_text()
+    flat = re.sub(r"\s+", " ", src)
+    assert "NON_ZERO_REFS" in flat and "still referenced — leaving it" in flat
