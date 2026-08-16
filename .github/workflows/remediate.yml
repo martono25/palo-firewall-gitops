@@ -196,6 +196,26 @@ jobs:
   # rulebase they REORDERED. The remedy for all three is to re-assert the
   # declared state, which is what `apply` does.
   restore:
+    # THE SAME CONCURRENCY GROUP `apply.yml` DECLARES, repeated here because it
+    # does not carry across the call.
+    #
+    # A workflow's top-level `concurrency` applies to runs OF that workflow. When
+    # it is invoked as a reusable workflow the caller's run owns the group, so
+    # apply.yml's `fw-apply-<ref>` was simply not in force — and the unattended
+    # restore ran outside the very guard that exists to stop two applies
+    # colliding on Terraform state. It failed on exactly that, first time out:
+    #
+    #   PutObject -> 412 PreconditionFailed  (the lock exists)
+    #   GetObject -> 404 NoSuchKey           (the lock is gone)
+    #
+    # Two processes contending, one releasing between the calls. `REQ-2026-0725`
+    # stayed `deny` because the restore never completed.
+    #
+    # `cancel-in-progress: false` for the same reason apply.yml gives: an
+    # in-flight apply is never killed, it is queued behind.
+    concurrency:
+      group: fw-apply-${{ github.ref }}
+      cancel-in-progress: false
     needs: [remediate, already_applied]
     if: github.event_name == 'schedule' && needs.already_applied.outputs.ok == 'true'
     uses: ./.github/workflows/apply.yml
