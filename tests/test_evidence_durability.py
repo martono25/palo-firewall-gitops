@@ -889,3 +889,36 @@ def test_EVERY_drift_check_fails_the_run_not_just_warns():
         assert "exit 1" in after, (
             f"{marker!r} must FAIL the run — a warning on a green run reaches "
             f"nobody")
+
+
+def test_the_drift_job_COMPILES_before_it_plans():
+    """Without it the plan compares against nothing and says so cheerfully.
+
+    tfvars are generated artifacts, absent from a fresh checkout. The plan loop
+    required `rules.auto.tfvars.json` to exist, so every folder was skipped, the
+    loop ran zero iterations, and the step printed "No drift — SCM matches the
+    declared policy" having compared nothing. Measured 2026-08-16: the step
+    completed in 20 MILLISECONDS, against 20-60 seconds for a real init+plan.
+
+    That is the check responsible for "a managed object was edited in SCM", and
+    it had never run.
+    """
+    wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+
+    i_compile = wf.find("fwgitops compile intent")
+    i_plan = wf.find("Detect drift (terraform plan per folder)")
+    assert i_compile != -1, "the drift job must compile — the plan needs tfvars"
+    assert i_compile < i_plan, "and must do it BEFORE the plan, or nothing changes"
+
+
+def test_the_drift_plan_accepts_ANY_compiled_tfvars():
+    """The guard apply.yml fixed in v1.39.2 and this job never inherited: keying
+    on `rules.auto.tfvars.json` skips a scope holding only interfaces, zones or
+    routes, while still reporting success."""
+    wf = (REPO_ROOT / ".github" / "workflows" / "drift-detect.yml").read_text()
+    plan_step = wf.split("Detect drift (terraform plan per folder)", 1)[1][:1600]
+
+    assert '"$dir"*.auto.tfvars.json' in plan_step, (
+        "the plan must run for a scope with ANY compiled tfvars")
+    assert '[ -f "$dir/rules.auto.tfvars.json" ] || continue' not in plan_step, (
+        "keying on rules alone silently skips interface/zone/route-only scopes")
