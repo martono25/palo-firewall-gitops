@@ -1,0 +1,16 @@
+{
+  "action": "delete",
+  "at": "2026-08-16T07:38:45Z",
+  "dispatched_by": "martono25",
+  "folder": "GitOps",
+  "kind": "address",
+  "name": "fixture-unmanaged-31934276561",
+  "object_id": "33335f4c-2ea5-4808-a931-52162373babd",
+  "provenance": "workflow",
+  "reason": "Disposable fixture proving the violation_id link after #255. Drift run 31934305374 ran while this object was LIVE and reported no drift, so nothing detected it \u2014 hence NONE.",
+  "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31934393765",
+  "schema": "fw-manual-action/v2",
+  "tags_at_deletion": [],
+  "unlinked_reason": "No detected violation. Operator stated NONE. Disposable fixture proving the violation_id link after #255. Drift run 31934305374 ran while this object was LIVE and reported no drift, so nothing detected it \u2014 hence NONE.",
+  "violation_id": null
+}
