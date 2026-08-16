@@ -1,0 +1,20 @@
+{
+  "class": "malformed",
+  "first_seen": "2026-08-16T18:28:14Z",
+  "first_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31964632775",
+  "id": "VIOL-2026-0816-prod-edge-REQ-2026-0725-copy-31953100402",
+  "kind": "security-rule",
+  "last_seen": "2026-08-16T18:28:14Z",
+  "last_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31964632775",
+  "name": "REQ-2026-0725-copy-31953100402",
+  "resolved_at": null,
+  "schema": "fw-violation/v1",
+  "scope": "prod-edge",
+  "status": "open",
+  "tags_observed": [
+    "gitops:managed",
+    "gitops:req:REQ-2026-0725",
+    "gitops:section:specific-allow",
+    "gitops:ticket:JIRA-20725"
+  ]
+}
