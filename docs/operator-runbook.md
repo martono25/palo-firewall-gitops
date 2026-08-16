@@ -173,13 +173,26 @@ request authorised and no evidence bundle records.
 
 There are exactly two ways to end that state:
 
-**Deleting the object in SCM is unavoidable, and it is not one of the two
-choices — it is always step two.** The choice is only whether you also recreate
-its effect under management first.
+**The object is always deleted (ADR-0011).** An emergency change made directly
+in SCM is a legitimate operational act — a firewall exists to be changed when
+something is on fire. It is not a legitimate permanent state.
 
-1. **If the effect is wanted** — write an intent that reproduces it, open a PR,
-   let it apply. A 3am break-glass fix is a normal reason to be here.
-2. **Then delete the original in SCM**, whichever you chose in step 1.
+**Do it in this order. Deleting first opens a coverage gap.**
+
+1. **The emergency fix is already in SCM.** Traffic flows. Drift goes red at the
+   next run — correct, and the reminder that step 2 is outstanding.
+2. **Raise a normal `AccessRequest`** — PR, review, tier gate, apply. The
+   permanent rule now exists ALONGSIDE the emergency one. Both live, traffic
+   covered twice, harmless.
+3. **Delete the hand-made object**, which records the removal. Drift goes green.
+
+Deleting before step 2 lands leaves traffic uncovered between the removal and
+the apply — at exactly the moment someone is under pressure and least able to
+absorb one.
+
+The permanent rule is a NEW object: it lands at the bottom of the pre-rulebase,
+not where the emergency rule sat. **If order mattered to the fix, say so with
+`position:`** — the platform will not infer it and nothing will warn you.
 
 > **"Adopting" does NOT absorb the live object, and this runbook said it did
 > until 2026-08-16.** The compiler names a rule after its request id
