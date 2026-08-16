@@ -7,9 +7,9 @@
   "last_seen": "2026-08-16T08:03:02Z",
   "last_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31935407748",
   "name": "fixture-unmanaged-31935377923",
-  "resolved_at": null,
+  "resolved_at": "2026-08-16T08:06:42Z",
   "schema": "fw-violation/v1",
   "scope": "GitOps",
-  "status": "open",
+  "status": "resolved",
   "tags_observed": []
 }
