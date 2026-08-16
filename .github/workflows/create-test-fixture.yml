@@ -39,7 +39,8 @@ on:
           - malformed-copy   # a copy of a managed rule, inheriting its tags
           - edit-managed     # change a declared field on a declared rule
           - delete-managed   # DELETE a declared rule — apply must recreate it
-          - all
+          - reorder          # move a declared rule out of deployment order
+          - all              # every scenario at once, on DIFFERENT victims
 
 permissions:
   contents: read
@@ -135,7 +136,14 @@ jobs:
           if not declared:
               print("::error::no managed rule found to base the scenarios on")
               sys.exit(1)
-          victim = sorted(declared, key=lambda r: str(r["name"]))[0]
+          # DIFFERENT VICTIMS PER SCENARIO, so `all` stages six independent
+          # findings rather than three that cancel each other out: editing a
+          # rule and then deleting the SAME rule leaves only the deletion, and
+          # the edit scenario silently proves nothing.
+          ordered = sorted(declared, key=lambda r: str(r["name"]))
+          victim = ordered[0]                       # edited
+          doomed = ordered[1] if len(ordered) > 1 else ordered[0]   # deleted
+          shuffled = ordered[-1]                    # moved to the top
 
           def post(body, what):
               try:
@@ -186,24 +194,33 @@ jobs:
                   sys.exit(1)
               print(f"STAGED EDIT on managed rule {victim['name']}: action -> deny")
 
-          if scenario == "delete-managed":
+          if scenario in ("reorder", "all"):
+              # `top` needs no anchor. The rule was deployed last, so moving it
+              # first is unambiguously out of deployment order.
+              try:
+                  session.request("POST", f"{RULES}/{shuffled['id']}:move",
+                                  body={"destination": "top", "rulebase": "pre"})
+              except ScmApiError as e:
+                  print(f"::error::move failed: {e}")
+                  sys.exit(1)
+              print(f"STAGED REORDER: {shuffled['name']} moved to the top")
+
+          if scenario in ("delete-managed", "all"):
               # DELETES AN AUTHORISED RULE. The tag engine cannot see this at
               # all — it classifies rules that ARE in SCM — so `missing` is the
               # only thing that reports it, and `apply` is the only thing that
               # puts it back.
               #
-              # NOT part of `all`: it removes a rule rather than adding one, so
-              # it must not be mixed with scenarios whose remedy is deletion.
               # Terraform still holds it in state, so the next apply recreates
               # it; until then the rule is absent, which DENIES the traffic it
               # used to permit — the fail-safe direction.
               try:
-                  session.request("DELETE", f"{RULES}/{victim['id']}")
+                  session.request("DELETE", f"{RULES}/{doomed['id']}")
               except ScmApiError as e:
                   print(f"::error::delete failed: {e}")
                   sys.exit(1)
-              print(f"STAGED DELETE of managed rule {victim['name']} "
-                    f"(id={victim['id']}) — apply must recreate it")
+              print(f"STAGED DELETE of managed rule {doomed['name']} "
+                    f"(id={doomed['id']}) — apply must recreate it")
 
           print("::notice::Now run drift-detect.yml, then remediate.yml")
           PY

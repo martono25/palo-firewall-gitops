@@ -370,3 +370,30 @@ def test_an_OUT_OF_ORDER_rulebase_still_gets_moved():
     c = _FakeClient(LIVE)                        # 0727, 0726, 0725, ...
     assert restore_deployment_order(c, "prod-edge", DEPLOYED) == DEPLOYED[1:]
     assert c.moves, "an out-of-order rulebase must be re-seated"
+
+
+def test_a_DELETED_rule_is_not_also_reported_as_a_REORDER():
+    """One deletion produced six findings on 2026-08-16.
+
+    `REQ-2026-0725` was deleted to test the `missing` class. Every rule after it
+    shifted index, so `moved()` — which indexed against the full expected list —
+    blamed all five remaining rules for a reorder none of them had undergone.
+    The `missing` finding already described the real event, and its remedy is
+    different.
+
+    Order is about the RELATIVE sequence of the rules that exist.
+    """
+    gone = [n for n in DEPLOYED if n != "REQ-2026-0725"]
+    r = detect_order(scope="prod-edge", expected=DEPLOYED, actual_rulebase=gone)
+    assert r.is_clean, r.summary()
+    assert r.moved() == []
+
+
+def test_a_REAL_reorder_among_the_survivors_is_still_caught():
+    """The guard must not become "never report anything once a rule is gone"."""
+    gone_and_swapped = ["REQ-2026-0727", "REQ-2026-0726", "REQ-2026-0730",
+                        "REQ-2026-0809", "REQ-2026-0812"]      # 0725 absent, 726/727 swapped
+    r = detect_order(scope="prod-edge", expected=DEPLOYED,
+                     actual_rulebase=gone_and_swapped)
+    assert not r.is_clean
+    assert r.moved() == ["REQ-2026-0726", "REQ-2026-0727"]
