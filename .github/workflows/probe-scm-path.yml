@@ -41,6 +41,10 @@ on:
         description: "print each object's gitops: tags (only that namespace)"
         required: false
         default: "false"
+      show_raw:
+        description: "print every non-value FIELD of each row — what SCM itself says about provenance"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -66,6 +70,7 @@ jobs:
           SHOW_PREDEFINED: ${{ inputs.show_predefined }}
           SHOW_ORDER: ${{ inputs.show_order }}
           SHOW_TAGS: ${{ inputs.show_tags }}
+          SHOW_RAW: ${{ inputs.show_raw }}
         run: |
           python - <<'PY'
           import json
@@ -105,6 +110,28 @@ jobs:
                   blob = json.dumps(rows)
                   ours = sorted(set(re.findall(r"\b(?:addr|svc)-[A-Za-z0-9._-]+-[0-9a-f]{8}\b", blob)))
                   print(f"{'':<45} references our objects: {ours or 'NONE'}")
+              if os.environ.get("SHOW_RAW", "").lower() == "true":
+                  # WHICH FIELDS EXIST, not what they contain. The question is
+                  # whether SCM ITSELF marks an object as predefined or system —
+                  # if it does, provenance is derived live and there is nothing
+                  # on disk for anyone to edit. If it does not, a baseline
+                  # allowlist becomes a way to launder an unauthorised object by
+                  # adding its name, which is worse than no control.
+                  #
+                  # Values are printed ONLY for fields that cannot carry config:
+                  # the rest is somebody's business and this repository is
+                  # public.
+                  SAFE = ("folder", "snippet", "device", "type", "system",
+                          "predefined", "readonly", "read_only", "origin",
+                          "source", "shared", "location")
+                  for r in (rows or []):
+                      if not isinstance(r, dict):
+                          continue
+                      keys = sorted(r.keys())
+                      shown = {k: r[k] for k in SAFE if k in r}
+                      print(f"{'':<45} {str(r.get('name',''))[:38]:<38} "
+                            f"keys={keys}")
+                      print(f"{'':<45} {'':<38} provenance-ish={shown or 'NONE'}")
               if os.environ.get("SHOW_TAGS", "").lower() == "true":
                   # ONLY the gitops: namespace. Those values (REQ ids, tickets)
                   # are already public in this repo; anything else on the object
