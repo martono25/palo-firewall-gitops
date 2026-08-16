@@ -2539,9 +2539,21 @@ def run_remediate(
         print(f"{scope.key}: nothing unauthorised to remove", file=out)
         return 0
 
+    # LINK BY IDENTITY, NOT BY STATUS.
+    #
+    # Filtering to `open` coupled the link to two things it has nothing to do
+    # with: whether some other checker had already closed the record, and
+    # whether the run that filed it had finished merging to `main` yet. Both
+    # happened at once on 2026-08-16 — a finding was created and resolved
+    # fifteen seconds apart by the same drift run, the reopen had not landed,
+    # and two real deletions recorded `violation_id: null` while their findings
+    # sat in the directory.
+    #
+    # The link is a statement about WHICH FINDING this deletion answers. That is
+    # true whatever the record says today.
     known = {(r.get("kind"), r.get("name")): r.get("id")
              for r in _v.load(Path("evidence/violations")).values()
-             if r.get("status") == "open" and r.get("scope") == scope.key}
+             if r.get("scope") == scope.key}
 
     for rem in removals:
         if not apply:
