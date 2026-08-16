@@ -78,9 +78,17 @@ jobs:
           KIND: ${{ inputs.kind }}
           FOLDER: ${{ inputs.folder }}
           NAME: ${{ inputs.name }}
+          # THE RECORD'S CONTENTS. Absent until 2026-08-16, so `reason` — a
+          # REQUIRED input, described as "lands in the record" — reached the
+          # record as an empty string, along with who ran it and where.
+          REASON: ${{ inputs.reason }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           python - <<'PY'
+          import json
           import os
+          import pathlib
           import sys
 
           from fwgitops.scmapi import ScmApiError, ScmCredentials, ScmSession
@@ -146,9 +154,14 @@ jobs:
           # token, a protected branch, a push race — and the object is already
           # gone by then. The log is the fallback copy of a record for something
           # that cannot be undone.
+          # WRITE FIRST, THEN PRINT. The other order shipped, and on the first
+          # real run the PRINT raised (NameError: _json — an alias that was
+          # never imported), so the rule was deleted and NOTHING was recorded,
+          # not even the fallback log copy this print exists to be. Writing
+          # first means the weakest link cannot cost the record.
+          f = write_manual_action(rec, pathlib.Path("evidence"))
           print("MANUAL ACTION RECORD:")
-          print(_json.dumps(rec, indent=2, sort_keys=True))
-          f = write_manual_action(rec, _pathlib.Path("evidence"))
+          print(json.dumps(rec, indent=2, sort_keys=True))
           print(f"recorded: {f}")
           PY
 
