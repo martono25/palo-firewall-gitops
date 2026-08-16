@@ -168,3 +168,47 @@ def test_an_object_STILL_IN_USE_does_not_fail_the_run():
            / "cli.py").read_text()
     flat = re.sub(r"\s+", " ", src)
     assert "NON_ZERO_REFS" in flat and "still referenced — leaving it" in flat
+
+
+# ── the function itself, actually executed ──────────────────────────────────
+
+class _StubSession:
+    """Returns an empty estate. Enough to run every line of the happy path."""
+
+    def __init__(self):
+        self.deleted = []
+
+    def request(self, method, path, params=None, body=None):
+        if method == "DELETE":
+            self.deleted.append(path)
+            return {}
+        return {"data": []}
+
+
+def test_run_remediate_EXECUTES_end_to_end(tmp_path, monkeypatch):
+    """The bug this exists for: `from fwgitops.drift import of_kind` — a name
+    that lives in `fwgitops.kinds`.
+
+    A function-local import only runs when the function runs, and nothing ran
+    this one. 1041 tests passed while `fwgitops remediate` raised ImportError on
+    its first line of real work, and it was found by a dry run against the live
+    tenant. Unit tests covered `removals_for_*` thoroughly and never called the
+    command that uses them.
+    """
+    from pathlib import Path
+
+    from fwgitops.cli import run_remediate
+
+    repo = Path(__file__).resolve().parents[1]
+    stub = _StubSession()
+    rc = run_remediate("prod-edge", repo / "intent",
+                       repo / "catalog" / "environments.yaml",
+                       service_catalog_path=repo / "catalog" / "services.yaml",
+                       app_catalog_path=repo / "catalog" / "apps.yaml",
+                       session=stub)
+
+    # An empty estate means every declared rule is MISSING, which is drift — the
+    # exit code is not the point here. What is being proven is that the function
+    # runs at all.
+    assert rc in (0, 3)
+    assert stub.deleted == [], "a dry run must never issue a DELETE"

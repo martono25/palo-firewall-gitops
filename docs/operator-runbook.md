@@ -113,8 +113,9 @@ summary is worth having in your head:
 
 ## An emergency change has a deadline
 
-**Anything you create by hand in SCM is deleted at 03:00 UTC** (11:00 Singapore)
-by the `remediate` job. That is not a warning about tidiness — it is automatic,
+**Anything you create by hand in SCM is deleted at 03:00 Singapore time**
+(19:00 UTC) by the `remediate` job. The nightly detection runs an hour earlier,
+at 02:00 SGT. That is not a warning about tidiness — it is automatic,
 unattended, and it will remove a rule that is carrying production traffic.
 
 If you open a path by hand to restore a service:

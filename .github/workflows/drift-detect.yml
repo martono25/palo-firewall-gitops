@@ -16,7 +16,11 @@ name: drift-detect
 
 on:
   schedule:
-    - cron: "0 2 * * *"   # daily 02:00 UTC
+    # 18:00 UTC == 02:00 the next day in Singapore (UTC+8), where this estate is
+    # operated. Written in UTC because cron has no timezone; stated in local
+    # time because the OPERATOR's deadline is what matters — an emergency change
+    # must become an AccessRequest before the remediation that follows this.
+    - cron: "0 18 * * *"  # daily 02:00 SGT
   workflow_dispatch: {}
 
 permissions:
