@@ -1,0 +1,15 @@
+{
+  "action": "delete",
+  "at": "2026-08-16T13:45:23Z",
+  "dispatched_by": "github-actions[bot]",
+  "folder": "GitOps",
+  "kind": "address",
+  "name": "fixture-unmanaged-31945212071",
+  "object_id": "64d65396-cf0b-48c2-81c7-009b6f20e026",
+  "provenance": "workflow",
+  "reason": "Automatic remediation: this object was in a managed scope, no request authorised it, and GitOps is the source of truth (ADR-0011). Emergency changes must be raised as an AccessRequest before this job runs.",
+  "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31950711031",
+  "schema": "fw-manual-action/v2",
+  "tags_at_deletion": [],
+  "violation_id": "VIOL-2026-0816-GitOps-fixture-unmanaged-31945212071"
+}
