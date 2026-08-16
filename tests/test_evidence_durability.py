@@ -1166,3 +1166,25 @@ def test_a_violation_record_LANDS_ON_ITS_OWN():
     assert "gh pr merge" in step and "--auto" in step, (
         "the violation record must merge on its own, like every other record — "
         "a finding stuck in a PR cannot be resolved and gets re-filed nightly")
+
+
+def test_remediation_runs_AFTER_detection_with_a_gap():
+    """Both schedules are in UTC and the operator's deadline is in Singapore
+    time, so the two are easy to drift apart when either is edited.
+
+    The order is load-bearing: detection files the findings that remediation
+    links its deletions to, and the hour between them is the window in which a
+    finding can still be fixed by hand before anything is destroyed.
+    """
+    import re
+
+    def _hour(name):
+        wf = (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        m = re.search(r'cron:\s*"0 (\d+) \* \* \*"', wf)
+        assert m, f"{name} has no daily cron"
+        return int(m.group(1))
+
+    detect, remediate = _hour("drift-detect.yml"), _hour("remediate.yml")
+    assert remediate == detect + 1, (
+        f"remediation runs at {remediate}:00 UTC and detection at {detect}:00 — "
+        f"remediation must follow detection by an hour")

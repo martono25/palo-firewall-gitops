@@ -2427,7 +2427,7 @@ def run_remediate(
     """
     from fwgitops.clients import ScmPushClient  # noqa: F401  (auth stack)
     from fwgitops.compiler import Scope
-    from fwgitops.drift import ActualRule, detect_drift, of_kind
+    from fwgitops.drift import ActualRule, detect_drift
     from fwgitops.evidence import build_manual_action, write_manual_action
     from fwgitops.objectdrift import detect as detect_objects
     from fwgitops.objectsweep import KIND_PATHS
