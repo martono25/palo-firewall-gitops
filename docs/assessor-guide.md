@@ -220,7 +220,21 @@ edit. Only managed rules are compared with each other; a device-local rule may
 sit anywhere between them.
 
 Detection is in the read-only nightly job; the correction is in `apply`, behind
-the same human gate as any other change to a live firewall.
+the same human gate as any other change to a live firewall. Both leave records,
+like every other class of unauthorised change:
+
+  * detection files one `fw-violation/v1` per rule that moved, class
+    `reordered`, so each ages and resolves on its own;
+  * the re-stack files a `fw-manual-action/v2` with `action: "reorder"`, naming
+    the order asserted, the rules re-seated, and the finding it remediates.
+
+Until 2026-08-16 ordering was the one unauthorised change that produced NO
+evidence at either end — the detection failed a run and the remediation changed
+a live firewall, and both existed only in a CI log that expires.
+
+A record is written only when a rule actually moved. The re-stack is idempotent
+and runs on every apply, so recording unconditionally would file a remediation
+for each ordinary deploy and bury the ones that mean something.
 
 **Bounded honestly:** "append at bottom" is only deterministic one rule at a
 time. Several rules deployed in a single apply land in whatever order the

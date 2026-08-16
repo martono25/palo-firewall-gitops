@@ -1308,6 +1308,7 @@ def run_drift(
 
     scopes_in_snapshot = {(r.scope or r.folder) for r in actual}
     order_drifted = False
+    order_findings: List[Dict[str, Any]] = []
     for scope_key in sorted(scopes_in_snapshot):
         declared_here = {
             ch.rule.name: path
@@ -1330,6 +1331,15 @@ def run_drift(
                              actual_rulebase=actual_names)
         print(order.summary(), file=out)
         order_drifted = order_drifted or not order.is_clean
+        # RECORDED, not just printed — one finding per rule that moved, so each
+        # ages and resolves on its own. A reorder failed the run and left a log
+        # line that expires, which is exactly the gap violation records exist to
+        # close for every other class.
+        order_findings.extend(
+            {"cls": "reordered", "kind": "security-rule-order",
+             "scope": scope_key, "name": name, "tags": []}
+            for name in order.moved()
+        )
 
     # RECORD THE FINDING, not just the failure. Detection failed the run and
     # left nothing behind: the classification existed here and never reached
@@ -1345,7 +1355,7 @@ def run_drift(
                                ("orphaned", report.orphaned),
                                ("malformed", report.malformed))
             for r in rules
-        ]
+        ] + order_findings
         # Only scopes this run actually READ may have their findings resolved —
         # a scope we could not look at must not be reported as clean.
         # Union of what the snapshot SHOWS and what the caller SAYS it read.
@@ -2707,6 +2717,7 @@ def run_enrich(
             moved = restore_deployment_order(client, folder, order)
             print(f"deployment order re-asserted over {len(moved)} rule(s): "
                   f"{' -> '.join(order)}", file=out)
+            _record_reorder(folder, order, moved, out=out)
     except (EnrichError, ScmApiError) as e:
         print(f"ENRICH FAILED: {e}", file=err)
         return 3
@@ -2714,6 +2725,58 @@ def run_enrich(
     print(f"OK — enriched {len(result.records)} rule(s) in folder {folder!r}", file=out)
     print(json.dumps(result.to_evidence(), sort_keys=True), file=out)
     return 0
+
+
+def _record_reorder(folder: str, order: Sequence[str], moved: Sequence[str],
+                    *, out) -> None:
+    """Leave the same trace a deletion leaves.
+
+    A re-stack CHANGES A LIVE FIREWALL and wrote nothing until 2026-08-16: the
+    detection failed a run, the remediation fixed it, and neither survived the
+    CI log. Every other unauthorised change on this platform is recorded and
+    linked to the finding that justified acting on it; ordering was the
+    exception, and it is the quietest class of all — no rule added, removed or
+    edited, only which one matches first.
+
+    NO RECORD WHEN NOTHING MOVED. `restore_deployment_order` is idempotent and
+    runs on every apply, so recording unconditionally would file a remediation
+    for each ordinary deploy and bury the ones that mean something.
+    """
+    from fwgitops import violations as _v
+    from fwgitops.evidence import build_manual_action, write_manual_action
+
+    if not moved:
+        return
+    # LINK TO THE OPEN FINDING, by the same identity the detector recorded it
+    # under. A remediation that cannot name what it remediated is the prose
+    # `reason` field all over again.
+    known = {r.get("name"): r.get("id")
+             for r in _v.load(Path("evidence/violations")).values()
+             if r.get("class") == "reordered" and r.get("status") == "open"
+             and r.get("scope") == folder}
+    linked = sorted({vid for name, vid in known.items() if name in moved and vid})
+
+    rec = build_manual_action(
+        action="reorder", kind="security-rule-order", folder=folder,
+        name=f"rulebase order ({len(moved)} rule(s) re-seated)",
+        object_id=None, tags=[],
+        reason=("Re-asserted deployment order: " + " -> ".join(order)
+                + f". Re-seated: {', '.join(moved)}."),
+        actor=os.environ.get("GITHUB_ACTOR", ""),
+        run_url=os.environ.get("RUN_URL", ""),
+        provenance="workflow",
+        violation_id=linked[0] if len(linked) == 1 else None,
+        unlinked_reason=(
+            "" if len(linked) == 1 else
+            (f"Remediates {len(linked)} recorded findings: {', '.join(linked)}. "
+             f"The schema links one, so all are named here."
+             if linked else
+             "No open `reordered` finding matched. Either the drift job has not "
+             "run since the rulebase moved, or this apply re-seated rules for "
+             "another reason — a re-stack is idempotent and runs every apply.")),
+    )
+    path = write_manual_action(rec, Path("evidence"))
+    print(f"reorder record: {path}", file=out)
 
 
 def run_onboard(

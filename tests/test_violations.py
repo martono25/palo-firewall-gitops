@@ -34,12 +34,16 @@ def _found(cls="unmanaged", name="Testing-unmmanaged", scope="GitOps", tags=()):
             "name": name, "tags": list(tags)}
 
 
-def test_the_three_classes_are_distinct_and_named():
+def test_the_classes_are_distinct_and_named():
     """They are different failures of authorisation and a report must not merge
     them. `malformed` in particular is worse than an honest stranger: it CLAIMS
     this platform's provenance while tracing to no request, so it would pass any
     check that only looked for the marker."""
-    assert set(CLASSES) == {"unmanaged", "malformed", "orphaned"}
+    assert set(CLASSES) == {"unmanaged", "malformed", "orphaned", "reordered"}
+    # `reordered` is the quietest of them: every rule is authorised and
+    # unmodified, so nothing looks wrong on inspection while the EFFECTIVE
+    # policy has changed. It ranks second for that reason.
+    assert CLASSES.index("reordered") == 1
     with pytest.raises(ValueError):
         build(cls="suspicious", kind="security-rule", scope="GitOps",
               name="x", tags=[], run_url=RUN, at=T1)

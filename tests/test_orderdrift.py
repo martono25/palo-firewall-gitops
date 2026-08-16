@@ -243,3 +243,99 @@ def test_the_evidence_bundles_CANNOT_order_anything():
         "If that is a real per-rule FIRST-applied time rather than an artefact "
         "of which rules the last apply happened to touch, orderdrift should use "
         "it in place of commit time")
+
+
+# ── evidence ────────────────────────────────────────────────────────────────
+
+def test_a_reorder_remediation_is_RECORDED_and_LINKED(tmp_path, monkeypatch):
+    """A re-stack changes a live firewall and must leave what a deletion leaves.
+
+    Until 2026-08-16 it left nothing: detection failed a run, remediation fixed
+    it, and neither survived the CI log. Ordering was the only unauthorised
+    change on this platform with no record and no link to the finding that
+    justified acting on it — and it is the quietest class, since no rule is
+    added, removed or edited.
+    """
+    import json
+
+    from fwgitops import violations as _v
+    from fwgitops.cli import _record_reorder
+
+    vroot = tmp_path / "evidence" / "violations"
+    _v.write(_v.reconcile(
+        found=[{"cls": "reordered", "kind": "security-rule-order",
+                "scope": "prod-edge", "name": "REQ-2026-0725", "tags": []}],
+        existing={}, root=vroot, run_url="https://example/run/1",
+        at="2026-08-16T01:00:00Z"))
+    vid = json.loads(next(vroot.glob("*.json")).read_text())["id"]
+
+    monkeypatch.chdir(tmp_path)
+    out = []
+    _record_reorder("prod-edge", DEPLOYED, ["REQ-2026-0725"],
+                    out=type("W", (), {"write": lambda s, t: out.append(t)})())
+
+    rec = json.loads(next((tmp_path / "evidence" / "manual-actions")
+                          .glob("*.json")).read_text())
+    assert rec["action"] == "reorder"
+    assert rec["provenance"] == "workflow"
+    assert rec["violation_id"] == vid, "the remediation must name what it fixed"
+    assert "REQ-2026-0725" in rec["reason"]
+
+
+def test_an_apply_that_MOVED_NOTHING_records_nothing(tmp_path, monkeypatch):
+    """`restore_deployment_order` is idempotent and runs on EVERY apply.
+    Recording unconditionally would file a remediation for each ordinary deploy
+    and bury the ones that mean something."""
+    monkeypatch.chdir(tmp_path)
+    from fwgitops.cli import _record_reorder
+
+    _record_reorder("prod-edge", DEPLOYED, [],
+                    out=type("W", (), {"write": lambda s, t: None})())
+    assert not (tmp_path / "evidence" / "manual-actions").exists()
+
+
+def test_run_drift_ACTUALLY_WRITES_a_reordered_violation(tmp_path):
+    """End to end through the real drift path, against this repository's own
+    intents — because the wiring is the thing that was missing.
+
+    Order drift printed a summary and failed the run while recording NOTHING,
+    and a mutation removing the one line that feeds order findings into the
+    violation recorder left the entire suite green. A test that asserts the line
+    exists would be theatre; this runs the command and looks for the record.
+    """
+    import json
+    import os
+    from pathlib import Path
+
+    from fwgitops.cli import run_drift
+
+    repo = Path(__file__).resolve().parents[1]
+    snap = tmp_path / "snap.json"
+    # The pilot's rules, deliberately out of deployment order.
+    wrong = ["REQ-2026-0812", "REQ-2026-0726", "REQ-2026-0727",
+             "REQ-2026-0730", "REQ-2026-0809", "REQ-2026-0725"]
+    snap.write_text(json.dumps([
+        {"kind": "AccessRequest", "folder": "prod-edge", "scope": "prod-edge",
+         "name": n, "tag": ["gitops:managed", f"gitops:req:{n}"]}
+        for n in wrong
+    ]))
+
+    vroot = tmp_path / "violations"
+    cwd = os.getcwd()
+    os.chdir(repo)                       # git history is read from the repo
+    try:
+        rc = run_drift(repo / "intent", repo / "catalog" / "environments.yaml",
+                       snap, service_catalog_path=repo / "catalog" / "services.yaml",
+                       app_catalog_path=repo / "catalog" / "apps.yaml",
+                       record_violations=vroot, run_url="https://example/run/1")
+    finally:
+        os.chdir(cwd)
+
+    assert rc == 3, "a reordered rulebase must fail the run"
+    recs = [json.loads(p.read_text()) for p in vroot.glob("*.json")]
+    reordered = [r for r in recs if r["class"] == "reordered"]
+    assert reordered, (
+        "order drift produced no violation record — it fails the run and leaves "
+        "nothing behind, which is the gap records exist to close")
+    assert {r["name"] for r in reordered} >= {"REQ-2026-0725", "REQ-2026-0812"}
+    assert all(r["id"].startswith("VIOL-") for r in reordered)

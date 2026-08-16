@@ -542,7 +542,17 @@ def build_manual_action(*, action: str, kind: str, folder: str, name: str,
                         provenance: str, violation_id: Optional[str],
                         unlinked_reason: str = "", reconstructed_from: str = "",
                         at: Optional[str] = None) -> Dict[str, Any]:
-    """A record of something done to SCM directly, outside the pipeline.
+    """A record of an action taken against SCM that the declarative path cannot express.
+
+    TWO KINDS LAND HERE, and the second is not "manual" in the sense the
+    directory name suggests:
+
+      * `delete` — removing an object GitOps never created. There is no pipeline
+        path, because Git has no representation of an object it did not make.
+      * `reorder` — re-asserting rule order. Git cannot represent a rule's
+        POSITION at all (the provider cannot issue an anchored move from inside
+        a for_each), which is why `enrich` exists. A re-stack changes a live
+        firewall and left no trace until 2026-08-16.
 
     DELIBERATELY NOT AN EVIDENCE BUNDLE. Those are keyed on a request id from an
     intent, and an unmanaged object has none — borrowing that shape would imply

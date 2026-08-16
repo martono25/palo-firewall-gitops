@@ -20,6 +20,9 @@ authorisation, and they are NOT interchangeable in a report:
     rule produces — it inherits both tags, so only the name gives it away.
   * `orphaned` — a managed object still live in SCM whose request is gone from
     Git. Authorised once, no longer declared.
+  * `reordered` — a managed rule sits somewhere other than its deployed
+    position. No rule was added, removed or edited, and every one of them is
+    authorised; what changed is which rule matches FIRST, which is the policy.
 
 FINDINGS, NOT EVENTS. A record is keyed on the OBJECT, not the run, so the same
 violation detected nightly for a week is one record with `first_seen` and
@@ -42,7 +45,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 SCHEMA = "fw-violation/v1"
 
 #: Ordered by how much explaining they need, worst first. Used for reporting.
-CLASSES = ("malformed", "unmanaged", "orphaned")
+#:
+#: `reordered` ranks second because it is the quietest: every rule involved is
+#: authorised and unmodified, so nothing looks wrong on inspection, while the
+#: EFFECTIVE policy has changed — a permissive rule moved above a restrictive
+#: one passes traffic the restrictive one was written to stop.
+CLASSES = ("malformed", "reordered", "unmanaged", "orphaned")
 
 _UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
