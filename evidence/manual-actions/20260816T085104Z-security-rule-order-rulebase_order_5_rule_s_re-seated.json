@@ -1,0 +1,17 @@
+{
+  "action": "reorder",
+  "at": "2026-08-16T08:51:04Z",
+  "dispatched_by": "martono25",
+  "folder": "prod-edge",
+  "kind": "security-rule-order",
+  "name": "rulebase order (5 rule(s) re-seated)",
+  "object_id": null,
+  "provenance": "reconstructed",
+  "reason": "Re-asserted deployment order: REQ-2026-0725 -> REQ-2026-0726 -> REQ-2026-0727 -> REQ-2026-0730 -> REQ-2026-0809 -> REQ-2026-0812. Re-seated: REQ-2026-0726, REQ-2026-0727, REQ-2026-0730, REQ-2026-0809, REQ-2026-0812. Adoption re-stack: the rulebase held REQ-2026-0727, REQ-2026-0726, REQ-2026-0725 in that order, from before -parallelism=1 existed. Verified safe beforehand \u2014 all fifteen pairs of the six rules were checked and none overlap in source AND destination, so no traffic decision changed.",
+  "reconstructed_from": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31937353026 \u2014 the apply log line 'deployment order re-asserted over 5 rule(s)', and probe run 31937547232 which read the resulting order back from SCM. NOTE: CI logs expire; this record's primary source is perishable.",
+  "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31937353026",
+  "schema": "fw-manual-action/v2",
+  "tags_at_deletion": [],
+  "unlinked_reason": "No `reordered` finding existed to link. Detection and remediation shipped in the same change, so the rulebase was re-stacked before anything could record that it was out of order \u2014 the condition this control ends. Reconstructed rather than left absent, for the same reason the 2026-08-16 deletion was: a live firewall changed, and an undocumented change is not made acceptable by having been authorised.",
+  "violation_id": null
+}
