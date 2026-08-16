@@ -212,3 +212,38 @@ def test_run_remediate_EXECUTES_end_to_end(tmp_path, monkeypatch):
     # runs at all.
     assert rc in (0, 3)
     assert stub.deleted == [], "a dry run must never issue a DELETE"
+
+
+def test_a_deletion_links_to_its_finding_WHATEVER_the_record_says_today(tmp_path,
+                                                                        monkeypatch):
+    """Linking must not depend on the record's status or on merge latency.
+
+    Filtering to `open` coupled the link to two unrelated things: whether some
+    other checker had already closed the record, and whether the run that filed
+    it had finished merging. Both happened at once — a finding created and
+    resolved fifteen seconds apart by the same run — and two real deletions
+    recorded `violation_id: null` while their findings sat right there.
+    """
+    import json
+
+    from fwgitops import violations as _v
+
+    root = tmp_path / "evidence" / "violations"
+    _v.write(_v.reconcile(
+        found=[{"cls": "unmanaged", "kind": "security-rule", "scope": "prod-edge",
+                "name": "console-hack", "tags": []}],
+        existing={}, root=root, run_url="https://ex/1", at="2026-08-16T11:07:43Z"))
+    # Closed by something else, as the object checker used to do.
+    _v.write(_v.reconcile(found=[], existing=_v.load(root), root=root,
+                          run_url="https://ex/1", at="2026-08-16T11:07:58Z",
+                          scopes_checked=["prod-edge"],
+                          kinds_checked=["security-rule"]))
+    rec = json.loads(next(root.glob("*.json")).read_text())
+    assert rec["status"] == "resolved"
+
+    monkeypatch.chdir(tmp_path)
+    known = {(r.get("kind"), r.get("name")): r.get("id")
+             for r in _v.load(tmp_path / "evidence" / "violations").values()
+             if r.get("scope") == "prod-edge"}
+    assert known[("security-rule", "console-hack")] == rec["id"], (
+        "a resolved record is still the finding this deletion answers")
