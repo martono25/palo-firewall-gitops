@@ -41,6 +41,10 @@ on:
         description: "print each object's gitops: tags (only that namespace)"
         required: false
         default: "false"
+      show_rule:
+        description: "dump EVERY field of the named rule (REQ-* only — our own, already public in intent/)"
+        required: false
+        default: ""
       show_raw:
         description: "print every non-value FIELD of each row — what SCM itself says about provenance"
         required: false
@@ -71,6 +75,7 @@ jobs:
           SHOW_ORDER: ${{ inputs.show_order }}
           SHOW_TAGS: ${{ inputs.show_tags }}
           SHOW_RAW: ${{ inputs.show_raw }}
+          SHOW_RULE: ${{ inputs.show_rule }}
         run: |
           python - <<'PY'
           import json
@@ -110,6 +115,20 @@ jobs:
                   blob = json.dumps(rows)
                   ours = sorted(set(re.findall(r"\b(?:addr|svc)-[A-Za-z0-9._-]+-[0-9a-f]{8}\b", blob)))
                   print(f"{'':<45} references our objects: {ours or 'NONE'}")
+              _want = os.environ.get("SHOW_RULE", "").strip()
+              if _want:
+                  # OUR OWN RULES ONLY. Their contents are declared in `intent/`
+                  # in this public repository already, so printing what SCM
+                  # returns for one reveals nothing new — while anything else in
+                  # the folder is somebody's business.
+                  if not _want.startswith("REQ-"):
+                      print(f"{'':<45} refusing: only REQ-* rules may be dumped")
+                  for r in (rows or []):
+                      if not isinstance(r, dict) or str(r.get("name")) != _want:
+                          continue
+                      print(f"{'':<45} --- {_want} as SCM returns it ---")
+                      for k in sorted(r):
+                          print(f"{'':<45}   {k} = {json.dumps(r[k])}")
               if os.environ.get("SHOW_RAW", "").lower() == "true":
                   # WHICH FIELDS EXIST, not what they contain. The question is
                   # whether SCM ITSELF marks an object as predefined or system —
