@@ -1049,3 +1049,28 @@ def test_the_runbook_warns_that_a_replacement_rule_LOSES_ITS_POSITION():
     runbook = _flat(DOCS / "operator-runbook.md").replace("*", "").replace("`", "")
     assert "lands at the bottom of the pre-rulebase" in runbook
     assert "If order mattered to the fix, say so with position:" in runbook
+
+
+def test_the_cli_reference_names_the_CURRENT_version():
+    """`Generated against vX.Y.Z` is a claim, and nothing checked it.
+
+    It said v2.3.0 through 140 commits and an entire release, and was only
+    corrected because the version bump made somebody read the line. A doc that
+    names a version needs the same treatment `__version__` got: one source of
+    truth, checked.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    m = re.search(r'^version\s*=\s*"([^"]+)"',
+                  (root / "pyproject.toml").read_text(), re.M)
+    assert m, "pyproject.toml declares no version"
+    declared = m.group(1)
+
+    page = (root / "docs" / "cli-reference.md").read_text()
+    claimed = re.search(r'Generated against v([0-9]+\.[0-9]+\.[0-9]+)', page)
+    assert claimed, "cli-reference.md no longer states which version it documents"
+    assert claimed.group(1) == declared, (
+        f"cli-reference.md says v{claimed.group(1)} but the package is "
+        f"{declared} — the page claims to describe a version it does not")

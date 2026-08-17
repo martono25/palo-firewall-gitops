@@ -254,7 +254,20 @@ ones. The same split as `tags`, one object class along (ADR-0010).
 ```sh
 fwgitops objects ensure prod-edge
 fwgitops objects sweep prod-edge
+fwgitops objects drift prod-edge     # who does each object belong to?
 ```
+
+**`drift` answers a different question from the other two.** They act on objects
+this platform MINTED; `drift` classifies everything in the folder — ours,
+inherited from an ancestor, provided by SCM itself, or **unmanaged**, meaning
+nothing accounts for it. Provenance is read live from SCM's own `snippet`
+marker, so there is no allowlist for anyone to add a name to. Exit 3 when
+something is unaccounted for.
+
+Until v3.0.0 nothing looked at address and service objects at all: they are not
+intent kinds, so neither drift engine covered them, and the sweep only ever
+asked "did WE mint this" — the right question for deleting, the wrong one for
+detecting.
 
 **`ensure` is load-bearing, not a convenience.** The API rejects a rule naming
 an object that does not resolve, so a rule cannot be applied before its objects
