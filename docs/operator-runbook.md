@@ -163,6 +163,10 @@ and the next cycle restores everything.
 
 The nightly job failed. That failure **is** the alert.
 
+*For why the system behaves this way — what each engine sees, and why one
+question decides every remedy — see
+[how-drift-enforcement-works.md](how-drift-enforcement-works.md).*
+
 **Read the last step first — `Alert on everything this run found`.** It lists
 every finding from all three detectors in one place. The individual detect steps
 record their verdicts and pass; only the gate fails the job. Before 2026-08-16

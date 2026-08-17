@@ -180,6 +180,10 @@ Two properties worth testing, because both are places this could quietly lie:
   read as a clean bill of health — and this failed exactly that way until
   2026-08-16, when an empty checked-set skipped the guard entirely.
 
+*The design rationale behind everything in this section is in
+[how-drift-enforcement-works.md](how-drift-enforcement-works.md), including the
+trade-offs it deliberately accepts.*
+
 ### What is checked, and what is not
 
 Drift detection covers security rules (by tag), interfaces, routes and zones (by

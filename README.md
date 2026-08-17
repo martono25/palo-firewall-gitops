@@ -32,6 +32,12 @@ provisioning.md  ->  building-a-folder.md  ->  requesting-rules.md  ->  operator
                       zones, routes)
 ```
 
+**Why does the platform delete things I made by hand?** —
+[`how-drift-enforcement-works.md`](docs/how-drift-enforcement-works.md) explains
+the whole detect-and-remediate system: what each engine sees, why one question
+decides every remedy, and what the design gives up. Read it before changing
+anything in the SCM console.
+
 **Changing a rule that already exists** — a different address, port or range —
 behaves like neither adding nor removing, and has its own walkthrough:
 [`changing-a-rule.md`](docs/changing-a-rule.md).
