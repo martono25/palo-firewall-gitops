@@ -226,7 +226,7 @@ jobs:
             # which looks like a permissions problem and is not. Observed in CI
             # 2026-08-05; the guard existed on apply from the start and was never
             # carried to plan.
-            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode \
+            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode -lock-timeout=15m \
               -parallelism=1 2>&1 | tee "plan-$folder.txt" || rc=$?
             case "$rc" in
               0|2) ;;

@@ -16,11 +16,11 @@ name: drift-detect
 
 on:
   schedule:
-    # 18:00 UTC == 02:00 the next day in Singapore (UTC+8), where this estate is
+    # 01:00 UTC == 09:00 in Singapore (UTC+8), where this estate is
     # operated. Written in UTC because cron has no timezone; stated in local
     # time because the OPERATOR's deadline is what matters — an emergency change
     # must become an AccessRequest before the remediation that follows this.
-    - cron: "0 18 * * *"  # daily 02:00 SGT
+    - cron: "0 1 * * *"   # daily 09:00 SGT
   workflow_dispatch: {}
 
 permissions:
@@ -163,7 +163,7 @@ jobs:
             # which looks like a permissions problem and is not. Observed in CI
             # 2026-08-05; the guard existed on apply from the start and was never
             # carried to plan.
-            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode -parallelism=1
+            terraform -chdir="$dir" plan -input=false -no-color -detailed-exitcode -parallelism=1 -lock-timeout=15m
             rc=$?
             set -e
             echo "::endgroup::"

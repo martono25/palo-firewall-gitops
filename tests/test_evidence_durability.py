@@ -1318,3 +1318,30 @@ def test_a_job_that_CALLS_a_workflow_repeats_its_concurrency_group():
                 f"{wf_path.name}:{job_name} calls {uses}, which serialises on "
                 f"{want!r} — but a called workflow's concurrency does not apply. "
                 f"Repeat the group on the calling job or the two can collide.")
+
+
+def test_every_terraform_plan_and_apply_WAITS_for_the_state_lock():
+    """The unattended restore failed twice on `Error acquiring the state lock`.
+
+    The second time the lock named its holder: `OperationTypePlan`, created one
+    minute after the remediation run began. Remediation deletes what nobody
+    authorised, opens the pull request that RECORDS the deletion, and that PR
+    triggers `pr-validate` — which runs `terraform plan` and takes the lock. The
+    restore leg collides with the validation of its own evidence.
+
+    Concurrency groups cannot fix it: pr-validate runs on the PR ref, a
+    different group by construction. Every terraform operation on the shared
+    state must therefore QUEUE rather than fail — the contention is brief and
+    legitimate.
+    """
+    import re
+
+    for name in ("apply.yml", "pr-validate.yml", "drift-detect.yml"):
+        wf = (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        for line in wf.splitlines():
+            s = line.strip()
+            if not re.match(r'terraform -chdir=.* (plan|apply)\b', s):
+                continue
+            assert "-lock-timeout=" in s, (
+                f"{name}: `{s[:70]}...` fails immediately when another workflow "
+                f"holds the state lock. Two unattended restores died this way.")
