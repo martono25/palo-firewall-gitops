@@ -188,3 +188,149 @@ def test_an_undeclared_field_being_SET_is_the_accepted_blind_spot():
     d = compare(_declared(description=None), dict(LIVE, description="edited by hand"),
                 scope="prod-edge")
     assert d.is_clean
+
+
+def test_a_DISABLED_rule_is_caught():
+    """The easiest unauthorised change there is, and it was invisible.
+
+    Toggle a managed rule off in the console: it still exists, still carries its
+    tags, still matches its request name. The tag engine, the order check and
+    every compared field agree nothing is wrong — while the rule does nothing at
+    all. Disable a deny and a path opens; disable an allow and a service stops.
+
+    The compiler has always declared `disabled=False`, so this was a plain
+    omission from the field map, not a field nobody could assert.
+    """
+    d = compare(_declared(), dict(LIVE, disabled=True), scope="prod-edge")
+    assert [f.field for f in d.fields] == ["disabled"]
+
+
+def test_a_rule_DECLARED_disabled_is_not_drift_when_it_IS_disabled():
+    """An intent may legitimately declare a rule disabled — staged but not yet
+    in force. The check must compare, not assume False."""
+    assert compare(_declared(disabled=True), dict(LIVE, disabled=True),
+                   scope="prod-edge").is_clean
+
+
+def test_the_THREAT_PROFILE_is_compared_across_differing_shapes():
+    """Strip the profile group in the console and IPS/AV stops applying while
+    every other field looks identical — the rule matches the same traffic, it
+    just stops being inspected.
+
+    The shapes differ: the compiler carries a group NAME, SCM returns
+    `{"group": [name]}`. Confirmed against REQ-2026-0812 on the tenant rather
+    than read off the Terraform module, which says what we WRITE, not what the
+    API returns.
+    """
+    live = dict(LIVE, profile_setting={"group": ["best-practice"]})
+    assert compare(_declared(profile_group="best-practice"), live,
+                   scope="prod-edge").is_clean
+
+    d = compare(_declared(profile_group="best-practice"),
+                dict(LIVE, profile_setting=None), scope="prod-edge")
+    assert [f.field for f in d.fields] == ["profile_setting"], (
+        "a profile removed in the console must be caught")
+
+
+def test_a_rule_declaring_NO_profile_is_not_compared_on_it():
+    """Most rules declare none, and asserting a value this platform never writes
+    is the false positive that hit every rule in the estate once already."""
+    assert compare(_declared(), dict(LIVE, profile_setting={"group": ["x"]}),
+                   scope="prod-edge").is_clean
+
+
+def test_a_rule_declared_DISABLED_reaches_terraform_as_disabled():
+    """The tfvars entry is not decoration.
+
+    The module declares `disabled = optional(bool, false)`, so omitting the key
+    does not break the apply — Terraform just writes `false`. Which means a rule
+    an intent declares DISABLED would be applied ENABLED, silently, and the
+    comparison would then report drift on a rule that Terraform itself had just
+    switched on.
+
+    Dropping `"disabled": r.disabled` from the tfvars failed no test until this
+    one existed.
+    """
+    import dataclasses
+
+    from fwgitops.compiler import CompiledChange, to_tfvars_written
+
+    # A REAL CompiledChange, not a stub: `to_tfvars` also reads the object
+    # collections, and a stub with only `.rule` fails on the first of them —
+    # which is the test discovering the payload has more contract than it
+    # assumed.
+    off = _declared(disabled=True)
+    fields = {f.name for f in dataclasses.fields(CompiledChange)}
+    kwargs = {"rule": off}
+    for name in fields - {"rule"}:
+        f = next(x for x in dataclasses.fields(CompiledChange) if x.name == name)
+        if f.default is not dataclasses.MISSING:
+            kwargs[name] = f.default
+        elif f.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
+            kwargs[name] = f.default_factory()             # type: ignore[misc]
+        else:
+            kwargs[name] = () if "objects" in name else None
+    payload = to_tfvars_written([CompiledChange(**kwargs)])
+    row = payload["security_rules"][off.name]
+    assert row.get("disabled") is True, (
+        "a rule declared disabled must reach Terraform as disabled; the module "
+        "default would otherwise apply it ENABLED")
+
+
+def test_an_UNDECLARED_log_profile_falls_back_to_the_environment_DEFAULT():
+    """Closing the gap without declaring the default in every intent.
+
+    Every prod-edge rule carried `log_setting: "Cortex Data Lake"` in SCM while
+    the compiler emitted None. Asserting a value this platform never writes
+    reported drift no remediation could fix; skipping it left a real change
+    invisible. Naming the default in the environment resolves both — the
+    declared state is complete, and any OTHER value is somebody changing it.
+    """
+    import yaml
+    from pathlib import Path
+
+    from fwgitops.resolve import EnvMap
+
+    root = Path(__file__).resolve().parents[1]
+    em = EnvMap.from_dict(yaml.safe_load((root / "catalog" / "environments.yaml").read_text()))
+    assert em.resolve("prod").default_log_forwarding == "Cortex Data Lake", (
+        "the environment must NAME the default, or an undeclared log profile is "
+        "uncomparable again")
+
+
+def test_a_CHANGED_log_profile_is_now_a_finding():
+    """The point of declaring the default: any other value is a change."""
+    d = compare(_declared(log_setting="Cortex Data Lake"),
+                dict(LIVE, log_setting="somewhere-else"), scope="prod-edge")
+    assert [f.field for f in d.fields] == ["log_setting"]
+
+
+def test_compiling_a_REAL_intent_applies_the_environment_default():
+    """The fallback itself, exercised.
+
+    Removing `or res.default_log_forwarding` from the compiler failed no test:
+    one test asserted the env map HOLDS the default, another compared a rule
+    built by hand with the value already set. Neither ran the line that puts the
+    two together — the same gap as `moved=[]` and the fixture that declared
+    `log_setting` explicitly.
+    """
+    import yaml
+    from pathlib import Path
+
+    from fwgitops.compiler import compile_request
+    from fwgitops.intent import load_intent
+    from fwgitops.resolve import EnvMap
+
+    root = Path(__file__).resolve().parents[1]
+    em = EnvMap.from_dict(yaml.safe_load((root / "catalog" / "environments.yaml").read_text()))
+    cats = {"service_catalog": yaml.safe_load((root / "catalog" / "services.yaml").read_text()),
+            "app_catalog": yaml.safe_load((root / "catalog" / "apps.yaml").read_text())}
+    doc = yaml.safe_load((root / "intent" / "prod" / "observability"
+                          / "REQ-2026-0725.yaml").read_text())
+    assert "log_forwarding" not in (doc.get("spec") or {}), (
+        "this test needs an intent that declares NO log profile")
+
+    ch = compile_request(load_intent(doc, env_map=em, **cats), em)
+    assert ch.rule.log_setting == "Cortex Data Lake", (
+        "an intent declaring no log profile must compile to the environment's "
+        "default, or the field is uncomparable and a change to it invisible")

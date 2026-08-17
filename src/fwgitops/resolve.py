@@ -23,7 +23,7 @@ than guessing a folder.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 class ResolveError(Exception):
@@ -38,6 +38,18 @@ class EnvResolution:
     #: Other zones that already exist on this folder's device but are not the
     #: default pair. Optional; see `baseline_zones_by_folder` for why it matters.
     baseline_zones: Tuple[str, ...] = field(default=())
+    #: The log-forwarding profile SCM applies when a rule declares none.
+    #:
+    #: DECLARED HERE RATHER THAN LEFT IMPLICIT. Every prod-edge rule carried
+    #: `log_setting: "Cortex Data Lake"` in SCM while the compiler emitted None,
+    #: so the field could not be compared: asserting a value this platform never
+    #: writes reported drift no remediation could fix, and skipping it left a
+    #: real change undetected. Naming the default resolves both — the declared
+    #: state becomes complete, and any OTHER value is somebody changing it.
+    #:
+    #: It is per-environment because it is a property of the tenant's folder,
+    #: not of this code. Confirmed by the operator 2026-08-17.
+    default_log_forwarding: Optional[str] = None
 
 
 class EnvMap:
@@ -75,6 +87,7 @@ class EnvMap:
                 from_zone=spec["from_zone"],
                 to_zone=spec["to_zone"],
                 baseline_zones=tuple(extra),
+                default_log_forwarding=spec.get("default_log_forwarding"),
             )
         return cls(out)
 
