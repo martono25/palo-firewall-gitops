@@ -40,6 +40,7 @@ on:
           - edit-managed     # change a declared field on a declared rule
           - delete-managed   # DELETE a declared rule — apply must recreate it
           - reorder          # move a declared rule out of deployment order
+          - disable-managed  # switch a declared rule OFF in the console
           - all              # every scenario at once, on DIFFERENT victims
 
 permissions:
@@ -204,6 +205,23 @@ jobs:
                   print(f"::error::move failed: {e}")
                   sys.exit(1)
               print(f"STAGED REORDER: {shuffled['name']} moved to the top")
+
+          if scenario in ("disable-managed", "all"):
+              # SWITCHED OFF, NOT REMOVED. The rule still exists, still carries
+              # its tags, still matches its request name — every provenance
+              # check passes while it matches no traffic at all. Until
+              # 2026-08-17 this produced a red `terraform plan` and NO violation
+              # record: detected, reverted, and unattributed.
+              #
+              # Fail-safe: a disabled ALLOW denies traffic it used to permit.
+              body = {k: v for k, v in ordered[2].items() if k not in ("id", "tfid")}
+              body["disabled"] = True
+              try:
+                  session.request("PUT", f"{RULES}/{ordered[2]['id']}", body=body)
+              except ScmApiError as e:
+                  print(f"::error::disable failed: {e}")
+                  sys.exit(1)
+              print(f"STAGED DISABLE of managed rule {ordered[2]['name']}")
 
           if scenario in ("delete-managed", "all"):
               # DELETES AN AUTHORISED RULE. The tag engine cannot see this at
