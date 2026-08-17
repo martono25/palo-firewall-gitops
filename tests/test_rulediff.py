@@ -334,3 +334,38 @@ def test_compiling_a_REAL_intent_applies_the_environment_default():
     assert ch.rule.log_setting == "Cortex Data Lake", (
         "an intent declaring no log profile must compile to the environment's "
         "default, or the field is uncomparable and a change to it invisible")
+
+
+def test_an_intent_CAN_declare_a_rule_disabled_and_it_reaches_the_rule():
+    """Enforcement removed the alternative, so the pipeline had to provide one.
+
+    Disabling a rule is routine. Once remediation began reverting console
+    changes there was no sanctioned way to do it — switch it off by hand and the
+    next run switches it back on. The only pipeline path was DELETING the
+    intent, which destroys the rule and loses its position in the rulebase: a
+    much larger act than "turn this off for now".
+    """
+    import copy
+
+    import yaml
+    from pathlib import Path
+
+    from fwgitops.compiler import compile_request
+    from fwgitops.intent import load_intent
+    from fwgitops.resolve import EnvMap
+
+    root = Path(__file__).resolve().parents[1]
+    em = EnvMap.from_dict(yaml.safe_load((root / "catalog" / "environments.yaml").read_text()))
+    cats = {"service_catalog": yaml.safe_load((root / "catalog" / "services.yaml").read_text()),
+            "app_catalog": yaml.safe_load((root / "catalog" / "apps.yaml").read_text())}
+    doc = yaml.safe_load((root / "intent" / "prod" / "observability"
+                          / "REQ-2026-0725.yaml").read_text())
+
+    # UNDECLARED -> ENABLED. A request for access means the rule is in force.
+    assert compile_request(load_intent(doc, env_map=em, **cats), em).rule.disabled is False
+
+    off = copy.deepcopy(doc)
+    off["spec"]["disabled"] = True
+    assert compile_request(load_intent(off, env_map=em, **cats), em).rule.disabled is True, (
+        "an intent must be able to say a rule is off, or the only way to do it "
+        "is a console change the platform reverts")

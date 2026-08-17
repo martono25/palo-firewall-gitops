@@ -16,6 +16,34 @@ Terraform, the SCM API, or PAN-OS internals. Just follow the steps.
 
 ---
 
+## Turning a rule off without deleting it
+
+A rule is IN FORCE unless the intent says otherwise. The field is optional, and
+this is what it looks like in its normal state:
+
+```yaml
+spec:
+  environment: prod
+  disabled: false     # the default — omit the line entirely and it is the same
+```
+
+**To turn the rule off, change that `false` to `true` and merge.** The rule
+stays in the rulebase, keeps its position and its request id, and stops matching
+traffic. Change it back to turn it on again.
+
+The example above shows `false` on purpose. A snippet showing `true` is one
+copy-paste away from silently disabling a rule somebody needs.
+
+**Do not switch it off in the SCM console.** The platform reverts console
+changes: remediation puts the rule back on at the next run, usually within the
+hour, and files a violation record naming you as the source of an unauthorised
+change. That is the system working — a rule someone silently disabled is
+indistinguishable from an attack, so the platform cannot treat it as anything
+else.
+
+To put it back, remove the line (or set `false`) and merge.
+
+
 ## Updating or removing an existing rule
 
 **To change a rule**, edit its file and **give it a new `ticket`**. The request id
