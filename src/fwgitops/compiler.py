@@ -332,6 +332,7 @@ def compile_request(
         target_rule=tgt,
         description=ar.spec.description,
         log_start=ar.spec.log_start,
+        disabled=ar.spec.disabled,
         source_user=list(ar.spec.source_user),
         category=list(ar.spec.category),
         negate_source=ar.spec.negate_source,

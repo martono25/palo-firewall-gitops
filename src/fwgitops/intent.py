@@ -109,6 +109,7 @@ _ACCESS_SPEC_KEYS = frozenset({
     "environment", "action", "source", "destination", "service", "log",
     "application", "profile", "log_forwarding", "position", "description",
     "log_start", "source_user", "category", "negate_source", "negate_destination",
+    "disabled",
 })
 _ZONE_SPEC_KEYS = frozenset({
     "folder", "device", "environment", "zone", "type", "interfaces",
@@ -185,6 +186,17 @@ class Spec:
     #: like a request would silently reorder policy on the next apply.
     position: Optional[str] = None
     # ── v1.0 rule completeness ──
+    #: Switch the rule OFF without removing it. Default false — a request for
+    #: access means the rule should be in force, so an intent that says nothing
+    #: declares an ENABLED rule.
+    #:
+    #: THIS EXISTS BECAUSE ENFORCEMENT REMOVED THE ALTERNATIVE. Disabling a rule
+    #: is a routine firewall action, and once remediation began reverting console
+    #: changes there was no sanctioned way to do it: switch it off by hand and
+    #: the next run switches it back on, within the hour. The only pipeline path
+    #: was deleting the intent, which DESTROYS the rule and loses its position in
+    #: the rulebase — a much larger act than "turn this off for now".
+    disabled: bool = False
     #: Free-text rule documentation (audit). None -> no description.
     description: Optional[str] = None
     #: Log at session start too (pairs with `log`, which is session end).
@@ -1021,6 +1033,7 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     # ── v1.0 rule-completeness fields ──
     description, desc_ok = _opt_str(sp, "description", path, c)
     log_start, ls_ok = _opt_bool(sp, "log_start", path, c)
+    disabled, dis_ok = _opt_bool(sp, "disabled", path, c)
     negate_source, ns_ok = _opt_bool(sp, "negate_source", path, c)
     negate_destination, nd_ok = _opt_bool(sp, "negate_destination", path, c)
     source_user = _opt_str_list(sp, "source_user", path, c)
@@ -1029,7 +1042,7 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
     if environment is None or action not in _ACTIONS or source is None or destination is None \
             or service is None or not isinstance(log, bool) \
             or application is None or not position_ok or not profile_ok or not logfwd_ok \
-            or not desc_ok or not ls_ok or not ns_ok or not nd_ok \
+            or not desc_ok or not ls_ok or not ns_ok or not nd_ok or not dis_ok \
             or source_user is None or category is None:
         return None
     return Spec(
@@ -1040,6 +1053,7 @@ def _load_spec(sp: Any, c: _Collector) -> Optional[Spec]:
         description=description, log_start=bool(log_start),
         source_user=source_user, category=category,
         negate_source=bool(negate_source), negate_destination=bool(negate_destination),
+        disabled=bool(disabled),
     )
 
 
