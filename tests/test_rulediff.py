@@ -188,3 +188,90 @@ def test_an_undeclared_field_being_SET_is_the_accepted_blind_spot():
     d = compare(_declared(description=None), dict(LIVE, description="edited by hand"),
                 scope="prod-edge")
     assert d.is_clean
+
+
+def test_a_DISABLED_rule_is_caught():
+    """The easiest unauthorised change there is, and it was invisible.
+
+    Toggle a managed rule off in the console: it still exists, still carries its
+    tags, still matches its request name. The tag engine, the order check and
+    every compared field agree nothing is wrong — while the rule does nothing at
+    all. Disable a deny and a path opens; disable an allow and a service stops.
+
+    The compiler has always declared `disabled=False`, so this was a plain
+    omission from the field map, not a field nobody could assert.
+    """
+    d = compare(_declared(), dict(LIVE, disabled=True), scope="prod-edge")
+    assert [f.field for f in d.fields] == ["disabled"]
+
+
+def test_a_rule_DECLARED_disabled_is_not_drift_when_it_IS_disabled():
+    """An intent may legitimately declare a rule disabled — staged but not yet
+    in force. The check must compare, not assume False."""
+    assert compare(_declared(disabled=True), dict(LIVE, disabled=True),
+                   scope="prod-edge").is_clean
+
+
+def test_the_THREAT_PROFILE_is_compared_across_differing_shapes():
+    """Strip the profile group in the console and IPS/AV stops applying while
+    every other field looks identical — the rule matches the same traffic, it
+    just stops being inspected.
+
+    The shapes differ: the compiler carries a group NAME, SCM returns
+    `{"group": [name]}`. Confirmed against REQ-2026-0812 on the tenant rather
+    than read off the Terraform module, which says what we WRITE, not what the
+    API returns.
+    """
+    live = dict(LIVE, profile_setting={"group": ["best-practice"]})
+    assert compare(_declared(profile_group="best-practice"), live,
+                   scope="prod-edge").is_clean
+
+    d = compare(_declared(profile_group="best-practice"),
+                dict(LIVE, profile_setting=None), scope="prod-edge")
+    assert [f.field for f in d.fields] == ["profile_setting"], (
+        "a profile removed in the console must be caught")
+
+
+def test_a_rule_declaring_NO_profile_is_not_compared_on_it():
+    """Most rules declare none, and asserting a value this platform never writes
+    is the false positive that hit every rule in the estate once already."""
+    assert compare(_declared(), dict(LIVE, profile_setting={"group": ["x"]}),
+                   scope="prod-edge").is_clean
+
+
+def test_a_rule_declared_DISABLED_reaches_terraform_as_disabled():
+    """The tfvars entry is not decoration.
+
+    The module declares `disabled = optional(bool, false)`, so omitting the key
+    does not break the apply — Terraform just writes `false`. Which means a rule
+    an intent declares DISABLED would be applied ENABLED, silently, and the
+    comparison would then report drift on a rule that Terraform itself had just
+    switched on.
+
+    Dropping `"disabled": r.disabled` from the tfvars failed no test until this
+    one existed.
+    """
+    import dataclasses
+
+    from fwgitops.compiler import CompiledChange, to_tfvars_written
+
+    # A REAL CompiledChange, not a stub: `to_tfvars` also reads the object
+    # collections, and a stub with only `.rule` fails on the first of them —
+    # which is the test discovering the payload has more contract than it
+    # assumed.
+    off = _declared(disabled=True)
+    fields = {f.name for f in dataclasses.fields(CompiledChange)}
+    kwargs = {"rule": off}
+    for name in fields - {"rule"}:
+        f = next(x for x in dataclasses.fields(CompiledChange) if x.name == name)
+        if f.default is not dataclasses.MISSING:
+            kwargs[name] = f.default
+        elif f.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
+            kwargs[name] = f.default_factory()             # type: ignore[misc]
+        else:
+            kwargs[name] = () if "objects" in name else None
+    payload = to_tfvars_written([CompiledChange(**kwargs)])
+    row = payload["security_rules"][off.name]
+    assert row.get("disabled") is True, (
+        "a rule declared disabled must reach Terraform as disabled; the module "
+        "default would otherwise apply it ENABLED")

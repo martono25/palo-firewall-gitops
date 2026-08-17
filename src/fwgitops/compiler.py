@@ -84,6 +84,13 @@ class SecurityRule:
     category: List[str] = field(default_factory=lambda: ["any"])
     negate_source: bool = False
     negate_destination: bool = False
+    #: A rule can be switched OFF without being removed. The Terraform module
+    #: has always asserted `false` via `optional(bool, false)`, so a rule
+    #: disabled in the console already shows in `terraform plan` — but the
+    #: compiler never carried the field, so `rulediff` could not compare it and
+    #: the change produced NO violation record. Detected, remediated, and
+    #: unattributed. Declaring it here is what makes it a named finding.
+    disabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -445,7 +452,7 @@ def _rule_dict(r: SecurityRule) -> Dict[str, Any]:
         "from_zones": list(r.from_zones), "to_zones": list(r.to_zones),
         "sources": list(r.sources), "destinations": list(r.destinations),
         "services": list(r.services), "action": r.action,
-        "log_end": r.log_end, "tags": list(r.tags),
+        "log_end": r.log_end, "tags": list(r.tags), "disabled": r.disabled,
         "application": list(r.application),
         "profile_group": r.profile_group,
         "log_setting": r.log_setting,

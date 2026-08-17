@@ -54,6 +54,25 @@ FIELD_MAP: Dict[str, str] = {
     "negate_source": "negate_source",
     "negate_destination": "negate_destination",
     "tags": "tag",
+    # DISABLED WAS MISSING UNTIL 2026-08-17, and it is the easiest unauthorised
+    # change there is. Toggle a managed rule off in the console and it still
+    # EXISTS, still carries its tags, still matches its request name — so the
+    # tag engine, the order check and every content field agree that nothing is
+    # wrong, while the rule does nothing at all. Disable a deny and a path
+    # opens; disable an allow and a service stops.
+    #
+    # The compiler has always declared it (`False` by default), so this was a
+    # plain omission from the map rather than a field nobody could assert.
+    "disabled": "disabled",
+    # THE THREAT-INSPECTION PROFILE. Strip it in the console and IPS/AV stops
+    # applying to the rule while every other field looks identical — the rule
+    # still matches the same traffic, it just stops being inspected.
+    #
+    # The shapes differ: the compiler carries a single group NAME, SCM returns
+    # `{"group": ["best-practice"]}`. Verified against the tenant on REQ-2026-0812
+    # rather than taken from the Terraform module, which is a claim about what
+    # we WRITE, not what the API returns.
+    "profile_group": "profile_setting",
 }
 
 #: Compared as SETS. SCM does not promise to preserve the order we sent, and for
@@ -99,7 +118,17 @@ class RuleDiff:
                 + "; ".join(str(f) for f in self.fields))
 
 
+def _profile_group(value: Any) -> Any:
+    """SCM's `{"group": ["best-practice"]}` -> the group name the compiler holds."""
+    if isinstance(value, dict):
+        groups = value.get("group") or []
+        return groups[0] if groups else None
+    return value
+
+
 def _norm(name: str, value: Any) -> Any:
+    if name == "profile_group":
+        return _profile_group(value)
     if name in _UNORDERED:
         return frozenset(value or ())
     if value == "":
