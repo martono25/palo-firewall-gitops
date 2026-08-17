@@ -5,6 +5,74 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-17
+
+**Drift is remediated, not just reported.** Config no request authorised is now
+deleted, and config Git declares is restored — unattended, nightly, with a record
+at both ends.
+
+### BREAKING — read before upgrading
+
+- **Unauthorised config is DELETED automatically**, at 10:00 SGT, one hour after
+  detection. Anything created by hand in SCM — an address, a rule, a copy of a
+  managed rule — does not survive the day. This is the intended contract
+  (ADR-0011), and it means **an emergency change made by hand now has a
+  deadline**: raise and apply an AccessRequest before the run, or the fix is
+  removed. The runbook states the deadline in local time beside the emergency
+  procedure.
+
+- **`fw-manual-action/v1` → `v2`** adds a REQUIRED `provenance` field
+  (`workflow` | `reconstructed`), so anything consuming those records breaks
+  until it handles it. A `reconstructed` record must also name what it was
+  rebuilt from. Both existing records were migrated rather than grandfathered.
+
+- **Managed rules are restored, not left drifted.** A rule edited, deleted or
+  reordered in the console is put back by the next run. There is no longer a
+  sanctioned way to change one outside the pipeline — use `spec.disabled` to
+  switch a rule off, and the intent for anything else.
+
+### Added
+
+- **Three new drift classes** — `modified` (an authorised rule whose live config
+  differs from Git), `missing` (a declared rule absent from SCM), `reordered`
+  (managed rules out of deployment order). The tag engine could see none of
+  them: it asks who owns a rule, never whether it still matches.
+- **Object-level drift** (`fwgitops objects drift`) — addresses and services
+  were invisible to every engine. Provenance is read live from SCM's own
+  `snippet` marker, so there is no allowlist for anyone to edit.
+- **Rule order is deployment order**, read from Git history. No manifest: an
+  intent carries no position, so the order is a consequence rather than a
+  choice.
+- **`fwgitops remediate`** — deletes what Git does not declare. Dry run by
+  default; `--apply` required to destroy anything.
+- **`fw-violation/v1` records** — findings, not events. One record per violation
+  identity, resolved rather than deleted, and a scope that was not read can
+  never resolve its findings.
+- **`spec.disabled`** on an AccessRequest, so a rule can be switched off through
+  the pipeline instead of the console.
+- **`default_log_forwarding`** per environment, so a rule that declares no log
+  profile still DECLARES one and the field becomes enforceable.
+- `disabled` and the threat-inspection profile are now compared, having produced
+  a red run and no record naming the rule.
+
+### Fixed
+
+- **Every evidence bundle claimed `compiler_version: "1.0.0"`** while the tool
+  was 2.3.0 — the constant was hardcoded beside the real one. The package now
+  reads its own metadata.
+- **A duplicated managed rule passed as clean.** The check tested the tag's
+  request against the declared set and never the object's own name, so a console
+  copy inheriting both tags was invisible while free to carry any contents.
+- **One night, one alert.** Each detector exited on its first finding, skipping
+  every check below it — so the night with the most drift reported the least.
+- **A deleted rule is no longer also reported as a reorder** — every rule after
+  the gap shifted index, blaming five rules nobody had touched.
+- A correct rulebase is no longer written to, or recorded: the moves were issued
+  unconditionally, filing a false remediation record on every apply.
+- Terraform now waits for the state lock rather than failing on it. Remediation
+  was racing the `terraform plan` of its own evidence pull request.
+
+
 ### Fixed — the other three guides carried the same two gaps
 
 A pass over `requesting-rules.md`, `building-a-folder.md` and `provisioning.md`

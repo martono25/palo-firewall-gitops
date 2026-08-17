@@ -4,12 +4,19 @@ GitOps-driven firewall automation for Palo Alto (Strata Cloud Manager / Panorama
 covering **Day-1 provisioning + onboarding** through **Day-2 rule changes**, automated as far
 as is safe.
 
-> **Status: v2.3.0.** The Day-2 loop (`intent → tags ensure → compile → classify
+> **Status: v3.0.0.** The Day-2 loop (`intent → tags ensure → compile → classify
 > (the tier picks the approver) → terraform apply → enrich → push → tags sweep`)
 > and the **Day-1 chain**
 > (`InterfaceRequest → ZoneRequest → RouteRequest`) are both implemented, tested, and
 > **proven end-to-end on live VM-Series hardware**. Four intent kinds, evidence bundles
-> for every one, and drift detection across two engines. See
+> for every one, and drift detection across FOUR engines.
+>
+> **Drift is now REMEDIATED, not just reported.** Config no request authorised is
+> deleted, and config Git declares is restored — unattended, nightly, with a record
+> at both ends. Every class was proven against the live tenant before release:
+> unmanaged object, unmanaged rule, forged copy, edited rule, deleted rule,
+> reordered rulebase, disabled rule. **An emergency change made by hand now has a
+> deadline** (`docs/operator-runbook.md`). See
 > [`CHANGELOG.md`](CHANGELOG.md) and [`docs/adr/`](docs/adr/). Full design:
 > [`docs/DESIGN.md`](docs/DESIGN.md).
 
