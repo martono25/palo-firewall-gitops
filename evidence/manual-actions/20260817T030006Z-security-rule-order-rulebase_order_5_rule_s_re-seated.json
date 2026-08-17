@@ -1,0 +1,16 @@
+{
+  "action": "reorder",
+  "at": "2026-08-17T03:00:06Z",
+  "dispatched_by": "martono25",
+  "folder": "prod-edge",
+  "kind": "security-rule-order",
+  "name": "rulebase order (5 rule(s) re-seated)",
+  "object_id": null,
+  "provenance": "workflow",
+  "reason": "Re-asserted deployment order: REQ-2026-0725 -> REQ-2026-0726 -> REQ-2026-0727 -> REQ-2026-0730 -> REQ-2026-0809 -> REQ-2026-0812. Re-seated: REQ-2026-0726, REQ-2026-0727, REQ-2026-0730, REQ-2026-0809, REQ-2026-0812.",
+  "run_url": "",
+  "schema": "fw-manual-action/v2",
+  "tags_at_deletion": [],
+  "unlinked_reason": "Remediates 4 recorded findings: VIOL-2026-0817-prod-edge-REQ-2026-0727, VIOL-2026-0817-prod-edge-REQ-2026-0730, VIOL-2026-0817-prod-edge-REQ-2026-0809, VIOL-2026-0817-prod-edge-REQ-2026-0812. The schema links one, so all are named here.",
+  "violation_id": null
+}
