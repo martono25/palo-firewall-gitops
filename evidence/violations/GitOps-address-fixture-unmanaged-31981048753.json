@@ -1,0 +1,15 @@
+{
+  "class": "unmanaged",
+  "first_seen": "2026-08-17T02:22:51Z",
+  "first_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31987742132",
+  "id": "VIOL-2026-0817-GitOps-fixture-unmanaged-31981048753",
+  "kind": "address",
+  "last_seen": "2026-08-17T02:22:51Z",
+  "last_seen_run": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31987742132",
+  "name": "fixture-unmanaged-31981048753",
+  "resolved_at": null,
+  "schema": "fw-violation/v1",
+  "scope": "GitOps",
+  "status": "open",
+  "tags_observed": []
+}
