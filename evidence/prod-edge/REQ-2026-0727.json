@@ -1,13 +1,13 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31889588315"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31995292963"
   },
   "approval": {
     "approvers": [],
     "gate": null,
-    "merge_commit": "13eb8df38deb6b69fb2ec4d5ca4f6043512466f4",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/214"
+    "merge_commit": "a575882dc0a4d5d277ad9bee8e74c0715ff08c9f",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/302"
   },
   "compiled": {
     "compiler_version": "1.0.0",
@@ -42,11 +42,12 @@
         "destinations": [
           "addr-10.20.40.53_32-600511ea"
         ],
+        "disabled": false,
         "from_zones": [
           "local"
         ],
         "log_end": true,
-        "log_setting": null,
+        "log_setting": "Cortex Data Lake",
         "log_start": false,
         "name": "REQ-2026-0727",
         "negate_destination": false,
@@ -85,13 +86,13 @@
         }
       ]
     },
-    "object_sha256": "166518ed4498828cb909eb947ef496a019710b4552e8a26ecf1b4f79f88884e0",
+    "object_sha256": "4c1700a170f279af1f7b63e35ecd5cf1d5aae192edd9ca34708b16bb8f193d3c",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "rules.auto.tfvars.json",
-    "tfvars_sha256": "6eff4aab9a96372830e7def58f59a589235e17913d4ff41f5fda2a58dabf2470"
+    "tfvars_sha256": "a24f15b0a0591608ae9cd9b03cac786e39dd27eeb5ee479946201e07e767bfea"
   },
   "controls": [
     "AC-4",
@@ -106,15 +107,9 @@
       "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
     }
   ],
-  "generated_at": "2026-08-15T14:22:17Z",
+  "generated_at": "2026-08-17T04:42:30Z",
   "kind": "AccessRequest",
-  "push": {
-    "admin_count": 1,
-    "all_admins": false,
-    "folder": "prod-edge",
-    "job_id": "243",
-    "status": "success"
-  },
+  "push": null,
   "req_id": "REQ-2026-0727",
   "request": {
     "intent_file": "intent/prod/dns/REQ-2026-0727.yaml",
