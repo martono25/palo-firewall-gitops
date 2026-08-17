@@ -596,3 +596,35 @@ def test_every_committed_deletion_resolves_to_a_REAL_violation_or_declares_none(
             assert rec["violation_id"] in known, (
                 f"{a.name} remediates {rec['violation_id']}, which no violation "
                 f"record claims — a dangling link is worse than none")
+
+
+def test_the_version_stamped_into_evidence_MATCHES_the_package():
+    """Every bundle records `compiled.compiler_version`, and it was a lie.
+
+    `__init__.py` hardcoded "1.0.0" while pyproject said 2.3.0 and the repo sat
+    139 commits past the v2.3.0 tag. Every audit record on `main` therefore
+    claimed it was produced by a version that shipped months earlier — and an
+    assessor tracing a defect to the tool that made it would have been sent to
+    the wrong code.
+
+    Two constants for one fact drift the moment somebody bumps the one they can
+    see, so the package reads its own installed metadata and this pins that they
+    agree.
+    """
+    import re
+    from pathlib import Path
+
+    import fwgitops
+
+    # A REGEX, NOT `tomllib`: that module is 3.11+, and this project's own venv
+    # runs 3.9 while CI runs 3.11. A test that passes on one interpreter and
+    # ImportErrors on the other is worse than no test — it goes green where
+    # nobody looks and red where somebody is already busy.
+    root = Path(__file__).resolve().parents[1]
+    m = re.search(r'^version\s*=\s*"([^"]+)"',
+                  (root / "pyproject.toml").read_text(), re.M)
+    assert m, "pyproject.toml declares no version"
+    declared = m.group(1)
+    assert fwgitops.__version__ == declared, (
+        f"fwgitops.__version__ is {fwgitops.__version__!r} but pyproject declares "
+        f"{declared!r}; evidence bundles stamp the former as compiler_version")
