@@ -323,7 +323,11 @@ def compile_request(
         ),
         application=applications,
         profile_group=ar.spec.profile,
-        log_setting=ar.spec.log_forwarding,
+        # THE INTENT WINS; the environment's default fills the gap. A rule that
+        # declares nothing still DECLARES the default, so the field is
+        # comparable and a console change to it is a finding rather than a
+        # value nobody asserted.
+        log_setting=ar.spec.log_forwarding or res.default_log_forwarding,
         relative_position=rel,
         target_rule=tgt,
         description=ar.spec.description,

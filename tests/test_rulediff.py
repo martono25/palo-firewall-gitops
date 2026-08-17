@@ -275,3 +275,62 @@ def test_a_rule_declared_DISABLED_reaches_terraform_as_disabled():
     assert row.get("disabled") is True, (
         "a rule declared disabled must reach Terraform as disabled; the module "
         "default would otherwise apply it ENABLED")
+
+
+def test_an_UNDECLARED_log_profile_falls_back_to_the_environment_DEFAULT():
+    """Closing the gap without declaring the default in every intent.
+
+    Every prod-edge rule carried `log_setting: "Cortex Data Lake"` in SCM while
+    the compiler emitted None. Asserting a value this platform never writes
+    reported drift no remediation could fix; skipping it left a real change
+    invisible. Naming the default in the environment resolves both — the
+    declared state is complete, and any OTHER value is somebody changing it.
+    """
+    import yaml
+    from pathlib import Path
+
+    from fwgitops.resolve import EnvMap
+
+    root = Path(__file__).resolve().parents[1]
+    em = EnvMap.from_dict(yaml.safe_load((root / "catalog" / "environments.yaml").read_text()))
+    assert em.resolve("prod").default_log_forwarding == "Cortex Data Lake", (
+        "the environment must NAME the default, or an undeclared log profile is "
+        "uncomparable again")
+
+
+def test_a_CHANGED_log_profile_is_now_a_finding():
+    """The point of declaring the default: any other value is a change."""
+    d = compare(_declared(log_setting="Cortex Data Lake"),
+                dict(LIVE, log_setting="somewhere-else"), scope="prod-edge")
+    assert [f.field for f in d.fields] == ["log_setting"]
+
+
+def test_compiling_a_REAL_intent_applies_the_environment_default():
+    """The fallback itself, exercised.
+
+    Removing `or res.default_log_forwarding` from the compiler failed no test:
+    one test asserted the env map HOLDS the default, another compared a rule
+    built by hand with the value already set. Neither ran the line that puts the
+    two together — the same gap as `moved=[]` and the fixture that declared
+    `log_setting` explicitly.
+    """
+    import yaml
+    from pathlib import Path
+
+    from fwgitops.compiler import compile_request
+    from fwgitops.intent import load_intent
+    from fwgitops.resolve import EnvMap
+
+    root = Path(__file__).resolve().parents[1]
+    em = EnvMap.from_dict(yaml.safe_load((root / "catalog" / "environments.yaml").read_text()))
+    cats = {"service_catalog": yaml.safe_load((root / "catalog" / "services.yaml").read_text()),
+            "app_catalog": yaml.safe_load((root / "catalog" / "apps.yaml").read_text())}
+    doc = yaml.safe_load((root / "intent" / "prod" / "observability"
+                          / "REQ-2026-0725.yaml").read_text())
+    assert "log_forwarding" not in (doc.get("spec") or {}), (
+        "this test needs an intent that declares NO log profile")
+
+    ch = compile_request(load_intent(doc, env_map=em, **cats), em)
+    assert ch.rule.log_setting == "Cortex Data Lake", (
+        "an intent declaring no log profile must compile to the environment's "
+        "default, or the field is uncomparable and a change to it invisible")

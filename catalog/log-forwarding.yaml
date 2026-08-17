@@ -9,3 +9,6 @@
 # NameCatalog shape) even though these are log-forwarding profiles.
 profiles:
   - log-best
+  # SCM's default for a rule that declares no profile — named in
+  # catalog/environments.yaml as `default_log_forwarding`.
+  - Cortex Data Lake

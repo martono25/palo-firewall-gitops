@@ -8,6 +8,16 @@ prod:
   from_zone: local      # SCM/NGFW default zone (exists on the device)
   to_zone: internet     # SCM/NGFW default zone (exists on the device)
 
+  # The log-forwarding profile SCM applies to a rule that declares none.
+  #
+  # DECLARED, NOT LEFT IMPLICIT. Every rule in this folder carried
+  # "Cortex Data Lake" while the compiler emitted nothing, so the field could
+  # not be compared at all: asserting a value this platform never writes
+  # reported drift no remediation could fix, and skipping it left a real change
+  # invisible. Naming the default makes the declared state complete — and any
+  # OTHER value on a rule is now somebody having changed it.
+  default_log_forwarding: Cortex Data Lake
+
   # Other zones that ALREADY EXIST in this folder and may be referenced by a
   # rule without a ZoneRequest. Verified against the live tenant 2026-07-31 via
   # GET /config/network/v1/zones?folder=prod-edge — the folder carries seven
