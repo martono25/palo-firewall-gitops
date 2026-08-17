@@ -22,6 +22,11 @@ as is safe.
 
 ## Guides
 
+**Never used this before?** Start with
+[`tutorial-your-first-rule.md`](docs/tutorial-your-first-rule.md) — you add one
+real rule and watch the platform check it, tier it, apply it and record it. The
+first three steps run entirely on your laptop and need no credentials.
+
 **Starting from nothing?** The four guides hand off to each other in this order,
 and each one ends by pointing at the next:
 

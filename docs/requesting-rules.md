@@ -1,5 +1,9 @@
 # Requesting a firewall rule
 
+*New here? [tutorial-your-first-rule.md](tutorial-your-first-rule.md) walks one
+request end to end in six steps. This page is the full field reference.*
+
+
 This guide walks you through requesting a firewall rule change **from start to
 finish**, using only your web browser. You describe *what you need* in a small
 file, open a pull request, and — once approved and merged — the platform applies
