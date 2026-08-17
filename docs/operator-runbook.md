@@ -113,9 +113,9 @@ summary is worth having in your head:
 
 ## An emergency change has a deadline
 
-**Anything you create by hand in SCM is deleted at 03:00 Singapore time**
-(19:00 UTC) by the `remediate` job. The nightly detection runs an hour earlier,
-at 02:00 SGT.
+**Anything you create by hand in SCM is deleted at 10:00 Singapore time**
+(02:00 UTC) by the `remediate` job. The nightly detection runs an hour earlier,
+at 09:00 SGT.
 
 Evening rather than the small hours, deliberately: an emergency change made
 overnight has the whole working day to become an AccessRequest, and the run
@@ -144,8 +144,8 @@ gh workflow run remediate.yml -f dry_run=true
 
 | Time (SGT) | Job | Does |
 |---|---|---|
-| 02:00 | `drift-detect` | reads SCM, records every finding, fails the run |
-| 03:00 | `remediate` | **deletes** what Git does not declare, then **restores** what it does |
+| 09:00 | `drift-detect` | reads SCM, records every finding, fails the run |
+| 10:00 | `remediate` | **deletes** what Git does not declare, then **restores** what it does |
 
 Deletion and restoration are two halves of one rule: config Git does not declare
 is removed, config Git declares is put back. Neither asks for approval — the

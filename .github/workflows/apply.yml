@@ -124,6 +124,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # WAIT FOR THE STATE LOCK, DO NOT FAIL ON IT (`-lock-timeout=15m` below).
+  #
+  # The unattended restore failed twice on `Error acquiring the state lock`, and
+  # the second time the lock named its own holder:
+  #
+  #     Operation: OperationTypePlan   Created: 19:20:19
+  #
+  # One minute after that remediation run began. Remediation deletes what nobody
+  # authorised, opens the pull request that RECORDS the deletion, and that PR
+  # triggers `pr-validate` — which runs `terraform plan` and takes the lock. The
+  # restore leg then collides with the validation of its own evidence.
+  #
+  # Concurrency groups cannot fix it: pr-validate runs on the PR ref, a
+  # different group by construction. The remedy is the one Terraform already
+  # provides — QUEUE for the lock rather than fail, since the contention is
+  # brief and legitimate.
+  #
   # ── TIER ROUTING: who has to approve depends on how risky the change is ───
   #
   # This existed as a commented-out "Phase 2 slot" until v2.1.0, and its absence
@@ -368,7 +385,7 @@ jobs:
             # without this the apply silently drops the config and reports success.
             # Authoritative check is tfcontract.check_contract at compile time;
             # this backstops hand-edited tfvars and terraform/ changes.
-            terraform -chdir="$dir" plan -input=false -no-color 2>&1 | tee "plan-$folder.txt"
+            terraform -chdir="$dir" plan -input=false -no-color -lock-timeout=15m 2>&1 | tee "plan-$folder.txt"
             if grep -q "Value for undeclared variable" "plan-$folder.txt"; then
               echo "::error::$folder: compiled tfvars set a variable the Terraform module does not declare — the config would be SILENTLY IGNORED. Refusing to apply."
               exit 1
@@ -392,7 +409,7 @@ jobs:
 
             # -parallelism=1 REQUIRED: the scm provider cannot handle concurrent
             # token acquisition (spike 2026-07-19) — serial apply only.
-            terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1 \
+            terraform -chdir="$dir" apply -input=false -auto-approve -parallelism=1 -lock-timeout=15m \
               2>&1 | tee "apply-$folder.txt"
 
             # DID THE APPLY ACTUALLY CHANGE ANYTHING? Read from what it DID, not

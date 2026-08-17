@@ -28,10 +28,10 @@ name: remediate
 
 on:
   schedule:
-    # 19:00 UTC == 03:00 SGT, one hour after drift-detect. The hour is the gap
+    # 02:00 UTC == 10:00 SGT, one hour after drift-detect. The hour is the gap
     # in which a detected finding can still be fixed by hand before anything is
     # destroyed.
-    - cron: "0 19 * * *"  # daily 03:00 SGT
+    - cron: "0 2 * * *"   # daily 10:00 SGT
   workflow_dispatch:
     inputs:
       dry_run:
