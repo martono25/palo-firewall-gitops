@@ -16,6 +16,29 @@ Terraform, the SCM API, or PAN-OS internals. Just follow the steps.
 
 ---
 
+## Log forwarding, and why you rarely declare it
+
+A rule that says nothing about log forwarding still gets a profile: the one the
+environment names as its default (`default_log_forwarding` in
+`catalog/environments.yaml`, currently `Cortex Data Lake` for `prod`).
+
+That is deliberate, and it is what makes the field enforceable. Before v3.0.0 the
+compiler emitted nothing while SCM held a value, so the field could not be
+compared in either direction — asserting a value the platform never writes
+reported drift no remediation could fix, and skipping it left a real change
+invisible. Naming the default makes the declared state complete: **any other
+value on a rule is somebody having changed it**, and drift says so.
+
+Declare `log_forwarding` only when you want a profile other than the default:
+
+```yaml
+spec:
+  environment: prod
+  log_forwarding: log-best    # must exist in catalog/log-forwarding.yaml
+```
+
+An unknown name is rejected at PR time rather than failing at the device commit.
+
 ## Turning a rule off without deleting it
 
 A rule is IN FORCE unless the intent says otherwise. The field is optional, and

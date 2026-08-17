@@ -191,6 +191,8 @@ jq -r 'select(.status=="open") | "\(.class)\t\(.scope)/\(.name)\tsince \(.first_
 | `class: unmanaged` | someone created this outside the pipeline; nothing authorised it. Covers security rules AND address/service objects — the latter only since 2026-08-16 |
 | `class: malformed` | it carries `gitops:managed` but traces to no request of its own — including a **console copy** of a managed rule, which inherits the tags and is given away only by its name |
 | `class: orphaned` | authorised once, no longer declared in Git |
+| `class: modified` | a managed rule's live config differs from what Git declares. The rule is authorised, correctly named and correctly tagged, so every provenance check passes while it does something nobody approved — a widened destination is indistinguishable from the original by inspection. **Remedied by re-applying, not deleting** |
+| `class: missing` | a rule Git declares is absent from SCM. Somebody deleted approved policy; if it was a deny, a path is now open that nothing else reports. Recreated by the next apply |
 | `class: reordered` | a managed rule sits somewhere other than its deployed position. No rule was added, removed or edited — every one is authorised — so nothing looks wrong on inspection while the effective policy has changed |
 | `RULE ORDER DRIFT` | managed rules are not in deployment order — someone reordered the rulebase. Order **is** policy: a permissive rule above a restrictive one changes what passes without editing either. Fixed by re-running the apply, which re-asserts the order |
 | `resolved_at: null` | still open. This is the field that answers "is it still there" — **not** `last_seen`, which records when the record last *changed* |
