@@ -183,11 +183,12 @@ def apply_adoption(adoption: "Adoption", *, folders_text: str, interfaces_text: 
     if interfaces != interfaces_text:
         out["catalog/interfaces.yaml"] = interfaces
 
+    folders = out.get("catalog/folders.yaml", folders_text)
+    folders = _add_device(folders, adoption.folder, adoption.serial, adoption.display_name)
     if adoption.display_name:
-        folders = out.get("catalog/folders.yaml", folders_text)
         folders = _set_display_name(folders, adoption.serial, adoption.display_name)
-        if folders != folders_text:
-            out["catalog/folders.yaml"] = folders
+    if folders != folders_text:
+        out["catalog/folders.yaml"] = folders
 
     return out
 
@@ -251,13 +252,61 @@ def _set_device_port(text: str, role: str, serial: str, port: str) -> str:
                      + block[entry.end():])
         return text[:role_at.end()] + new_block + text[end:]
 
-    devices_at = re.search(r"^(\s+)devices:\s*$", block, re.M)
+    block = _open_empty_map(block, "devices")
+    devices_at = re.search(r"^(\s+)devices:[ \t]*(#[^\n]*)?$", block, re.M)
     if not devices_at:
         return text
     insert = devices_at.end() + 1
     indent = devices_at.group(1) + "  "
     return (text[:role_at.end()] + block[:insert]
             + f'{indent}"{serial}": {port}\n' + block[insert:] + text[end:])
+
+
+def _open_empty_map(block: str, key: str) -> str:
+    """`key: {}` -> `key:`, keeping any trailing comment, so an entry can go under it.
+
+    An EMPTY map is written in flow style, and the entry regexes only knew the
+    block form. That is how adopting the first firewall into a folder with none
+    exited 0 having written nothing (2026-09-15).
+    """
+    import re
+
+    return re.sub(rf"^(\s+){key}:[ \t]*\{{\s*\}}([ \t]*#[^\n]*)?$",
+                  lambda m: f"{m.group(1)}{key}:{m.group(2) or ''}", block, count=1,
+                  flags=re.M)
+
+
+def _add_device(text: str, folder: str, serial: str, name: Optional[str]) -> str:
+    """Declare `serial` under `folders.<folder>.devices` when it is not there.
+
+    Replacement renames an existing entry and a re-run updates one; neither can
+    create the FIRST. Only what SCM told us is written — `display_name` — plus
+    `targetable: true`, which is what adopting a firewall means. `model` is not
+    written: nothing reads it, and a typed value is what this command removes.
+    """
+    import re
+
+    if re.search(rf'^\s+"{re.escape(serial)}":\s*$', text, re.M):
+        return text
+    at = re.search(rf"^  {re.escape(folder)}:\s*$", text, re.M)
+    if not at:
+        return text
+    nxt = re.search(r"^  \S", text[at.end():], re.M)
+    end = at.end() + (nxt.start() if nxt else len(text) - at.end())
+    block = _open_empty_map(text[at.end():end], "devices")
+    dev = re.search(r"^(\s+)devices:[ \t]*(#[^\n]*)?$", block, re.M)
+    indent = (dev.group(1) if dev else "    ") + "  "
+    entry = (f'{indent}# Adopted from SCM by `fwgitops adopt-device`.\n'
+             f'{indent}"{serial}":\n'
+             + (f"{indent}  display_name: {name}\n" if name else "")
+             + f"{indent}  targetable: true\n")
+    if dev:
+        cut = dev.end() + 1
+        block = block[:cut] + entry + block[cut:]
+    else:
+        body = block if block.endswith("\n") else block + "\n"
+        block = body + f"{indent[:-2]}devices:\n" + entry
+    return text[:at.end()] + block + text[end:]
 
 
 def _set_display_name(text: str, serial: str, name: str) -> str:

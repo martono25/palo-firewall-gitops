@@ -3143,6 +3143,29 @@ def run_adopt_device(
                 if replacing and replacing != serial else None)
     root_work = (not new_root.exists()) or (old_root is not None and old_root.is_dir())
 
+    # POST-CONDITION: the catalog this would leave behind DECLARES the firewall.
+    # On 2026-09-15 adoption into a folder with no firewall wrote nothing, then
+    # printed the port map and "OK — scaffolded" and exited 0 — a success message
+    # over an unchanged catalog. Checking the RESULT rather than trusting the
+    # edit is what turns the next such gap into a refusal.
+    from fwgitops.catalog import FolderHierarchy, InterfaceCatalog
+    import yaml as _yaml
+    try:
+        after_h = FolderHierarchy.from_dict(_yaml.safe_load(
+            changes.get("catalog/folders.yaml", folders_path.read_text())))
+        after_i = InterfaceCatalog.from_dict(_yaml.safe_load(
+            changes.get("catalog/interfaces.yaml", ifaces_path.read_text())))
+    except Exception as e:  # noqa: BLE001
+        print(f"error: the adopted catalog would not parse: {e}", file=err)
+        return 3
+    missing = [] if after_h.is_device_targetable(serial) else ["catalog/folders.yaml"]
+    missing += [f"catalog/interfaces.yaml ({role})" for role in sorted(adoption.ports)
+                if after_i.device_names.get(role, {}).get(serial) != adoption.ports[role]]
+    if missing:
+        print(f"error: adoption would leave {serial} undeclared in: "
+              + ", ".join(missing) + ". Nothing written.", file=err)
+        return 3
+
     if not changes and not root_work:
         print("nothing to change — the repository already matches SCM", file=out)
         return 0

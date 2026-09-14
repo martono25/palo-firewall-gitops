@@ -79,15 +79,17 @@ interfaces:
     # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
     # Name at DEVICE scope, per firewall. A firewall absent here cannot be
     # targeted for this role: fail closed rather than guess a port.
-    # EMPTY since 2026-09-14: no firewall is registered (see folders.yaml).
-    # The retired 2404 mapped this to ethernet1/1 (ENI device index 1).
-    devices: {}
+    # ENI device index 1 (trust subnet 10.100.3.0/24). Written by
+    # `fwgitops adopt-device` from SCM's $eth-local default, 2026-09-15.
+    devices:
+      "007955000919340": ethernet1/1
 
   internet:
     description: Outside / untrust segment.
     folder: $eth-internet
     # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
-    devices: {}   # retired 2404: ethernet1/2 (ENI device index 2)
+    devices:   # ENI device index 2 (untrust subnet 10.100.2.0/24)
+      "007955000919340": ethernet1/2
 
   dmz:
     description: >-
@@ -122,6 +124,6 @@ interfaces:
     site_specific: true
     # A firewall absent from this map cannot be targeted for this role — fail
     # closed rather than guess a port that may have no ENI behind it.
-    # EMPTY since 2026-09-14; the retired 2404 used ethernet1/3 (ENI device
-    # index 3).
-    devices: {}
+    # ENI device index 3 (dmz subnet 10.100.1.0/24).
+    devices:
+      "007955000919340": ethernet1/3

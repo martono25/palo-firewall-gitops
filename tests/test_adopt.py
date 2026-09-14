@@ -345,3 +345,69 @@ def test_without_a_ticket_the_intents_are_left_alone():
                          intent_files={"intent/prod/f/REQ-1.yaml": body},
                          replacing="OLD-1")
     assert "ticket: JIRA-OLD" in out["intent/prod/f/REQ-1.yaml"]
+
+
+# ── adopting into a folder with NO firewall ────────────────────────────────
+# FOUND ON THE LIVE RUN, 2026-09-15. The pilot's only firewall was retired with
+# its AWS account, leaving `devices: {}` in both catalogs. Adopting its
+# replacement exited 0, printed the port map and "OK — scaffolded", and wrote
+# NOTHING to either catalog: the command could update a serial already listed
+# or replace one serial with another, and had never had to ADD one. A success
+# message over an unchanged catalog is the silent partial adoption this command
+# exists to remove.
+
+EMPTY_FOLDERS = '''folders:
+  prod-edge:
+    # Production.
+    children: []
+    targetable: true
+    devices: {}
+  GitOps:
+    children: []
+    targetable: true
+'''
+
+EMPTY_INTERFACES = '''interfaces:
+  local:
+    folder: $eth-local
+    # EMPTY since 2026-09-14.
+    devices: {}
+
+  internet:
+    folder: $eth-internet
+    devices: {}   # retired: ethernet1/2
+'''
+
+
+def test_a_FIRST_firewall_is_ADDED_to_a_folder_with_none():
+    import yaml
+    from fwgitops.catalog import FolderHierarchy
+    out = apply_adoption(_adoption(), folders_text=EMPTY_FOLDERS,
+                         interfaces_text=EMPTY_INTERFACES, intent_files={})
+    assert "catalog/folders.yaml" in out, "nothing written — the silent no-op"
+    h = FolderHierarchy.from_dict(yaml.safe_load(out["catalog/folders.yaml"]))
+    assert h.is_device_targetable("NEW-2")
+    assert h.device_display_names.get("NEW-2") == "fw-prod-edge-new"
+    assert "NEW-2" not in yaml.safe_load(out["catalog/folders.yaml"])["folders"]["GitOps"].get(
+        "devices", {}) , "added under the adopted folder only"
+    assert "# Production." in out["catalog/folders.yaml"], "comments survive"
+
+
+def test_a_FIRST_firewall_gets_its_ports_in_an_EMPTY_flow_map():
+    import yaml
+    out = apply_adoption(_adoption(), folders_text=EMPTY_FOLDERS,
+                         interfaces_text=EMPTY_INTERFACES, intent_files={})
+    assert "catalog/interfaces.yaml" in out, "nothing written — the silent no-op"
+    doc = yaml.safe_load(out["catalog/interfaces.yaml"])["interfaces"]
+    assert doc["local"]["devices"] == {"NEW-2": "ethernet1/1"}
+    assert doc["internet"]["devices"] == {"NEW-2": "ethernet1/2"}
+    text = out["catalog/interfaces.yaml"]
+    assert "# EMPTY since 2026-09-14." in text and "# retired: ethernet1/2" in text
+
+
+def test_adopting_the_first_firewall_is_IDEMPOTENT():
+    first = apply_adoption(_adoption(), folders_text=EMPTY_FOLDERS,
+                           interfaces_text=EMPTY_INTERFACES, intent_files={})
+    again = apply_adoption(_adoption(), folders_text=first["catalog/folders.yaml"],
+                           interfaces_text=first["catalog/interfaces.yaml"], intent_files={})
+    assert again == {}, f"a re-run must write nothing, wrote {sorted(again)}"
