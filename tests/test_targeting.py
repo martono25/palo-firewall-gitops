@@ -30,14 +30,18 @@ from fwgitops.intent import IntentError, load_intent  # noqa: E402
 from fwgitops.kinds import compile_any  # noqa: E402
 from fwgitops.resolve import EnvMap  # noqa: E402
 
+from onboarded_catalog import EXAMPLE_SERIAL, onboarded_dicts  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SANDBOX = "GitOps"          # a real container folder, targetable
-DEVICE = "007955000902404"  # an `on-prem` DEVICE entry — NOT a folder
+DEVICE = EXAMPLE_SERIAL     # an `on-prem` DEVICE entry — NOT a folder
 
 
 def _hierarchy():
-    return FolderHierarchy.from_dict(
-        yaml.safe_load((REPO_ROOT / "catalog" / "folders.yaml").read_text()))
+    """The real hierarchy with a firewall ONBOARDED. Targeting rules are the
+    subject here, not which firewall SCM holds today — prod-edge had none at
+    all from 2026-09-14."""
+    return FolderHierarchy.from_dict(onboarded_dicts(DEVICE)[0])
 
 
 def _env():

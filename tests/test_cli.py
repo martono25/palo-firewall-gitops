@@ -414,32 +414,49 @@ def _session(**kw):
     return ScmSession(CREDS, transport=_scm_transport(**kw))
 
 
-def test_cli_push_success_scoped_to_service_account(capsys):
+def _folders_with_a_firewall(tmp_path):
+    """folders.yaml with a firewall ONBOARDED under prod-edge.
+
+    Push SKIPS a folder with no firewall beneath it — correctly. These tests are
+    about what a push SENDS, so they need one to exist; from 2026-09-14 the live
+    catalog held none, and reading it made every one of them a skip."""
+    import yaml as _yaml
+    from onboarded_catalog import onboarded_dicts
+    p = tmp_path / "folders.yaml"
+    p.write_text(_yaml.safe_dump(onboarded_dicts()[0]))
+    return p
+
+
+def test_cli_push_success_scoped_to_service_account(tmp_path, capsys):
     sink = []
-    rc = run_push("prod-edge", session=ScmSession(CREDS, transport=_scm_transport(sink=sink)))
+    rc = run_push("prod-edge", catalog_path=_folders_with_a_firewall(tmp_path),
+                  session=ScmSession(CREDS, transport=_scm_transport(sink=sink)))
     assert rc == 0
     assert "OK — success" in capsys.readouterr().out
     assert sink[-1]["admin"] == [SA]          # default: commit only our SA's changes
 
 
-def test_cli_push_all_admins_is_unscoped(capsys):
+def test_cli_push_all_admins_is_unscoped(tmp_path, capsys):
     sink = []
-    rc = run_push("prod-edge", all_admins=True,
+    rc = run_push("prod-edge", all_admins=True, catalog_path=_folders_with_a_firewall(tmp_path),
                   session=ScmSession(CREDS, transport=_scm_transport(sink=sink)))
     assert rc == 0
     assert "admin" not in sink[-1]            # break-glass: whole candidate
 
 
-def test_cli_push_noop_when_nothing_staged(capsys):
-    rc = run_push("prod-edge", session=_session(nothing_to_push=True))
+def test_cli_push_noop_when_nothing_staged(tmp_path, capsys):
+    rc = run_push("prod-edge", catalog_path=_folders_with_a_firewall(tmp_path),
+                  session=_session(nothing_to_push=True))
     assert rc == 0
     assert "noop" in capsys.readouterr().out
 
 
-def test_cli_push_missing_env_exits_1(monkeypatch, capsys):
+def test_cli_push_missing_env_exits_1(tmp_path, monkeypatch, capsys):
     for v in ("SCM_CLIENT_ID", "SCM_CLIENT_SECRET", "SCM_SCOPE"):
         monkeypatch.delenv(v, raising=False)
-    rc = run_push("prod-edge")   # no session -> from_env -> missing -> 1
+    # no session -> from_env -> missing -> 1. Needs a firewall beneath, or the
+    # push is SKIPPED before credentials are ever read and exits 0.
+    rc = run_push("prod-edge", catalog_path=_folders_with_a_firewall(tmp_path))
     assert rc == 1
 
 
@@ -987,8 +1004,14 @@ def test_a_push_record_is_matched_by_SCOPE_not_by_scm_address(tmp_path):
         "status": "success", "job_id": "191", "admin_count": 1, "all_admins": False,
     }))
     out_root = tmp_path / "evidence"
+    # A catalog with the firewall ONBOARDED. This test needs a device-scoped
+    # change to exist; which firewall SCM holds today is not its subject.
+    from onboarded_catalog import onboarded_catalog_dir
+    cat = onboarded_catalog_dir(tmp_path / "catalog")
     assert run_evidence(intent_root, env_map, out_root, push_records=[rec],
-                        tfvars_root=tmp_path / "tf") == 0
+                        tfvars_root=tmp_path / "tf",
+                        service_catalog_path=cat / "services.yaml",
+                        app_catalog_path=cat / "apps.yaml") == 0
 
     device = json.loads(
         (out_root / "device-007955000902404" / "REQ-2026-0801.json").read_text())
@@ -1043,14 +1066,17 @@ def _catalog_pair(tmp_path):
     under test.
     """
     import re, shutil
-    real = Path(__file__).resolve().parents[1] / "catalog"
+    from onboarded_catalog import onboarded_catalog_dir
     before, after = tmp_path / "cat-before", tmp_path / "cat-after"
-    shutil.copytree(real, before)
-    shutil.copytree(real, after)
     # The serial comes FROM the fixture, not a literal: a repo-wide rename of the
     # live serial once left this pointing at a device that was already absent,
     # so the "should fail" case passed for the wrong reason.
     serial = re.search(r'device:\s*"(\d+)"', DEVICE_INTENT).group(1)
+    # `before` ONBOARDS it rather than borrowing the live firewall: the live
+    # catalog held none at all from 2026-09-14, which failed this test for a
+    # reason unrelated to baselines.
+    onboarded_catalog_dir(before, serial)
+    shutil.copytree(before, after)
     # `after` forgets that firewall — the state of the world once it is replaced.
     for name in ("folders.yaml", "interfaces.yaml"):
         text = (after / name).read_text()
@@ -1168,9 +1194,11 @@ def test_cli_push_does_NOT_skip_a_parent_whose_CHILD_has_a_firewall(capsys):
     reaches `prod-edge`'s firewall. A non-transitive check would skip it and
     silently stop pushing the folder with the largest blast radius."""
     from fwgitops.catalog import FolderHierarchy
-    from fwgitops.io import read_yaml
+    from onboarded_catalog import onboarded_dicts
 
-    h = FolderHierarchy.from_dict(read_yaml(Path("catalog/folders.yaml")))
+    # Onboarded: transitivity is the subject. The live hierarchy had no
+    # firewall anywhere from 2026-09-14, so it could not show inheritance.
+    h = FolderHierarchy.from_dict(onboarded_dicts()[0])
     assert h.devices_beneath("ngfw-shared"), (
         "ngfw-shared must stay pushable — it inherits down to a real firewall")
     assert not h.devices_beneath("GitOps")

@@ -10,6 +10,12 @@ the scope those rules land in.
 > failed the first time, it says so — those are the parts you would otherwise
 > rediscover against a production firewall.
 >
+> **That firewall was retired on 2026-09-14**, when the AWS account hosting it
+> expired. Its three device intents are in Git history, and its serial lives on
+> as the worked example here and in `intent/prod/edge-example/` — a retired
+> serial can never be registered again, so an example can never be mistaken for
+> a live device. Substitute your firewall's serial wherever this guide shows it.
+>
 > Each `spec:` shown is **verbatim** from the file it links, and a test asserts
 > that it stays that way. The `metadata:` blocks are abbreviated for reading —
 > the real `justification` fields are longer. So trust the behaviour shown here
