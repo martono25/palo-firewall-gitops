@@ -15,6 +15,13 @@ All notable changes to `fwgitops` are documented here. This project follows
   recovery of objects this pipeline created, not the adoption ADR-0011 forbids.
   Plan before apply: `0 to add, 0 to destroy`.
 
+- **`device-sync` refused an empty inventory even when no firewall was
+  declared**, and as the first step of drift-detect it skipped every rule, state
+  and object detector behind it — so enforcement stayed blind after the AWS
+  recovery. An empty inventory now passes only when `catalog/folders.yaml`
+  declares no firewall; declared-but-missing, or an unreadable catalog, still
+  fails closed.
+
 ### Changed
 
 - **The pilot firewall `007955000902404` is retired.** It died with that account
