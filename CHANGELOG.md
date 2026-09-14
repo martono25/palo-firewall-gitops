@@ -5,6 +5,34 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nightly enforcement was blind for 17 days, and nothing said so in words.**
+  The AWS account holding Terraform state expired; from 2026-08-29 every
+  drift-detect and remediate run failed on `Could not assume role with OIDC`.
+  State, the CI role and the state bucket are rebuilt in the new account, and
+  the 10 declared SCM resources are re-imported by `imports_recovery.tf` — state
+  recovery of objects this pipeline created, not the adoption ADR-0011 forbids.
+  Plan before apply: `0 to add, 0 to destroy`.
+
+### Changed
+
+- **The pilot firewall `007955000902404` is retired.** It died with that account
+  and left SCM when it was deleted from CSP. Removed from `catalog/folders.yaml`
+  and `catalog/interfaces.yaml` on the precedent `007955000893662` set, with its
+  device intents (REQ-2026-0801/0802/0805) and its Terraform root. `prod-edge`
+  has no firewall until the replacement registers under its own serial; compile
+  and `verify-catalog` both say so.
+- **Tests no longer depend on which firewall is registered.** Device-scope tests
+  borrowed the live one, whose serial has now changed five times — each a
+  repo-wide rename through tests that were never about it, and one of which let
+  a "should fail" case pass for the wrong reason. Retiring the only firewall
+  failed 15 tests on a change that broke no behaviour. They now onboard a
+  firewall into a copy of the real catalog (`tests/onboarded_catalog.py`); tests
+  whose subject IS this repository's catalog and intents still read the real
+  ones. Device-root coverage is kept by scaffolding a root with `scaffold-root`,
+  the generator the next firewall will actually use.
+
 ## [3.0.0] - 2026-08-17
 
 **Drift is remediated, not just reported.** Config no request authorised is now

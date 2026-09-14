@@ -19,7 +19,7 @@ dev = ["pytest>=8", "ruff"]
 packages = ["src/fwgitops"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 testpaths = ["tests"]
 
 [tool.ruff]

@@ -60,6 +60,15 @@
 #  to catch, and leaving it would have meant every run reporting a known
 #  stale entry until people stopped reading the output.)
 #
+# RE-VERIFIED 2026-09-14: prod-edge -> firewalls {} — NONE.
+# 007955000902404 (fw-prod-edge-2404) died with the AWS account that hosted it
+# and was deleted from CSP, which removed it from SCM. Removed here the same
+# day, on the precedent above, together with its interface mappings and its
+# three device intents (REQ-2026-0801/0802/0805 — in Git history). prod-edge
+# stays targetable: its rules are live in SCM and enforced; they reach no
+# firewall until the replacement VM registers and is onboarded under its OWN
+# serial (`fwgitops onboard`, then `scaffold-root --device`).
+#
 # Prisma Access built-ins (Mobile Users, Remote Networks, …) are not managed by
 # this platform and are deliberately absent.
 folders:
@@ -69,24 +78,25 @@ folders:
     targetable: false
 
   prod-edge:
-    # Production. No child CONTAINERS, but two firewalls beneath it — a change
-    # here reaches both, which is this folder's purpose rather than a hidden
-    # fan-out, so it stays targetable and is not tiered up for it.
+    # Production. No child CONTAINERS; the firewalls beneath it are listed
+    # under `devices:` — a change here reaches all of them, which is this
+    # folder's purpose rather than a hidden fan-out, so it stays targetable and
+    # is not tiered up for it.
     children: []
     targetable: true
-    devices:
-      # Addressed as `device: <serial>` in an intent, NEVER `folder:`.
-      "007955000902404":
-        # The label SCM shows in its inventory — NOT the firewall's hostname
-        # (that is ip-10-100-0-51, DHCP-assigned, undeclared). A re-onboard
-        # RESETS it: this went to `PA-VM` on 2026-08-05 and nothing noticed.
-        # `fwgitops verify-catalog` now compares it, because the reset is
-        # cosmetic but is a reliable symptom of a re-registration — and a
-        # re-registration wipes device-scope config.
-        display_name: fw-prod-edge-2404
-        model: PA-VM
-        # CONNECTED 2026-08-02. A push can commit to it.
-        targetable: true
+    # NO FIREWALL since 2026-09-14 (see the header). When one registers, add it:
+    #
+    #   devices:
+    #     # Addressed as `device: <serial>` in an intent, NEVER `folder:`.
+    #     "<serial>":
+    #       # The label SCM shows in its inventory — NOT the hostname. A
+    #       # re-onboard RESETS it, and `verify-catalog` compares it, because
+    #       # that reset is a reliable symptom of a re-registration — which
+    #       # wipes device-scope config.
+    #       display_name: fw-prod-edge-<last 4 of serial>
+    #       model: PA-VM
+    #       targetable: true
+    devices: {}
   GitOps:
     # Sandbox: zero devices, nothing inherits from it. Where the provider
     # fidelity probes run (spike/*-probe).

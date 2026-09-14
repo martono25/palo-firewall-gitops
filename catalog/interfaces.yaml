@@ -79,15 +79,15 @@ interfaces:
     # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
     # Name at DEVICE scope, per firewall. A firewall absent here cannot be
     # targeted for this role: fail closed rather than guess a port.
-    devices:
-      "007955000902404": ethernet1/1
+    # EMPTY since 2026-09-14: no firewall is registered (see folders.yaml).
+    # The retired 2404 mapped this to ethernet1/1 (ENI device index 1).
+    devices: {}
 
   internet:
     description: Outside / untrust segment.
     folder: $eth-internet
     # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
-    devices:
-      "007955000902404": ethernet1/2
+    devices: {}   # retired 2404: ethernet1/2 (ENI device index 2)
 
   dmz:
     description: >-
@@ -120,8 +120,8 @@ interfaces:
     # unmapped firewall, so an intent naming one with `interface: dmz` is
     # rejected at load rather than compiling into a port that may not exist.
     site_specific: true
-    devices:
-      # ethernet1/2 = ENI device index 2, 10.100.1.110/24. A firewall absent
-      # from this map cannot be targeted for this role — fail closed rather than
-      # guess a port that may have no ENI behind it.
-      "007955000902404": ethernet1/3
+    # A firewall absent from this map cannot be targeted for this role — fail
+    # closed rather than guess a port that may have no ENI behind it.
+    # EMPTY since 2026-09-14; the retired 2404 used ethernet1/3 (ENI device
+    # index 3).
+    devices: {}

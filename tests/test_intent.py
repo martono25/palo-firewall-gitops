@@ -642,9 +642,18 @@ def test_every_shipped_intent_still_loads():
         router_catalog=RouterCatalog.from_dict(
             _yaml.safe_load((root / "catalog" / "routers.yaml").read_text())),
     )
+    # THE OPERATIONAL TREE LOADS AGAINST THE REAL CATALOG — that pairing is the
+    # subject of this test. `*.example.yaml` is documentation: it shows a
+    # device-scoped intent whether or not a firewall is registered today, so it
+    # loads against a catalog with one onboarded (tests/onboarded_catalog.py).
+    # Before 2026-09-14 both used the real catalog, and retiring the only
+    # firewall failed this test on a change that broke no shipped intent.
+    from onboarded_catalog import load_kwargs
+    example_kw = load_kwargs()
     seen = 0
     for path in sorted((root / "intent").rglob("*.yaml")):
-        load_intent(_yaml.safe_load(path.read_text()), **kw)
+        is_example = path.name.endswith(".example.yaml")
+        load_intent(_yaml.safe_load(path.read_text()), **(example_kw if is_example else kw))
         seen += 1
     assert seen >= 10
 
@@ -785,13 +794,11 @@ def test_every_example_in_the_requester_guide_actually_LOADS():
         f = root / "catalog" / name
         return cls.from_dict(_yaml.safe_load(f.read_text())) if f.is_file() else None
 
-    kw = dict(
-        env_map=env,
-        folder_hierarchy=_cat(FolderHierarchy, "folders.yaml"),
-        interface_catalog=_cat(InterfaceCatalog, "interfaces.yaml"),
-        router_catalog=_cat(RouterCatalog, "routers.yaml"),
-        service_catalog=_cat(ServiceCatalog, "services.yaml"),
-    )
+    # A catalog with a firewall ONBOARDED, not the live one: the examples show
+    # device scope, and whether a firewall is registered TODAY is deployed
+    # state — the same coupling the next test's docstring describes for intents.
+    from onboarded_catalog import load_kwargs
+    kw = load_kwargs()
     text = (root / "docs" / "requesting-rules.md").read_text()
     # EVERY kind, not just AccessRequest. The guide gained Zone/Interface/Route
     # examples in v2.0.0, and an example a requester is told to copy is a claim
@@ -839,14 +846,11 @@ def test_every_example_in_the_folder_guide_LOADS_and_matches_the_real_intents():
         f = root / "catalog" / name
         return cls.from_dict(_yaml.safe_load(f.read_text())) if f.is_file() else None
 
-    kw = dict(
-        env_map=EnvMap.from_dict(
-            _yaml.safe_load((root / "catalog" / "environments.yaml").read_text())),
-        folder_hierarchy=_cat(FolderHierarchy, "folders.yaml"),
-        interface_catalog=_cat(InterfaceCatalog, "interfaces.yaml"),
-        router_catalog=_cat(RouterCatalog, "routers.yaml"),
-        service_catalog=_cat(ServiceCatalog, "services.yaml"),
-    )
+    # A catalog with a firewall ONBOARDED, not the live one: the examples show
+    # device scope, and whether a firewall is registered TODAY is deployed
+    # state — the same coupling the next test's docstring describes for intents.
+    from onboarded_catalog import load_kwargs
+    kw = load_kwargs()
     text = (root / "docs" / "building-a-folder.md").read_text()
     blocks = [b for b in re.findall(r"```yaml\n(.*?)```", text, re.S) if "kind: " in b]
     assert len(blocks) >= 3, f"expected the three Day-1 kinds, found {len(blocks)}"
@@ -911,14 +915,11 @@ def test_the_repo_demonstrates_every_registered_kind():
         f = root / "catalog" / name
         return cls.from_dict(_yaml.safe_load(f.read_text())) if f.is_file() else None
 
-    kw = dict(
-        env_map=EnvMap.from_dict(
-            _yaml.safe_load((root / "catalog" / "environments.yaml").read_text())),
-        folder_hierarchy=_cat(FolderHierarchy, "folders.yaml"),
-        interface_catalog=_cat(InterfaceCatalog, "interfaces.yaml"),
-        router_catalog=_cat(RouterCatalog, "routers.yaml"),
-        service_catalog=_cat(ServiceCatalog, "services.yaml"),
-    )
+    # A catalog with a firewall ONBOARDED, not the live one: the examples show
+    # device scope, and whether a firewall is registered TODAY is deployed
+    # state — the same coupling the next test's docstring describes for intents.
+    from onboarded_catalog import load_kwargs
+    kw = load_kwargs()
     by_kind = {}
     for f in examples:
         doc = _yaml.safe_load(f.read_text())

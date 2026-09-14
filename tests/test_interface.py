@@ -204,7 +204,10 @@ def test_the_same_role_resolves_differently_per_scope():
 def test_a_role_is_resolved_against_the_intents_actual_target():
     from fwgitops.catalog import FolderHierarchy
     import yaml
-    h = FolderHierarchy.from_dict(yaml.safe_load((REPO_ROOT / "catalog" / "folders.yaml").read_text()))
+    from onboarded_catalog import onboarded_dicts
+    # Onboarded, not live: resolution against a target is the subject, and the
+    # live folder had no firewall to target from 2026-09-14.
+    h = FolderHierarchy.from_dict(onboarded_dicts("007955000902404")[0])
 
     at_folder = load_intent(_doc(environment=None, folder="prod-edge"),
                             interface_catalog=_ifcat(), folder_hierarchy=h)
