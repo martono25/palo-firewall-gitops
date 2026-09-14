@@ -5,6 +5,22 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- **`terraform/rebootstrap-account.sh` — moving to a new AWS account is one
+  command, and rehearsable.** The account holding state is a time-limited
+  subscription; its last expiry cost 17 blind days and a day of hand-run steps.
+  The script creates the state bucket and CI role, re-points
+  `AWS_OIDC_ROLE_ARN`, rewrites every backend, and rebuilds state with import
+  blocks — stopping unless each plan adds and destroys nothing. `--rehearse`
+  runs the rebuild against live SCM with empty scratch state and writes nothing
+  real; it passed against all three roots on 2026-09-15, and failed as it should
+  with one import removed.
+- **`fwgitops recover-state`** writes those import blocks from what Git
+  declares, never from what SCM holds. Refuses (exit 2, nothing written) when a
+  declared object is missing; skips a device root whose firewall is not
+  registered, because that is a retirement.
+
 ### Fixed
 
 - **Nightly enforcement was blind for 17 days, and nothing said so in words.**

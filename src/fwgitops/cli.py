@@ -3037,6 +3037,92 @@ def run_onboard(
     return 0
 
 
+def run_recover_state(out_root: Path, *, roots: Optional[List[str]] = None,
+                      check: bool = False, session=None, out=None, err=None) -> int:
+    """Write `imports_recovery.tf` into every root whose state was lost.
+
+    Exit 0 when every declared object was found in SCM. Exit 2 when any was NOT —
+    and then NOTHING is written: a declared object SCM lacks would be CREATED by
+    the next apply, and a partial recovery that silently creates is exactly the
+    surprise this command exists to remove. Compile first; this reads tfvars.
+    """
+    from fwgitops.recover import FILENAME, recover_root
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    candidates = sorted(p.parent for p in out_root.glob("*/main.tf")
+                        if not p.parent.name.startswith(("bootstrap-", "github-oidc", "modules"))
+                        and any(p.parent.glob("*.auto.tfvars.json")))
+    if roots:
+        wanted = set(roots)
+        candidates = [c for c in candidates if c.name in wanted]
+        unknown = wanted - {c.name for c in candidates}
+        if unknown:
+            print(f"error: no compiled root named {sorted(unknown)} under {out_root}", file=err)
+            return 1
+    if not candidates:
+        print(f"error: no compiled Terraform roots under {out_root} — run "
+              f"`fwgitops compile intent` first", file=err)
+        return 1
+    if session is None:
+        from fwgitops.scmapi import ScmCredentials, ScmSession
+        try:
+            session = ScmSession(ScmCredentials.from_env())
+        except Exception as e:  # noqa: BLE001
+            print(f"error: cannot reach SCM: {e}", file=err)
+            return 1
+
+    # A DEVICE ROOT WHOSE FIREWALL SCM DOES NOT HAVE is skipped, not "missing".
+    # On an account move the firewall dies with the account: there is nothing to
+    # import, and the right act is retiring it under its own ticket (a `Removes:`
+    # trailer), which no import can express. Blocking the folder roots on it
+    # would hold enforcement hostage to a firewall that no longer exists.
+    if any(c.name.startswith("device-") for c in candidates):
+        try:
+            registered = {str(d.get("serial_number") or d.get("id"))
+                          for d in (session.request("GET", "/config/setup/v1/devices",
+                                                    params={"limit": 200}) or {}).get("data") or []}
+        except Exception as e:  # noqa: BLE001
+            print(f"error: reading SCM devices failed: {e}", file=err)
+            return 1
+        kept = []
+        for c in candidates:
+            serial = c.name[len("device-"):] if c.name.startswith("device-") else None
+            if serial is not None and serial not in registered:
+                print(f"{c.name:28} SKIPPED — firewall {serial} is not registered in SCM. "
+                      f"Retire it: delete its intents with a `Removes:` trailer on a NEW "
+                      f"ticket, and remove it from the catalog.", file=out)
+                continue
+            kept.append(c)
+        candidates = kept
+
+    results = []
+    for root in candidates:
+        try:
+            results.append((root, recover_root(session, root)))
+        except Exception as e:  # noqa: BLE001 - an unread root must not look recovered
+            print(f"error: {root.name}: reading SCM failed: {e}", file=err)
+            return 1
+
+    missing = [(root, m) for root, rec in results for m in rec.missing]
+    for root, rec in results:
+        print(f"{root.name:28} {len(rec.blocks):3} to import"
+              + (f"   {len(rec.missing)} MISSING from SCM" if rec.missing else ""), file=out)
+    if missing:
+        for root, m in missing:
+            print(f"  - {root.name}: {m} is declared in Git but absent from SCM — the "
+                  f"next apply would CREATE it", file=err)
+        print("error: refusing to write a partial recovery. Nothing written.", file=err)
+        return 2
+    if check:
+        return 0
+    for root, rec in results:
+        if rec.blocks:
+            (root / FILENAME).write_text(rec.render())
+            print(f"wrote {root / FILENAME}", file=out)
+    return 0
+
+
 def run_adopt_device(
     serial: str,
     *,
@@ -3534,6 +3620,16 @@ def build_parser() -> argparse.ArgumentParser:
     ds = sub.add_parser("device-sync",
                         help="is each firewall running what SCM holds? (read-only)")
 
+    rs = sub.add_parser("recover-state",
+                        help="write import blocks re-attaching EMPTY Terraform state to "
+                             "the SCM objects Git declares (after an AWS account move)")
+    rs.add_argument("--out", default=Path("terraform"), type=Path,
+                    help="Terraform root directory (default: terraform)")
+    rs.add_argument("--root", action="append", default=[],
+                    help="only this root (repeatable); default every root with compiled tfvars")
+    rs.add_argument("--check", action="store_true",
+                    help="report what would be imported; write nothing")
+
     vc = sub.add_parser("verify-catalog",
                         help="verify catalog/folders.yaml against SCM's real hierarchy (read-only)")
     vc.add_argument("--folders", default=Path("catalog/folders.yaml"), type=Path)
@@ -3791,6 +3887,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     if args.command == "device-sync":
         return run_device_sync()
+
+    if args.command == "recover-state":
+        return run_recover_state(args.out, roots=args.root, check=args.check)
 
     if args.command == "verify-catalog":
         return run_verify_catalog(folders_path=args.folders,
