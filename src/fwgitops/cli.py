@@ -1743,7 +1743,8 @@ def run_verify_catalog(
     return 0
 
 
-def run_device_sync(*, session=None, out=None, err=None) -> int:
+def run_device_sync(*, session=None, catalog_path: Path = Path("catalog/folders.yaml"),
+                    out=None, err=None) -> int:
     """Is each FIREWALL running what SCM holds? READ-ONLY.
 
     Drift detection compares Git against SCM. Nothing compared SCM against the
@@ -1784,9 +1785,33 @@ def run_device_sync(*, session=None, out=None, err=None) -> int:
         # Fail closed: no devices could mean a healthy empty tenant OR a broken
         # read, and reporting "all in sync" for the second is the blindness this
         # command exists to remove.
-        print("error: SCM returned no devices; refusing to report sync status "
-              "against an empty inventory", file=err)
-        return 1
+        #
+        # THE CATALOG TELLS THE TWO APART. It declares which firewalls should
+        # exist, and `verify-catalog` holds it to SCM through a different
+        # endpoint. When it declares NONE, an empty inventory is the expected
+        # answer and there is no device a broken read could be hiding.
+        #
+        # Measured 2026-09-14: the only firewall was retired with its AWS
+        # account, and this refusal — the FIRST step of drift-detect, with no
+        # `if: always()` — skipped every rule, state and object detector behind
+        # it. A nightly job that checks nothing because nothing is plugged in
+        # is the same blindness, reached from the other side.
+        try:
+            from fwgitops.catalog import FolderHierarchy
+            from fwgitops.io import read_yaml
+            declared = sorted(FolderHierarchy.from_dict(read_yaml(catalog_path)).devices)
+        except Exception as e:  # noqa: BLE001 - unreadable catalog: cannot disambiguate
+            print(f"error: SCM returned no devices and {catalog_path} could not be "
+                  f"read to tell an empty tenant from a broken read: {e}", file=err)
+            return 1
+        if declared:
+            print("error: SCM returned no devices; refusing to report sync status "
+                  f"against an empty inventory — {catalog_path} declares "
+                  f"{', '.join(declared)}", file=err)
+            return 1
+        print(f"OK — no firewall is declared in {catalog_path} and SCM holds none: "
+              f"nothing to sync.", file=out)
+        return 0
 
     results = compare(devices, running, latest)
     problems = [r for r in results if r.is_problem]

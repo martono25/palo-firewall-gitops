@@ -134,12 +134,41 @@ def test_the_command_exits_0_for_first_push_pending_but_says_so(capsys):
     assert "NOTE" in out and "is_first_push_done" in out
 
 
-def test_an_empty_inventory_is_an_ERROR_not_a_pass(capsys):
+def _folders(tmp_path, devices):
+    import yaml
+    p = tmp_path / "folders.yaml"
+    p.write_text(yaml.safe_dump({"folders": {"prod-edge": {
+        "children": [], "targetable": True, "devices": devices}}}))
+    return p
+
+
+def test_an_empty_inventory_is_an_ERROR_when_the_catalog_expects_a_firewall(tmp_path, capsys):
     """No devices could mean a healthy empty tenant OR a broken read. Reporting
-    "all in sync" for the second is the blindness this command removes."""
-    rc = run_device_sync(session=_Session([], [], []))
+    "all in sync" for the second is the blindness this command removes — and
+    when the catalog declares a firewall, an empty inventory IS the second."""
+    cat = _folders(tmp_path, {"007955000902404": {"model": "PA-VM", "targetable": True}})
+    rc = run_device_sync(session=_Session([], [], []), catalog_path=cat)
+    err = capsys.readouterr().err
     assert rc == 1
-    assert "refusing to report sync status" in capsys.readouterr().err
+    assert "refusing to report sync status" in err and "007955000902404" in err
+
+
+def test_an_empty_inventory_PASSES_when_the_catalog_declares_no_firewall(tmp_path, capsys):
+    """Measured 2026-09-14: the only firewall was retired, SCM correctly held
+    none, and this refusal — the first step of drift-detect — skipped every
+    rule and object detector behind it. Nothing plugged in is not a reason to
+    check nothing. The catalog, held to SCM by verify-catalog, disambiguates."""
+    rc = run_device_sync(session=_Session([], [], []), catalog_path=_folders(tmp_path, {}))
+    assert rc == 0
+    assert "nothing to sync" in capsys.readouterr().out
+
+
+def test_an_empty_inventory_with_an_UNREADABLE_catalog_is_an_ERROR(tmp_path, capsys):
+    """The pass above rests on the catalog. If it cannot be read, nothing can
+    tell an empty tenant from a broken read — fail closed."""
+    rc = run_device_sync(session=_Session([], [], []), catalog_path=tmp_path / "absent.yaml")
+    assert rc == 1
+    assert "could not be read" in capsys.readouterr().err
 
 
 def test_a_read_failure_is_an_ERROR_not_a_pass(capsys):
