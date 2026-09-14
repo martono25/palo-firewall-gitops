@@ -186,12 +186,17 @@ def test_scope_dirname_matches_the_root_layout():
     would emit tfvars where no root reads them — caught only by the missing-root
     guard, and only at compile time."""
     from fwgitops.compiler import Scope
-    from onboarded_catalog import EXAMPLE_SERIAL
     names = {r.name for r in _roots()}
     assert Scope("folder", "prod-edge").dirname in names
-    # The scaffolded root is named by scaffold-root, independently of the
-    # compiler — so this still compares two sources, not one with itself.
-    assert Scope("device", EXAMPLE_SERIAL).dirname in names
+    # EVERY device root — real or scaffolded — is named the way the compiler
+    # names a device scope. The names come from `scaffold-root`, independently
+    # of the compiler, so this compares two sources, not one with itself. It
+    # does not name a serial: the first version asserted the example serial and
+    # failed the day a real firewall was adopted and the scaffold stood down.
+    devices = sorted(n for n in names if n.startswith("device-"))
+    assert devices, "the device case must be covered, real or scaffolded"
+    for name in devices:
+        assert Scope("device", name[len("device-"):]).dirname == name
 
 
 def _changes_by_scope():

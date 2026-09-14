@@ -22,6 +22,20 @@ All notable changes to `fwgitops` are documented here. This project follows
   declares no firewall; declared-but-missing, or an unreadable catalog, still
   fails closed.
 
+- **`adopt-device` reported success over a catalog it had not changed.**
+  Adopting the first firewall into a folder with none exited 0, printed the port
+  map and "OK — scaffolded", and wrote nothing: it could rename a serial or
+  update one already listed, never ADD one, and its entry regexes did not match
+  an empty `devices: {}`. It now declares a first firewall, and checks its RESULT
+  — a catalog that would leave the device undeclared exits 3, nothing written.
+
+### Added
+
+- **`fw-prod-edge-9340` (`007955000919340`)** — the replacement pilot firewall,
+  in AWS account 475369997213 with **IMDSv2 required**. Registered and licensed
+  on first boot; adopted from SCM under JIRA-9500, with three new interface
+  intents (REQ-2026-0910/0911/0912) addressed to the IPs AWS assigned its ENIs.
+
 ### Changed
 
 - **The pilot firewall `007955000902404` is retired.** It died with that account

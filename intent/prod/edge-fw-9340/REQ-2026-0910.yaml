@@ -1,0 +1,31 @@
+# Day-1 interface addressing for fw-prod-edge-9340 (ADR-0001 kind #3, ADR-0005).
+#
+# Replaces REQ-2026-0801 for the retired 007955000902404, which died with its AWS
+# account on 2026-09-14 (removed under JIRA-9400). A new intent, not an edit:
+# the old request authorised addressing a different firewall, and its evidence
+# stays true of that one.
+#
+# ADDRESS MUST MATCH THE ENI. On AWS the firewall only receives traffic on an
+# interface configured with the private IP AWS assigned to its ENI — anything
+# else is configured but silent. ethernet1/1 is ENI device index 1, which AWS
+# assigned 10.100.3.19 (read with describe-network-interfaces on
+# i-05524d0655b1a7aa3, 2026-09-15 — not carried over from the old firewall,
+# whose ENIs held different addresses).
+apiVersion: fw-intent/v1
+kind: InterfaceRequest
+
+metadata:
+  id: REQ-2026-0910
+  requester: martono@corp.com
+  ticket: JIRA-9500
+  justification: >-
+    Day-1 build for replacement edge firewall fw-prod-edge-9340: address the internal interface so the local zone can carry traffic.
+  requested: "2026-09-15"
+
+spec:
+  device: "007955000919340"     # fw-prod-edge-9340, PA-VM, connected
+  interface: local         # role — resolved via catalog/interfaces.yaml
+  ip:
+    - 10.100.3.19/24
+  mtu: 1500
+  comment: "Internal — managed by fwgitops"

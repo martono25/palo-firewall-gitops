@@ -15,6 +15,21 @@ module "vmseries" {
   ssh_key_name         = var.ssh_key_name
   iam_instance_profile = aws_iam_instance_profile.bootstrap.name
 
+  # IMDSv2 REQUIRED (session token; hop limit 1). The module defaults it OFF.
+  #
+  # The instance role reads the bootstrap bucket, which holds the SCM
+  # registration PIN (valid to 2027-03-15 — it outlives any one AWS account) and
+  # the BYOL auth code. With IMDSv1, a single forged GET — an SSRF in the mgmt
+  # web UI — returns that role's credentials.
+  #
+  # SUPPORTED, per Palo Alto (read 2026-09-14, not recalled): BYOL VM-Series on
+  # PAN-OS 10.2+ with VM-Series plugin 3.0.0+ (KB kA14u000000CqfQCAS). This AMI is
+  # 11.2.12. PLUG-10410 — "early licensing ... failing on IMDSv2 ... AWS" — is a
+  # known issue in plugin 3.0.2 and absent from the 4.0.2 list; no addressed-issue
+  # entry was found. VERIFY LICENSING ON FIRST BOOT. If it fails, relax without a
+  # relaunch: `aws ec2 modify-instance-metadata-options --http-tokens optional`.
+  enable_imdsv2 = true
+
   interfaces = {
     mgmt = {
       device_index       = 0

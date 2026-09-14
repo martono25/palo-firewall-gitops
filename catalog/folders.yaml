@@ -60,7 +60,7 @@
 #  to catch, and leaving it would have meant every run reporting a known
 #  stale entry until people stopped reading the output.)
 #
-# RE-VERIFIED 2026-09-14: prod-edge -> firewalls {} — NONE.
+# RE-VERIFIED 2026-09-14: prod-edge -> firewalls {} — NONE, for one day.
 # 007955000902404 (fw-prod-edge-2404) died with the AWS account that hosted it
 # and was deleted from CSP, which removed it from SCM. Removed here the same
 # day, on the precedent above, together with its interface mappings and its
@@ -68,6 +68,12 @@
 # stays targetable: its rules are live in SCM and enforced; they reach no
 # firewall until the replacement VM registers and is onboarded under its OWN
 # serial (`fwgitops onboard`, then `scaffold-root --device`).
+#
+# RE-VERIFIED 2026-09-15: prod-edge -> firewalls {007955000919340}
+# (fw-prod-edge-9340). The replacement, launched in AWS account 475369997213 with
+# IMDSv2 required; licensed and registered on first boot. Adopted with
+# `fwgitops adopt-device --ticket JIRA-9500`, which wrote the entry below from
+# SCM rather than by hand.
 #
 # Prisma Access built-ins (Mobile Users, Remote Networks, …) are not managed by
 # this platform and are deliberately absent.
@@ -84,19 +90,18 @@ folders:
     # is not tiered up for it.
     children: []
     targetable: true
-    # NO FIREWALL since 2026-09-14 (see the header). When one registers, add it:
+    # Addressed as `device: <serial>` in an intent, NEVER `folder:`.
     #
-    #   devices:
-    #     # Addressed as `device: <serial>` in an intent, NEVER `folder:`.
-    #     "<serial>":
-    #       # The label SCM shows in its inventory — NOT the hostname. A
-    #       # re-onboard RESETS it, and `verify-catalog` compares it, because
-    #       # that reset is a reliable symptom of a re-registration — which
-    #       # wipes device-scope config.
-    #       display_name: fw-prod-edge-<last 4 of serial>
-    #       model: PA-VM
-    #       targetable: true
-    devices: {}
+    # `display_name` is the label SCM shows in its inventory — NOT the hostname.
+    # A re-onboard RESETS it to `PA-VM`, and `verify-catalog` compares it,
+    # because that reset is a reliable symptom of a re-registration — which
+    # wipes device-scope config. Add a firewall with `fwgitops adopt-device`,
+    # which reads every value here from SCM.
+    devices:
+      # Adopted from SCM by `fwgitops adopt-device`.
+      "007955000919340":
+        display_name: fw-prod-edge-9340
+        targetable: true
   GitOps:
     # Sandbox: zero devices, nothing inherits from it. Where the provider
     # fidelity probes run (spike/*-probe).
