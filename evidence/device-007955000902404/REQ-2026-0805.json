@@ -1,7 +1,7 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31611888283"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/34853554385"
   },
   "approval": {
     "approvers": [
@@ -11,11 +11,11 @@
       }
     ],
     "gate": null,
-    "merge_commit": "36e845e6b3e96ddec5c7a62936bbeb1543f59cc8",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/179"
+    "merge_commit": "6c9bd5541530071c5c0fed4d4f1e99937231a98d",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/310"
   },
   "compiled": {
-    "compiler_version": "1.0.0",
+    "compiler_version": "3.0.0",
     "object": {
       "comment": "DMZ \u2014 managed by fwgitops",
       "dhcp": false,
@@ -26,13 +26,14 @@
       "mtu": 1500,
       "name": "ethernet1/3"
     },
+    "object_is": "the LAST APPLIED state, from the baseline tree",
     "object_sha256": "8a0446b141a559088fd9acdb4c768e1d26f50796c2e54bb2fc521267c67bdb1e",
     "scope": {
       "kind": "device",
       "value": "007955000902404"
     },
     "tfvars_file": "interfaces.auto.tfvars.json",
-    "tfvars_sha256": "9daff14d12295216503d36567762f3c19214d5f35dac7a872229d5dffa4d7f92"
+    "tfvars_sha256": null
   },
   "controls": [
     "AC-4",
@@ -43,14 +44,13 @@
     "CM-5"
   ],
   "controls_not_evidenced": [],
-  "generated_at": "2026-08-12T15:25:59Z",
+  "generated_at": "2026-09-14T14:10:24Z",
   "kind": "InterfaceRequest",
-  "push": {
-    "admin_count": 1,
-    "all_admins": false,
-    "folder": "007955000902404",
-    "job_id": "226",
-    "status": "success"
+  "push": null,
+  "removal": {
+    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
+    "commit": "6c9bd5541530071c5c0fed4d4f1e99937231a98d",
+    "ticket": "JIRA-9400"
   },
   "req_id": "REQ-2026-0805",
   "request": {
@@ -62,11 +62,17 @@
     "ticket": "JIRA-9321"
   },
   "risk": {
-    "checks_fired": [],
-    "classifier_version": "1.0",
-    "thresholds_version": "2026-07-26",
-    "tier": "LOW"
+    "checks_fired": [
+      {
+        "check": "interface_config_removed",
+        "reason": "removes interface configuration (REQ-2026-0805). A device-scope override reverts to the inherited object, which carries no addressing \u2014 the firewall loses the IP on that interface.",
+        "tier": "HIGH"
+      }
+    ],
+    "classifier_version": "1.0.0",
+    "thresholds_version": null,
+    "tier": "HIGH"
   },
   "schema": "fw-evidence/v2",
-  "status": "applied"
+  "status": "removed"
 }
