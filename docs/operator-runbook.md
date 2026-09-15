@@ -391,6 +391,52 @@ its checks start without you touching them.
 
 ---
 
+## The AWS account expired
+
+**Symptom:** every drift-detect and remediate run fails at *Configure AWS
+credentials* with `Could not assume role with OIDC: The web identity token
+provided could not be validated`.
+
+The pilot's AWS account is a time-limited subscription. When it expires, the
+Terraform state bucket, the CI role and the firewall go with it. **Nothing
+alerts except the red runs** — on 2026-08-29 that went unnoticed for 17 days.
+
+**Rehearse first, any time** — it proves the state rebuild against live SCM
+using empty scratch state, and writes nothing real:
+
+```bash
+./terraform/rebootstrap-account.sh --rehearse
+```
+
+**Then, signed in to the NEW account with `aws configure`:**
+
+```bash
+./terraform/rebootstrap-account.sh
+```
+
+It creates the state bucket and the CI role (you type `yes` to each apply),
+re-points `AWS_OIDC_ROLE_ARN`, rewrites every `backend.hcl`, and writes import
+blocks with [`fwgitops recover-state`](cli-reference.md#recover-state). It
+**stops** unless every root's plan shows `0 to add` and `0 to destroy`.
+
+What it deliberately leaves to you, and prints in order at the end:
+
+1. **Open the PR** with the `imports_recovery.tf` files.
+2. **Retire the dead firewall in the same PR.** `verify-catalog` rejects every
+   run while the catalog declares a serial SCM no longer has. Delete its intents
+   with a `Removes:` trailer in the PR **body** on a **new** ticket — never the
+   ticket that created them.
+3. **Merge**; approve the apply if it waits. Delete the import files afterwards.
+4. **Launch the replacement VM** and adopt it with
+   `fwgitops adopt-device <serial> --folder prod-edge --ticket <TICKET>`.
+5. **Dispatch drift-detect** and read what changed while nothing was checking.
+
+Two things the script cannot know, and you must: the new **vCPU quota**
+(new accounts start at 5; the firewall needs 4) and the **Marketplace
+subscription** to the VM-Series BYOL listing, which every new account needs once.
+
+---
+
 ## Bringing the pilot up and putting it away
 
 The pilot is suspended between sessions to stop the EC2 draw (`m5.xlarge` — 4

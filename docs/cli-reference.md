@@ -458,6 +458,48 @@ irreversible and **remote** — the difference between editing your repository a
 reaching into your cloud account to destroy a record. The bucket comes from a
 root's `backend.hcl` rather than a guess.
 
+## Recovering state
+
+### `recover-state`
+
+Write `import` blocks re-attaching **empty** Terraform state to the SCM objects
+Git declares. Run by `terraform/rebootstrap-account.sh`; rarely by hand.
+
+```sh
+fwgitops compile intent && fwgitops folder-interfaces --out terraform
+fwgitops recover-state --check              # what would be imported, per root
+fwgitops recover-state                      # writes terraform/<root>/imports_recovery.tf
+fwgitops recover-state --root prod-edge     # one root (repeatable)
+```
+
+| Exit | Meaning |
+|---|---|
+| 0 | every declared object was found; one file written per root |
+| 1 | SCM unreachable, no compiled roots, or an unknown `--root` |
+| 2 | a declared object is **absent** from SCM — **nothing written** |
+
+**Why it exists.** State lives in an S3 bucket in a time-limited AWS account.
+When that account expired, the new bucket was empty — and an apply against empty
+state tries to *create* every rule already in SCM.
+
+**State recovery, not adoption.** What to import is read from the compiled
+tfvars — what Git declares — and SCM supplies only the id. A hand-made object in
+the same folder is never imported ([ADR-0011](adr/0011-unmanaged-drift-is-deleted.md)).
+An object **inherited** from a parent folder is never imported into a child
+either: a later destroy there would delete it for every sibling.
+
+**Exit 2 writes nothing.** A declared object SCM lacks would be *created* by the
+next apply, and a partial recovery that looks complete is the surprise this
+removes.
+
+**A device root whose firewall is not registered is skipped**, not counted
+missing. On an account move the firewall dies with the account; that is a
+retirement (a `Removes:` trailer on a new ticket), not something an import can
+express — and it must not block the folders.
+
+**Ids** were read from live state, not the provider docs' placeholders:
+`prod-edge:::<uuid>` for a folder, `::<serial>:<uuid>` for a device.
+
 ## Device lifecycle
 
 | Command | What it does |
