@@ -42,6 +42,46 @@ jobs:
     if: contains(github.event.issue.labels.*.name, 'firewall-rule')
     runs-on: ubuntu-latest
     steps:
+      # EXPIRED IS NOT EMPTY. `secrets.AUTOMATION_PR_TOKEN || github.token`
+      # falls back only when the secret is UNSET. A PAT that has expired or been
+      # revoked is still set, so every use kept sending it: the push or
+      # `gh pr create` failed outright and the record never landed — while the
+      # "not set" warning, the only signal written for this case, never fired.
+      #
+      # So ASK GITHUB, before anything uses it: authenticate, and read this
+      # repository's pulls (the scope PR authorship needs). Usable → it authors
+      # the PR, checks run. Anything else → the default token, and a warning
+      # that says which case it is. Degrading to "needs a click" is recoverable;
+      # a missing audit record is not.
+      #
+      # Kept identical in every workflow that opens a PR, and executed by
+      # tests/test_pr_token_probe.py. It runs BEFORE checkout because the
+      # checkout's token is the one `git push` uses.
+      - name: Check AUTOMATION_PR_TOKEN is usable
+        id: pat
+        env:
+          PAT: ${{ secrets.AUTOMATION_PR_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "${PAT}" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AUTOMATION_PR_TOKEN is not set. PRs from this run are opened by github-actions[bot], and GitHub holds their required checks until someone approves them by hand. See docs/automation-token.md."
+            exit 0
+          fi
+          probe() {
+            curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+              -H "Authorization: Bearer ${PAT}" -H "Accept: application/vnd.github+json" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}$1" || true
+          }
+          repo=$(probe "")
+          pulls=$(probe "/pulls?per_page=1")
+          if [ "$repo" = "200" ] && [ "$pulls" = "200" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "AUTOMATION_PR_TOKEN is usable (repo HTTP $repo, pulls HTTP $pulls)"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::AUTOMATION_PR_TOKEN is SET but GitHub rejected it (repo HTTP ${repo:-none}, pulls HTTP ${pulls:-none}): expired, revoked, or lacking Pull requests access. Falling back to the default token, so PRs from this run need their checks approved by hand. Rotate it: gh secret set AUTOMATION_PR_TOKEN (docs/automation-token.md)."
+          fi
       - uses: actions/checkout@v7
         with:
           # SAME REASON AS apply.yml. A pull request opened by a workflow using
@@ -53,7 +93,7 @@ jobs:
           #
           # Falls back to the default token: without the secret the intake still
           # works, it just needs that click, and the PR step says so.
-          token: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
+          token: ${{ steps.pat.outputs.ok == 'true' && secrets.AUTOMATION_PR_TOKEN || github.token }}
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
@@ -110,7 +150,7 @@ jobs:
       - name: Open the pull request
         if: steps.gen.outputs.rc == '0'
         env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_PR_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.pat.outputs.ok == 'true' && secrets.AUTOMATION_PR_TOKEN || github.token }}
           # THE PAT DOES NOT COMMENT. It exists for ONE thing — authoring the
           # pull request, so GitHub runs its checks — and the least-privilege
           # scopes for that are contents + pull-requests. Commenting on the
@@ -120,7 +160,7 @@ jobs:
           # run then died on `Resource not accessible by personal access token
           # (addComment)`, leaving the requester with an open PR and silence.
           DEFAULT_TOKEN: ${{ github.token }}
-          HAS_PAT: ${{ secrets.AUTOMATION_PR_TOKEN != '' }}
+          HAS_PAT: ${{ steps.pat.outputs.ok }}
           NUMBER: ${{ github.event.issue.number }}
           AUTHOR: ${{ github.event.issue.user.login }}
           TITLE: ${{ github.event.issue.title }}
@@ -128,7 +168,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$HAS_PAT" != "true" ]; then
-            echo "::warning::AUTOMATION_PR_TOKEN is not set — github-actions[bot] opens this PR and GitHub holds its required checks until someone approves them, so the requester sees an unvalidated PR."
+            echo "::warning::AUTOMATION_PR_TOKEN is not usable (see the 'Check AUTOMATION_PR_TOKEN is usable' step for why) — github-actions[bot] opens this PR and its required checks wait for a manual approval."
           fi
           branch="intake/issue-${NUMBER}"
           git config user.name  "github-actions[bot]"
