@@ -5,6 +5,16 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The DMZ interface is routed.** `ethernet1/3` was addressed (REQ-2026-0912)
+  and zoned `dmz`, but outside every VRF — forwarding `N/A` on the device, no
+  connected route. `$eth-dmz` joins the `default` VRF in `catalog/routers.yaml`.
+  Membership compiles into REQ-2026-0803's router object, so the change is that
+  request's and carries its own ticket (JIRA-9600); the classifier refused it
+  under the route's original JIRA-9320. No rule names the `dmz` zone, so this
+  permits no traffic.
+
 ### Added
 
 - **`terraform/rebootstrap-account.sh` — moving to a new AWS account is one
