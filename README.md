@@ -63,6 +63,7 @@ matters: [`operator-runbook.md` § Replacing a firewall](docs/operator-runbook.m
 | **Provision a firewall** (stand up a VM-Series) | [`docs/provisioning.md`](docs/provisioning.md) | platform operator |
 | **Stand up a folder** (the Day-1 chain, end to end) | [`docs/building-a-folder.md`](docs/building-a-folder.md) | platform operator |
 | **Operate it day to day** (a run is held, drift fired, break-glass) | [`docs/operator-runbook.md`](docs/operator-runbook.md) | platform operator |
+| **Move to a new AWS account** (the subscription expired) | [`docs/changing-aws-account.md`](docs/changing-aws-account.md) | platform operator |
 | **Look up a command** (all 21, with exit codes) | [`docs/cli-reference.md`](docs/cli-reference.md) | platform operator |
 | **Audit it** (what the evidence proves, and what it does not) | [`docs/assessor-guide.md`](docs/assessor-guide.md) | assessor / incident responder |
 | Wire up CI (OIDC, secrets, environments) | [`docs/GITHUB-SETUP.md`](docs/GITHUB-SETUP.md) | platform operator |
