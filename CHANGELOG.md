@@ -16,6 +16,10 @@ All notable changes to `fwgitops` are documented here. This project follows
   runs the rebuild against live SCM with empty scratch state and writes nothing
   real; it passed against all three roots on 2026-09-15, and failed as it should
   with one import removed.
+- **`docs/changing-aws-account.md`** — the whole account move as ten steps,
+  including the parts no script can do: the two tickets, the key pair,
+  Marketplace, the vCPU quota, launching the VM and adopting its serial. Every
+  command in it was run as written against the live account on 2026-09-15.
 - **`fwgitops recover-state`** writes those import blocks from what Git
   declares, never from what SCM holds. Refuses (exit 2, nothing written) when a
   declared object is missing; skips a device root whose firewall is not

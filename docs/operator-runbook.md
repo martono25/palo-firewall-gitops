@@ -401,6 +401,10 @@ The pilot's AWS account is a time-limited subscription. When it expires, the
 Terraform state bucket, the CI role and the firewall go with it. **Nothing
 alerts except the red runs** — on 2026-08-29 that went unnoticed for 17 days.
 
+**The full procedure, step by step — including the key pair, Marketplace, the
+tickets, launching and adopting the new firewall — is
+[changing-aws-account.md](changing-aws-account.md).** This is the short version.
+
 **Rehearse first, any time** — it proves the state rebuild against live SCM
 using empty scratch state, and writes nothing real:
 
@@ -442,11 +446,17 @@ subscription** to the VM-Series BYOL listing, which every new account needs once
 The pilot is suspended between sessions to stop the EC2 draw (`m5.xlarge` — 4
 vCPU, 4 ENIs, which is both this deployment's ceiling and its requirement).
 
+The instance id changes with every rebuild and every AWS account, so read it
+from Terraform rather than from this page:
+
+```bash
+IID=$(terraform -chdir=provisioning/aws-vmseries-pilot output -raw instance_id)
+```
+
 **Up:**
 
 ```bash
-aws ec2 start-instances --region ap-southeast-1 --instance-ids i-0feced64ef9b5387f
-gh variable set FIREWALL_ONLINE --body true
+aws ec2 start-instances --region ap-southeast-1 --instance-ids "$IID"
 ```
 
 PAN-OS needs roughly ten minutes after the instance reports `running`. Wait for
@@ -460,12 +470,12 @@ printf 'set cli pager off\nshow cloud-management-status\n' \
 **Down:**
 
 ```bash
-gh variable set FIREWALL_ONLINE --body false
-aws ec2 stop-instances --region ap-southeast-1 --instance-ids i-0feced64ef9b5387f
+aws ec2 stop-instances --region ap-southeast-1 --instance-ids "$IID"
 ```
 
-`FIREWALL_ONLINE=false` skips the nightly drift job. A skipped job is visibly
-skipped; silently green would be the worse failure.
+The nightly jobs keep running with the firewall stopped, and should: they read
+SCM, not the device. (`FIREWALL_ONLINE` used to skip them; that gate was removed
+on 2026-08-15 because its premise was false — see `drift-detect.yml`.)
 
 **If SSH times out**, your egress IP has changed. Re-point the management
 security group at your current `/32` — never widen it.
