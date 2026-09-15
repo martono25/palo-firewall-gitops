@@ -30,3 +30,9 @@ routers:
           interfaces:
             - $eth-local
             - $eth-internet
+            # Added 2026-09-15. ethernet1/3 was addressed (REQ-2026-0912) and
+            # zoned `dmz`, but outside every VRF — forwarding N/A on the device,
+            # so the DMZ subnet had no connected route and could not be routed
+            # to or from. Membership only makes routing POSSIBLE; no rule names
+            # the `dmz` zone, so nothing is permitted until a request asks.
+            - $eth-dmz

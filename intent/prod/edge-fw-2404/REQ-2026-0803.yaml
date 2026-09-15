@@ -16,24 +16,31 @@
 # VRF MEMBERSHIP IS NOT OPTIONAL. Terraform manages whole objects and a router
 # holds both its routes AND its interface list, so the compiler carries
 # membership from catalog/routers.yaml on every compiled route and re-asserts it
-# on aggregation. Writing this router without [$eth-local, $eth-internet] would
-# empty the VRF and break routing wholesale — the reason RouteRequest is the
+# on aggregation. Writing this router without [$eth-local, $eth-internet,
+# $eth-dmz] would empty the VRF and break routing wholesale — the reason RouteRequest is the
 # first kind whose failure mode is an outage rather than a no-op.
 #
 # NEXT HOP is the AWS subnet router for the untrust segment (10.100.2.0/24),
-# which is always .1 — the firewall's own outside address is 10.100.2.142.
+# which is always .1 — the firewall's own outside address is 10.100.2.106
+# (fw-prod-edge-9340, REQ-2026-0911).
+#
+# CHANGED 2026-09-15 under JIRA-9600 — the spec below did not change; the router
+# object this request owns did. catalog/routers.yaml added $eth-dmz to the VRF,
+# and membership compiles into this request's router, so the change is THIS
+# request's and carries its own ticket. JIRA-9320 authorised the route itself.
 apiVersion: fw-intent/v1
 kind: RouteRequest
 
 metadata:
   id: REQ-2026-0803
-  requester: martono@corp
-  ticket: JIRA-9320
+  requester: martono@corp.com
+  ticket: JIRA-9600
   justification: >-
-    Day-1 build for edge firewall fw-prod-edge-4453: default route out the
-    untrust interface so the firewall can forward unmatched traffic. Completes
-    the ADR-0002 Day-1 chain (Interface -> Zone -> Route) on hardware.
-  requested: "2026-08-12"
+    Default route out the untrust interface for prod-edge, and add the DMZ
+    interface ($eth-dmz, ethernet1/3) to the default VRF so the DMZ subnet has a
+    connected route and can be routed. Membership only: no rule names the dmz
+    zone, so no traffic is permitted by this change.
+  requested: "2026-09-15"
 
 spec:
   folder: prod-edge
