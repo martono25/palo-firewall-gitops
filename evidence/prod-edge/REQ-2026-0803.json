@@ -1,7 +1,7 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/31611888283"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/34921063907"
   },
   "approval": {
     "approvers": [
@@ -11,11 +11,11 @@
       }
     ],
     "gate": null,
-    "merge_commit": "36e845e6b3e96ddec5c7a62936bbeb1543f59cc8",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/179"
+    "merge_commit": "3a8c5f528abb652e674bf3bdfd418db7ec896aa5",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/317"
   },
   "compiled": {
-    "compiler_version": "1.0.0",
+    "compiler_version": "3.0.0",
     "object": {
       "admin_dist": null,
       "destination": "0.0.0.0/0",
@@ -27,16 +27,17 @@
       "vrf": "default",
       "vrf_interfaces": [
         "$eth-local",
-        "$eth-internet"
+        "$eth-internet",
+        "$eth-dmz"
       ]
     },
-    "object_sha256": "a385dd402a8ab8093d3b97239ef7b951967554105dd57373620f759b4dbdef18",
+    "object_sha256": "67c4fccaa2e68bad7f162636d1e426ca062b44878d55b3f8657118ea5314bcc7",
     "scope": {
       "kind": "folder",
       "value": "prod-edge"
     },
     "tfvars_file": "routers.auto.tfvars.json",
-    "tfvars_sha256": "e7a5da73e0222090b4e604d669f8317467138b33a0668bf97bb98131f652e0bd"
+    "tfvars_sha256": "71dd8c6489e736b0d9a3801a76fd256fa497a148c24ec26fc5694b0b57419159"
   },
   "controls": [
     "AC-4",
@@ -47,23 +48,23 @@
     "CM-5"
   ],
   "controls_not_evidenced": [],
-  "generated_at": "2026-08-12T15:25:59Z",
+  "generated_at": "2026-09-15T02:30:59Z",
   "kind": "RouteRequest",
   "push": {
     "admin_count": 1,
     "all_admins": false,
     "folder": "prod-edge",
-    "job_id": "228",
+    "job_id": "266",
     "status": "success"
   },
   "req_id": "REQ-2026-0803",
   "request": {
     "intent_file": "intent/prod/edge-fw-2404/REQ-2026-0803.yaml",
-    "intent_sha256": "3ed6ee8ac9a7f3c5935bbaae2c906fc3d0b521147302dcdfbfd019c7dda8acd2",
-    "justification": "Day-1 build for edge firewall fw-prod-edge-4453: default route out the untrust interface so the firewall can forward unmatched traffic. Completes the ADR-0002 Day-1 chain (Interface -> Zone -> Route) on hardware.",
-    "requested": "2026-08-12",
-    "requester": "martono@corp",
-    "ticket": "JIRA-9320"
+    "intent_sha256": "62d88fe768120efdb66548af0007c195f43b4c7803a825ad6193fe7766946934",
+    "justification": "Default route out the untrust interface for prod-edge, and add the DMZ interface ($eth-dmz, ethernet1/3) to the default VRF so the DMZ subnet has a connected route and can be routed. Membership only: no rule names the dmz zone, so no traffic is permitted by this change.",
+    "requested": "2026-09-15",
+    "requester": "martono@corp.com",
+    "ticket": "JIRA-9600"
   },
   "risk": {
     "checks_fired": [
