@@ -5,6 +5,17 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **State rebuilt in AWS account `975239810400`.** The previous subscription
+  (`475369997213`) ended; its state bucket and CI role went with it. The new
+  bucket and role were created by `terraform/rebootstrap-account.sh` — its
+  fresh-account path's first real run — and `AWS_OIDC_ROLE_ARN` re-pointed.
+  These import blocks re-attach the 10 declared SCM objects to their live ids:
+  state recovery of objects this pipeline created, not the adoption ADR-0011
+  forbids. Plans: prod-edge 9 to import, GitOps 1, both `0 to add, 0 to
+  destroy`.
+
 ### Changed
 
 - **`fw-prod-edge-9340` (`007955000919340`) is retired** under JIRA-9700, ahead
