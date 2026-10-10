@@ -5,6 +5,18 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **An expired `AUTOMATION_PR_TOKEN` would have stopped records landing,
+  silently.** Every workflow used `secrets.AUTOMATION_PR_TOKEN || github.token`,
+  which falls back only when the secret is empty — an expired token is not. The
+  push or `gh pr create` would fail, so evidence, violation and remediation
+  records would not land, and the "not set" warning would never fire. Each job
+  that uses the token now probes it against the GitHub API first and uses it
+  only if usable; otherwise it falls back and warns which case — unset or
+  rejected — it hit. Verified with real `curl` against api.github.com: invalid
+  token 401 → fall back; valid token 200 → use.
+
 ### Changed
 
 - **The DMZ interface is routed.** `ethernet1/3` was addressed (REQ-2026-0912)

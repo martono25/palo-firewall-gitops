@@ -69,18 +69,33 @@ which a PR opened by the bot does not.
 
 ## When it expires
 
-The pipeline keeps working and degrades to the old behaviour — PRs open, checks
-wait for a manual approval. **The run says so**, both in `apply.yml` and
-`intake.yml`:
+**Every job that uses it asks GitHub first.** Its first step reads this
+repository and its pulls with the token. Only if both answer `200` is the token
+used; otherwise the job falls back to the default token, keeps working, and
+PRs wait for a manual approval of their checks.
+
+The run says which case it hit — they need different fixes:
 
 ```
-::warning::AUTOMATION_PR_TOKEN is not set — github-actions[bot] opens this PR …
+::warning::AUTOMATION_PR_TOKEN is SET but GitHub rejected it (repo HTTP 401, pulls HTTP 401): expired, revoked, …
+::warning::AUTOMATION_PR_TOKEN is not set. …
 ```
 
-That warning is deliberate. A secret that expires is a certainty rather than a
-risk, and the failure it causes is quiet: everything still runs green, records
-just stop landing. A test asserts the warning exists, so it cannot be tidied
-away.
+**This used to be wrong, and the doc said otherwise.** Until 2026-09-15 the
+fallback was `secrets.AUTOMATION_PR_TOKEN || github.token`, which only falls back
+when the secret is *empty*. An expired token is not empty, so every run would
+have kept sending it: the push or `gh pr create` fails, and the evidence,
+violation or remediation record never lands — while the "not set" warning, the
+only signal written for expiry, never fires. The probe was run against the live
+GitHub API with an invalid token (401 → fall back) and a valid one (200 → use).
+
+**Rotate before it expires anyway.** Falling back is recoverable, not free: every
+PR needs a click until the token is replaced. GitHub does not show a PAT's expiry
+through the secret — check it under **Settings → Developer settings →
+Fine-grained tokens**, and put the date somewhere you will see it.
+
+Tests execute the shipped probe (`tests/test_pr_token_probe.py`) and refuse any
+workflow that uses the token without it, so neither half can be tidied away.
 
 ## If you would rather not hold a credential
 
