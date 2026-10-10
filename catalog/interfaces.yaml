@@ -82,13 +82,15 @@ interfaces:
     # EMPTY since 2026-10-10: no firewall is registered (see folders.yaml).
     # The retired 9340 mapped this to ethernet1/1 (ENI device index 1, trust
     # subnet 10.100.3.0/24).
-    devices: {}
+    devices:
+      "007955000935486": ethernet1/1
 
   internet:
     description: Outside / untrust segment.
     folder: $eth-internet
     # No `create_in`: an SCM default inherited from ngfw-shared. NOT ours.
-    devices: {}   # retired 9340: ethernet1/2 (ENI device index 2)
+    devices:   # retired 9340: ethernet1/2 (ENI device index 2)
+      "007955000935486": ethernet1/2
 
   dmz:
     description: >-
@@ -125,4 +127,5 @@ interfaces:
     # closed rather than guess a port that may have no ENI behind it.
     # EMPTY since 2026-10-10; the retired 9340 used ethernet1/3 (ENI device
     # index 3, dmz subnet 10.100.1.0/24).
-    devices: {}
+    devices:
+      "007955000935486": ethernet1/3

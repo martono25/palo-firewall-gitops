@@ -5,6 +5,15 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- **`fw-prod-edge-5486` (`007955000935486`)** — the replacement pilot firewall,
+  in AWS account 975239810400 with IMDSv2 required. Registered and licensed on
+  first boot; adopted from SCM under JIRA-9710, with three new interface intents
+  (REQ-2026-0920/0921/0922) addressed to the IPs AWS assigned this VM's ENIs
+  (10.100.3.90, 10.100.2.77, 10.100.1.79 — the retired firewall's addresses do
+  not carry over).
+
 ### Fixed
 
 - **State rebuilt in AWS account `975239810400`.** The previous subscription
