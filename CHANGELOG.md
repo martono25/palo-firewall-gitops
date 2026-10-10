@@ -5,6 +5,17 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`fw-prod-edge-9340` (`007955000919340`) is retired** under JIRA-9700, ahead
+  of the AWS account change. Deleting it from CSP removed it from SCM, at which
+  point `verify-catalog` rejected every run (interface roles mapping a serial SCM
+  no longer has) and `device-sync` refused an empty inventory the catalog
+  contradicted — both correct, and both would have failed the nightly run.
+  Removed from both catalogs with its three interface intents
+  (REQ-2026-0910/0911/0912) and its Terraform root. `prod-edge` has no firewall
+  until the replacement registers in the new account.
+
 ### Fixed
 
 - **An expired `AUTOMATION_PR_TOKEN` would have stopped records landing,
