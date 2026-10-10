@@ -105,7 +105,11 @@ folders:
     # NO FIREWALL since 2026-10-10 (see the header). Add the replacement with
     # `fwgitops adopt-device <serial> --folder prod-edge --ticket <T>`, which
     # reads the serial, display name and port map from SCM rather than by hand.
-    devices: {}
+    devices:
+      # Adopted from SCM by `fwgitops adopt-device`.
+      "007955000935486":
+        display_name: fw-prod-edge-5486
+        targetable: true
   GitOps:
     # Sandbox: zero devices, nothing inherits from it. Where the provider
     # fidelity probes run (spike/*-probe).
