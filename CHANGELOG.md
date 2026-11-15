@@ -5,6 +5,20 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`rebootstrap-account.sh` kept the dead account's state and said it was
+  fine.** Step 2 decided which account a local state file belonged to by
+  grepping for an IAM ARN. `github-oidc` state holds ARNs and archived
+  correctly; `bootstrap-backend` state holds none — only a bucket name — so the
+  check found nothing, printed "state already belongs to <the new account>", and
+  terraform then refreshed the dead bucket: `403 AllAccessDisabled`. Hit by the
+  operator mid-move on 2026-11-15. The decision moved to
+  `terraform/lib/archive-foreign-state.sh` and now asks the question the other
+  way round — *does this state name the account I am applying in?* — so state it
+  cannot attribute is archived rather than trusted. Archiving moves the file,
+  never deletes it.
+
 ### Added
 
 - **`fw-prod-edge-5486` (`007955000935486`)** — the replacement pilot firewall,
