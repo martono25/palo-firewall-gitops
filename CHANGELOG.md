@@ -5,6 +5,21 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- **`./terraform/preflight.sh` — the account-move prerequisites, executed.**
+  Three moves were derailed by five things that were written down and never
+  checked: a firewall still registered in SCM, an unsubscribed Marketplace
+  listing, a key pair with the right name and the wrong key, a piped `yes` that
+  cancels every apply, and an advanced routing engine switched off (which let a
+  firewall come up addressed, zoned, policy-bearing and routing nothing while
+  every check reported health). Each is now a function in
+  `terraform/lib/preflight.sh` with tests, reported PASS/WARN/FAIL;
+  `rebootstrap-account.sh` runs the same set and refuses to start on any FAIL.
+  `--device <ip>` asks a freshly built firewall whether it is actually routing.
+  `docs/changing-aws-account.md` now points at the script instead of repeating
+  the list.
+
 ### Fixed
 
 - **A firewall could come up addressed, zoned, policy-bearing — and routing
