@@ -5,3 +5,45 @@ vm-series-auto-registration-pin-id=${pin_id}
 vm-series-auto-registration-pin-value=${pin_value}
 dgname=${scm_folder}
 dhcp-accept-server-hostname=yes
+# ADVANCED ROUTING, ENABLED AT FIRST BOOT.
+#
+# `scm_logical_router` is an ADVANCED-ROUTING object. With the engine off, SCM
+# pushes the logical router happily and the firewall ignores it: interfaces come
+# up addressed and zoned but with forwarding `N/A`, the route table is empty, and
+# `show advanced-routing logical-router` answers "advanced routing mode is not
+# enabled". Nothing fails. The firewall simply does not route.
+#
+# WHY THIS WAS NOT HERE FROM THE START. Palo Alto documents that the first push
+# from Strata Cloud Manager enables the engine and restarts the firewall, and
+# adds that "if the Advanced Routing Engine is not automatically enabled as part
+# of the onboarding process, you must enable it manually". On 007955000919340
+# and 007955000935486 the automatic path fired, so this platform depended on it
+# without ever declaring it. On 007955000959850 (2026-11-16) it did not: the
+# device was still at uptime 31 minutes, had never restarted, and routed nothing.
+# It was repaired by hand, which is the step this line exists to delete.
+#
+# THE SPELLING IS THE DEVICE'S, NOT THE KB's. Palo Alto's KB says to configure
+# `set deviceconfig setting advanced-routing yes`; PAN-OS 11.2.12 rejects that as
+# invalid syntax. Asked for its own completions, the firewall answered:
+#
+#     + advance-routing    Enable Advanced Routing Module
+#
+# so the config key — and this bootstrap value — is `advance-routing`, with no
+# `d`. The op-mode command keeps the other spelling
+# (`show system setting advanced-routing`), which is how the KB's version reads
+# plausibly enough to copy.
+#
+# VERIFY IT ON THE NEXT BUILD rather than trusting this comment: the same page
+# that documents `plugin-op-commands=advance-routing:enable` also shows an SCM
+# example written `plugin-op-commands-advance-routing=enable`, so one of the two
+# is wrong and only a boot settles which. Want, on a fresh firewall, BEFORE any
+# hand repair:
+#
+#     show system setting advanced-routing      -> on
+#     show interface logical                    -> forwarding lr:default
+#     show advanced-routing route               -> 0.0.0.0/0 plus connected
+#
+# Docs read 2026-11-16, not recalled:
+#   https://docs.paloaltonetworks.com/vm-series/getting-started/bootstrap-the-vm-series-firewall/create-bootstrap-configuration-files
+#   https://docs.paloaltonetworks.com/strata-cloud-manager/activation-and-onboarding/onboard-to-strata-cloud-manager
+plugin-op-commands=advance-routing:enable
