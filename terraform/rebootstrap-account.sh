@@ -130,17 +130,12 @@ fi
 
 # ── 2. archive local state that belongs to another account ──────────────────
 step "2. local state of the run-once AWS roots"
+# The decision lives in terraform/lib/archive-foreign-state.sh, with tests.
+# It used to be inline here and asked the wrong question — see that file's
+# header for the 403 it caused mid-move on 2026-11-15.
+. "$REPO/terraform/lib/archive-foreign-state.sh"
 for d in bootstrap-backend github-oidc; do
-  f="terraform/$d/terraform.tfstate"
-  [ -f "$f" ] || { ok "$d: no local state"; continue; }
-  old=$(grep -oE 'arn:aws:iam::[0-9]{12}' "$f" | head -1 | cut -d: -f5 || true)
-  if [ -n "$old" ] && [ "$old" != "$ACCT" ]; then
-    mkdir -p "terraform/$d/.old-account-$old"
-    mv terraform/"$d"/terraform.tfstate* "terraform/$d/.old-account-$old/"
-    ok "$d: state from account $old moved to .old-account-$old/ (kept, gitignored)"
-  else
-    ok "$d: state already belongs to $ACCT"
-  fi
+  ok "$d: $(archive_foreign_state "terraform/$d" "$ACCT")"
 done
 
 # ── 3. state bucket ──────────────────────────────────────────────────────────
