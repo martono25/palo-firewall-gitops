@@ -1,0 +1,31 @@
+# Day-1 interface addressing for fw-prod-edge-9850 (ADR-0001 kind #3, ADR-0005).
+#
+# Replaces REQ-2026-0922, which addressed the retired 007955000935486 — deleted from CSP on
+# 2026-11-16 when AWS account 975239810400 ended (JIRA-9800). A new request, not
+# an edit: the old one authorised addressing a different firewall, and its
+# evidence stays true of that one.
+#
+# ADDRESS MUST MATCH THE ENI. On AWS the firewall only receives traffic on an
+# interface configured with the private IP AWS assigned to its ENI — anything
+# else is configured but silent. ethernet1/3 is ENI device index 3 (dmz subnet 10.100.1.0/24), which AWS
+# assigned 10.100.1.82 on this instance (i-01a6f1c2b6a9859dc, read with
+# describe-network-interfaces 2026-11-16). The addresses change with every
+# rebuild: 935486 held 10.100.3.90/2.77/1.79, and those are now wrong.
+apiVersion: fw-intent/v1
+kind: InterfaceRequest
+
+metadata:
+  id: REQ-2026-1122
+  requester: martono@corp.com
+  ticket: JIRA-9810
+  justification: >-
+    Day-1 build for replacement edge firewall fw-prod-edge-9850 in AWS account 369676914610: address the DMZ interface so the dmz zone binds a real, addressed port.
+  requested: "2026-11-16"
+
+spec:
+  device: "007955000959850"     # fw-prod-edge-9850, PA-VM, connected
+  interface: dmz           # role — resolved via catalog/interfaces.yaml
+  ip:
+    - 10.100.1.82/24
+  mtu: 1500
+  comment: "DMZ — managed by fwgitops"
