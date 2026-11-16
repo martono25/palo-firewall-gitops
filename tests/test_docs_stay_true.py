@@ -1074,3 +1074,76 @@ def test_the_cli_reference_names_the_CURRENT_version():
     assert claimed.group(1) == declared, (
         f"cli-reference.md says v{claimed.group(1)} but the package is "
         f"{declared} — the page claims to describe a version it does not")
+
+
+# ── the demo script ────────────────────────────────────────────────────────
+#
+# A demo is the one document where being wrong is public. It was a file in the
+# operator's Downloads until 2026-11-16, where nothing checked it; two of its
+# instructions had already gone stale (the dispatched-remediate caveat, and the
+# device check that did not exist when it was written).
+
+def _demo() -> str:
+    return (DOCS / "demo-script.md").read_text()
+
+
+def test_the_demo_only_uses_fwgitops_subcommands_that_exist():
+    """The failure that cannot be recovered from in front of a room."""
+    import re
+    import subprocess
+    from pathlib import Path as _P
+    helptext = subprocess.run(
+        [str(_P(REPO_ROOT) / ".venv" / "bin" / "fwgitops"), "--help"],
+        capture_output=True, text=True).stdout
+    for sub in sorted(set(re.findall(r"fwgitops ([a-z][a-z-]+)", _demo()))):
+        assert sub in helptext, f"demo-script.md shows `fwgitops {sub}`, which does not exist"
+
+
+def test_the_demo_only_dispatches_workflows_that_exist():
+    import re
+    wf = REPO_ROOT / ".github" / "workflows"
+    for name in sorted(set(re.findall(r"gh workflow run ([a-z-]+\.yml)", _demo()))):
+        assert (wf / name).is_file(), f"demo-script.md dispatches {name}, which is not a workflow"
+
+
+def test_the_demo_passes_dry_run_false_when_it_claims_a_DELETION():
+    """`remediate` defaults to dry-run on a dispatch. Without the flag the demo
+    announces a deletion, shows a report, and deletes nothing — in public.
+
+    ASSERTED ON THE COMMAND, not on the page. The first version of this test
+    searched the whole document, so stripping the flag from the command left the
+    prose sentence ("`-f dry_run=false` is required") to satisfy it — the test
+    passed while the demo was broken."""
+    import re
+    dispatches = re.findall(r"gh workflow run remediate\.yml[^\n]*", _demo())
+    assert dispatches, "the demo must dispatch remediate.yml"
+    for line in dispatches:
+        assert "-f dry_run=false" in line, (
+            f"this dispatch would only dry-run: {line}")
+
+
+def test_the_demo_states_that_a_DISPATCH_cannot_RESTORE():
+    """The restore job is `if: github.event_name == 'schedule'`, so a dispatched
+    remediate deletes but never restores. A demo that edits a managed rule and
+    promises it will snap back is a promise the platform does not keep until
+    10:00 the next morning."""
+    wf = (REPO_ROOT / ".github" / "workflows" / "remediate.yml").read_text()
+    assert "github.event_name == 'schedule'" in wf, (
+        "if a dispatch can now restore, this caveat must be rewritten, not deleted")
+    demo = _demo()
+    assert "not restore" in demo and "10:00" in demo
+
+
+def test_the_demo_carries_the_check_for_a_firewall_that_ROUTES_NOTHING():
+    """The failure that looks like success: engine off, SCM's logical router
+    ignored, every pipeline check green. Any demo claiming enforcement needs the
+    one command that detects it."""
+    assert "preflight.sh --device" in _demo()
+
+
+def test_the_demo_keeps_the_two_tickets_distinct():
+    """Reusing the creation ticket for the removal is rejected by the pipeline,
+    and the demo is where someone copies the first value twice."""
+    demo = _demo()
+    assert "TICKET-A" in demo and "TICKET-B" in demo
+    assert "must differ" in demo or "must be different" in demo
