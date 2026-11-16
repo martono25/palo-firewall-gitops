@@ -1,13 +1,18 @@
 {
   "apply": {
     "plan_sha256": null,
-    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/38058750397"
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/43788260753"
   },
   "approval": {
-    "approvers": [],
+    "approvers": [
+      {
+        "login": "martono25",
+        "via": "deployment_gate"
+      }
+    ],
     "gate": null,
-    "merge_commit": "7bcc4c16e1c8cab76f9dd78d0f5b8fd5d18527b4",
-    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/324"
+    "merge_commit": "25e9516ecce661bb9808b5c8d7ef48fde0f218da",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/331"
   },
   "compiled": {
     "compiler_version": "3.0.0",
@@ -21,35 +26,31 @@
       "mtu": 1500,
       "name": "ethernet1/1"
     },
+    "object_is": "the LAST APPLIED state, from the baseline tree",
     "object_sha256": "748c6317a6e8c67fed27715bd730d9917d6d49a945f96e96920c4db92b98fa62",
     "scope": {
       "kind": "device",
       "value": "007955000935486"
     },
     "tfvars_file": "interfaces.auto.tfvars.json",
-    "tfvars_sha256": "7778c0a46479eba700a48a5d73944eb7b49889e27e8db87ae0883253b944ee1a"
+    "tfvars_sha256": null
   },
   "controls": [
     "AC-4",
     "CM-3",
     "AU-2",
     "AU-12",
-    "SC-7"
+    "SC-7",
+    "CM-5"
   ],
-  "controls_not_evidenced": [
-    {
-      "control": "CM-5",
-      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
-    }
-  ],
-  "generated_at": "2026-10-10T14:16:11Z",
+  "controls_not_evidenced": [],
+  "generated_at": "2026-11-16T01:49:21Z",
   "kind": "InterfaceRequest",
-  "push": {
-    "admin_count": 1,
-    "all_admins": false,
-    "folder": "007955000935486",
-    "job_id": "269",
-    "status": "success"
+  "push": null,
+  "removal": {
+    "authorises": "the removal \u2014 `request.ticket` authorised the object itself",
+    "commit": "25e9516ecce661bb9808b5c8d7ef48fde0f218da",
+    "ticket": "JIRA-9800"
   },
   "req_id": "REQ-2026-0920",
   "request": {
@@ -61,11 +62,17 @@
     "ticket": "JIRA-9710"
   },
   "risk": {
-    "checks_fired": [],
-    "classifier_version": "1.0",
-    "thresholds_version": "2026-07-26",
-    "tier": "LOW"
+    "checks_fired": [
+      {
+        "check": "interface_config_removed",
+        "reason": "removes interface configuration (REQ-2026-0920). A device-scope override reverts to the inherited object, which carries no addressing \u2014 the firewall loses the IP on that interface.",
+        "tier": "HIGH"
+      }
+    ],
+    "classifier_version": "1.0.0",
+    "thresholds_version": null,
+    "tier": "HIGH"
   },
   "schema": "fw-evidence/v2",
-  "status": "applied"
+  "status": "removed"
 }
