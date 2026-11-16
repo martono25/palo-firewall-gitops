@@ -7,6 +7,24 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ### Fixed
 
+- **State rebuilt in AWS account `369676914610`,** after `975239810400` ended on
+  2026-11-14 (both nightly jobs failed on `Not authorized to perform
+  sts:AssumeRoleWithWebIdentity` the next morning). Bucket and CI role recreated
+  by `rebootstrap-account.sh` — which this time exercised its
+  import-existing-OIDC-provider branch, the last untested path — and
+  `AWS_OIDC_ROLE_ARN` re-pointed. The 12 declared SCM objects are re-attached by
+  import blocks: state recovery, not the adoption ADR-0011 forbids.
+
+### Changed
+
+- **`fw-prod-edge-5486` (`007955000935486`) is retired** under JIRA-9800, in the
+  SAME pull request as the imports — splitting them on 2026-10-10 left a HIGH
+  apply waiting at the gate across an account switch, which only recorded
+  correctly by luck. Its VM died with the old account and CSP deletion removed it
+  from SCM; removed here with its three interface intents and its Terraform root.
+
+### Fixed
+
 - **`rebootstrap-account.sh` kept the dead account's state and said it was
   fine.** Step 2 decided which account a local state file belonged to by
   grepping for an IAM ARN. `github-oidc` state holds ARNs and archived

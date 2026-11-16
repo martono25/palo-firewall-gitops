@@ -69,7 +69,12 @@
 # firewall until the replacement VM registers and is onboarded under its OWN
 # serial (`fwgitops onboard`, then `scaffold-root --device`).
 #
-# RE-VERIFIED 2026-10-10: prod-edge -> firewalls {} — NONE.
+# RE-VERIFIED 2026-11-16: prod-edge -> firewalls {} — NONE.
+# 007955000935486 was deleted from CSP when the AWS account changed again
+# (975239810400 ended 2026-11-14; now 369676914610), which removed it from SCM.
+# Retired here the same day under JIRA-9800.
+#
+# 2026-10-10: prod-edge -> firewalls {} — NONE.
 # 007955000919340 was deleted from CSP ahead of the AWS account change (its VM
 # lives in 475369997213, expiring ~2026-10-19), which removed it from SCM.
 # Retired here the same day under JIRA-9700, on the precedent 893662 set.
@@ -105,11 +110,9 @@ folders:
     # NO FIREWALL since 2026-10-10 (see the header). Add the replacement with
     # `fwgitops adopt-device <serial> --folder prod-edge --ticket <T>`, which
     # reads the serial, display name and port map from SCM rather than by hand.
-    devices:
-      # Adopted from SCM by `fwgitops adopt-device`.
-      "007955000935486":
-        display_name: fw-prod-edge-5486
-        targetable: true
+    # NO FIREWALL since 2026-11-16 (see the header). Add the replacement with
+    # `fwgitops adopt-device <serial> --folder prod-edge --ticket <T>`.
+    devices: {}
   GitOps:
     # Sandbox: zero devices, nothing inherits from it. Where the provider
     # fidelity probes run (spike/*-probe).
