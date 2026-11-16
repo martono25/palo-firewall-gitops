@@ -1088,15 +1088,16 @@ def _demo() -> str:
 
 
 def test_the_demo_only_uses_fwgitops_subcommands_that_exist():
-    """The failure that cannot be recovered from in front of a room."""
-    import re
-    import subprocess
-    from pathlib import Path as _P
-    helptext = subprocess.run(
-        [str(_P(REPO_ROOT) / ".venv" / "bin" / "fwgitops"), "--help"],
-        capture_output=True, text=True).stdout
-    for sub in sorted(set(re.findall(r"fwgitops ([a-z][a-z-]+)", _demo()))):
-        assert sub in helptext, f"demo-script.md shows `fwgitops {sub}`, which does not exist"
+    """The failure that cannot be recovered from in front of a room.
+
+    Reads the registered parsers rather than shelling out to `fwgitops --help`:
+    the first version ran `.venv/bin/fwgitops`, which exists on the author's
+    laptop and not on the CI runner, so it failed in CI for a reason that had
+    nothing to do with the document."""
+    shown = set(re.findall(r"fwgitops ([a-z][a-z-]+)", _demo()))
+    invented = shown - _registered_subcommands()
+    assert not invented, (
+        f"demo-script.md shows subcommands that do not exist: {sorted(invented)}")
 
 
 def test_the_demo_only_dispatches_workflows_that_exist():
