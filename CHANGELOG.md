@@ -5,6 +5,24 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A firewall could come up addressed, zoned, policy-bearing — and routing
+  nothing.** `scm_logical_router` is an advanced-routing object, and with that
+  engine off SCM pushes it while the device ignores it: interfaces show
+  forwarding `N/A`, the route table is empty, and `show advanced-routing
+  logical-router` answers "advanced routing mode is not enabled". Nothing fails.
+  Palo Alto documents that Strata Cloud Manager's first push enables the engine
+  and restarts the firewall, and that you must enable it by hand when that does
+  not happen — so this platform depended on the automatic path without ever
+  declaring it. It fired for 007955000919340 and 007955000935486 and did NOT for
+  007955000959850 on 2026-11-16. `init-cfg.txt` now carries
+  `plugin-op-commands=advance-routing:enable`, so the engine is on at first boot
+  and declared in Git. The spelling is the DEVICE's: Palo Alto's KB says
+  `set deviceconfig setting advanced-routing yes`, which PAN-OS 11.2.12 rejects
+  as invalid syntax — asked for its own completions the firewall answers
+  `advance-routing`, with no `d`.
+
 ### Added
 
 - **`fw-prod-edge-9850` (`007955000959850`)** — the replacement pilot firewall,
