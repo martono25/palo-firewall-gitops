@@ -33,22 +33,49 @@ with every step that was manual then either scripted or written down here.
 
 ## Before you start
 
-You need all of these in hand. None of them can be scripted.
+**Run the checks rather than reading a list:**
 
-- [ ] **The new AWS subscription**, and an access key for it
+```bash
+./terraform/preflight.sh
+```
+
+It reads and writes nothing, and reports PASS / WARN / FAIL for every
+prerequisite that has ever derailed a move — the firewall still registered in
+SCM, the Marketplace subscription, the key pair whose *name* matches but whose
+key does not, the vCPU quota, a piped stdin that silently cancels every apply,
+credentials that will expire mid-run, and the terraform version. Exit 0 means
+nothing is blocking. `rebootstrap-account.sh` runs the same checks and refuses
+to start if any FAIL.
+
+Everything below used to be a checklist here, and three moves in a row were
+derailed by an item nobody checked. What remains is the part no script can do:
+
+- [ ] **The new AWS subscription**, and credentials for it — `aws configure`, or
+      an SSO login
 - [ ] **Two change tickets:**
-  - one to **retire** the old firewall's intents (e.g. JIRA-9400 last time)
-  - one to **onboard** the new firewall (e.g. JIRA-9500)
+  - one to **retire** the old firewall's intents (JIRA-9800 last time)
+  - one to **onboard** the new firewall (JIRA-9810 last time)
 
-  They must be new tickets. A removal quoting the ticket that *created* an
-  object makes its evidence name the wrong authorisation.
-- [ ] `gh` signed in to this repository, and `~/.fwgitops/scm.env` present
-- [ ] **The old firewall deleted from CSP** (Assets → Devices). That removes it
-  from SCM, so Step 3 skips its root cleanly instead of importing a dead device
-- [ ] The repo on `main`, up to date, with `.venv` installed (`pip install -e .`)
+  They must be different. A removal quoting the ticket that *created* an object
+  makes its evidence name the wrong authorisation, and the pipeline rejects it.
+- [ ] **The old firewall deleted from CSP** (Assets → Devices). Preflight tells
+      you if you have not: it compares the catalog against SCM and names the
+      serial.
 
-> **Never paste an AWS key into a chat, ticket or commit.** Enter it only at
-> the `aws configure` prompt. If it has been pasted anywhere, rotate it.
+> **Never paste an AWS key into a chat, ticket or commit.** Enter it only at the
+> `aws configure` prompt. If it has been pasted anywhere, rotate it.
+
+**After a firewall is built**, one more check — and do it *before* concluding the
+build worked:
+
+```bash
+./terraform/preflight.sh --device <mgmt-ip>
+```
+
+That asks the device whether the advanced routing engine is on. With it off, SCM
+pushes the logical router and the firewall silently ignores it: interfaces
+addressed, forwarding `N/A`, no routes, and every pipeline check green. It cost
+an hour on 2026-11-16.
 
 ---
 

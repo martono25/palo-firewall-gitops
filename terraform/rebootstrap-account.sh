@@ -67,6 +67,10 @@ scm_roots() {
 }
 
 # ── 1. preflight ─────────────────────────────────────────────────────────────
+# The checks live in terraform/lib/preflight.sh and run here as well as from
+# ./terraform/preflight.sh, because a prerequisite only helps if the thing that
+# needs it refuses to start without it. Three moves were derailed by one written
+# down and never checked; see that file's header.
 step "1. preflight"
 ACCT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) \
   || die "aws is not signed in. Run \`aws configure\` (or SSO) for the target account."
@@ -84,6 +88,29 @@ TFV=$(terraform version -json | "$PY" -c 'import json,sys;print(json.load(sys.st
 import sys; v=tuple(int(x) for x in sys.argv[1].split(".")[:2]); sys.exit(0 if v >= (1, 10) else 1)
 PY
 ok "terraform $TFV"
+
+# The prerequisites that are NOT about this script's own tools: a firewall the
+# catalog declares that SCM no longer has (delete it from CSP first), a key pair
+# whose name matches but whose key does not, an unsubscribed Marketplace
+# listing, a quota below the instance, and a piped stdin that silently cancels
+# every apply. Blocking ones stop the move here rather than at `terraform
+# apply` — or, worse, at an SSH failure that reads as a broken firewall.
+. "$REPO/terraform/lib/preflight.sh"
+PF_REGION="$REGION"
+# The REHEARSAL applies nothing, so it must stay scriptable; the real run needs
+# a terminal for terraform's approval prompt.
+if [ "$REHEARSE" = 1 ]; then check_stdin 0; else check_stdin 1; fi
+check_credentials
+check_firewalls "$REPO/catalog/folders.yaml"
+PILOT_TFVARS="$REPO/provisioning/aws-vmseries-pilot/terraform.tfvars"
+if [ -f "$PILOT_TFVARS" ]; then
+  _tfv() { awk -F'"' -v k="^$1" '$0 ~ k {print $2; exit}' "$PILOT_TFVARS"; }
+  _key=$(_tfv ssh_key_name); _ami=$(_tfv vmseries_ami_id); _it=$(_tfv instance_type)
+  [ -n "$_key" ] && check_key_pair "$_key" "$REPO/$_key.pem"
+  [ -n "$_ami" ] && [ -n "$_it" ] && check_marketplace "$_ami" "$_it"
+  [ -n "$_it" ] && check_quota "$_it"
+fi
+pfx_summary || die "preflight found a blocking problem — nothing has been changed. Fix every FAIL above, then run this again. (./terraform/preflight.sh re-runs just the checks.)"
 
 # ── rehearsal: the state rebuild against LIVE SCM, with EMPTY scratch state ──
 if [ "$REHEARSE" = 1 ]; then
