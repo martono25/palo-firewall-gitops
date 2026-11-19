@@ -140,23 +140,80 @@ platform addresses — not by removing the console, but by noticing.
 
 ---
 
-## Act 3 — Detection (~3 min)
+## Act 3 — Detection (~5 min)
+
+**3.1 — Start the detection run.** It normally runs at 09:00 SGT; dispatching it
+by hand runs the same workflow on demand.
 
 ```bash
 gh workflow run drift-detect.yml --ref main
-sleep 10 && gh run list --workflow drift-detect.yml --limit 1
-gh run watch          # paste the run id
 ```
 
-**The run FAILS, and that is the correct outcome.** Point at:
+That prints nothing on success. Wait a few seconds for GitHub to create the run,
+then capture its id — you will need it twice:
+
+```bash
+sleep 10
+RUN=$(gh run list --workflow drift-detect.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+echo "$RUN"
+```
+
+**3.2 — Watch it.** Takes 2–4 minutes.
+
+```bash
+gh run watch "$RUN"
+```
+
+**3.3 — It finishes RED, and that is the correct outcome.** Say so before anyone
+reads it as a mistake: a detection run that found unauthorised config is
+supposed to fail, because a green run means "nothing to answer for".
+
+Show what it found:
+
+```bash
+gh run view "$RUN" --log | grep -a "unmanaged"
+```
 
 ```
 unmanaged  prod-edge/console-hack-demo — nothing accounts for it
 ```
 
-and at *Land any violation records by pull request*, which opens a PR carrying a
-record with an id like `VIOL-2026-1116-prod-edge-console-hack-demo`. Merge it:
-records are **findings, not events** — filed once, resolved later, never deleted.
+**3.4 — Merge the violation record.** The run wrote a JSON record and opened a
+pull request for it; `main` takes no direct writes, not even from the pipeline.
+That PR is always on the branch `violations/pending`:
+
+```bash
+gh pr list --head violations/pending
+```
+
+```bash
+gh pr merge <number from that list> --squash
+```
+
+> Do **not** add `--delete-branch` here. `violations/pending` is reused and
+> force-pushed by every detection run; the other PRs in this demo use a fresh
+> branch per run, which is why they are merged differently.
+
+Then show the record you just committed:
+
+```bash
+git checkout main && git pull
+ls evidence/violations/ | tail -3
+cat evidence/violations/*console-hack-demo*.json
+```
+
+```json
+"id": "VIOL-2026-1116-prod-edge-console-hack-demo",
+"class": "unmanaged",  "scope": "prod-edge",
+"first_seen": "...",   "last_seen": "...",   "status": "open"
+```
+
+**Say:** the id is derived from the finding itself — date first seen, scope,
+object name — so every run computes the same id without a counter to coordinate.
+And this is a **finding, not an event**: seen on ten nights it stays ONE file
+whose `last_seen` moves, so "how long was this open?" has an answer. When it is
+fixed the status becomes `resolved` and the file stays, because deleting it
+would erase the fact that the gap existed.
 
 **Say:** six engines ran, not one — tags for provenance, every field of every
 managed rule, rule order, zones/routes/interfaces, address and service objects,
@@ -164,19 +221,61 @@ and `terraform plan` as a backstop.
 
 ---
 
-## Act 4 — Remediation (~3 min)
+## Act 4 — Remediation (~5 min)
+
+**4.1 — Start the remediation run.** It normally runs at 10:00 SGT, an hour
+after detection. The flag is not optional:
 
 ```bash
 gh workflow run remediate.yml --ref main -f dry_run=false
-sleep 10 && gh run list --workflow remediate.yml --limit 1
-gh run watch
 ```
 
-`-f dry_run=false` is **required**: a dispatch defaults to dry-run and would
-report what it *would* delete.
+> **`-f dry_run=false` is required.** A dispatch defaults to dry-run: without
+> it the run reports what it *would* delete, deletes nothing, and you will be
+> standing in front of a console that still shows the rule.
 
-Refresh the SCM console — `console-hack-demo` is gone. A second PR lands with a
-`fw-manual-action/v2` record naming the deletion and the violation it answers.
+```bash
+sleep 10
+RUN=$(gh run list --workflow remediate.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run watch "$RUN"
+```
+
+Takes 3–5 minutes. This one finishes **green**.
+
+**4.2 — Show the firewall config in SCM.** Refresh the console tab:
+`console-hack-demo` is **gone**. That is the whole claim of the platform, made
+visible.
+
+**4.3 — Merge the remediation record.** A second PR carries a
+`fw-manual-action/v2` record naming what was deleted and the violation id it
+answers. Unlike the violation PR, this one has a per-run branch:
+
+```bash
+gh pr list --search "record: removed unauthorised config"
+```
+
+```bash
+gh pr merge <number from that list> --squash --delete-branch
+```
+
+**4.4 — Show the two records linked.**
+
+```bash
+git checkout main && git pull
+cat "evidence/manual-actions/$(ls -t evidence/manual-actions | head -1)"
+```
+
+```json
+"schema": "fw-manual-action/v2",
+"action": "delete",   "name": "console-hack-demo",
+"violation_id": "VIOL-2026-1116-prod-edge-console-hack-demo",
+"provenance": "workflow",   "run_url": "https://github.com/...",
+"reason": "Remediate unauthorised change — VIOL-..."
+```
+
+The action record names the **`violation_id` it answers**, so the finding and
+the fix are one chain rather than two unrelated files. `provenance: workflow`
+means the pipeline did it, not a person reconstructing it afterwards.
 
 > ### Know this before you promise anything
 >
@@ -264,6 +363,9 @@ Removes: REQ-2026-0930 (TICKET-B)
 | classify says HIGH | the rule is broader than planned | the apply waits at `firewall-apply`: Actions → the run → Review deployments |
 | apply fails `403 Access denied` on a plan read | SCM transient, seen 2026-09-15 | re-run the **workflow**, never `terraform` locally |
 | drift-detect fails at `device-sync` | the firewall is stopped or absent | harmless here: it reads SCM, not the device |
+| the drift run finished **green** | nothing was detected — the hand-made rule was never committed in SCM | commit it in the console, then dispatch drift-detect again |
+| `gh pr list --head violations/pending` shows nothing | either the run found no drift (see the row above), or someone already merged it | `gh pr list --state merged --head violations/pending` to check the second case |
+| `gh run watch` says "no runs" | the run has not been created yet | wait ten seconds and re-capture `RUN` — GitHub creates it asynchronously |
 | you want the device view | needs the `.pem` **and** your current IP in the mgmt security group | ask before the session, or skip it |
 
 ## Related
