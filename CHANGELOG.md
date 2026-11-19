@@ -7,6 +7,19 @@ All notable changes to `fwgitops` are documented here. This project follows
 
 ### Added
 
+- **`docs/demo-script.md`** — the 20-minute demo, in the repository instead of
+  somebody's Downloads. Run for the Singapore team on 2026-10-30; two of its
+  instructions had already gone stale by the time it was committed, which is the
+  argument for keeping it where tests can reach it. Six tests hold it to the
+  code: every `fwgitops` subcommand and dispatched workflow must exist, the
+  remediate dispatch must carry `-f dry_run=false` (asserted on the command, not
+  the page), the restore-only-on-schedule caveat must stay while the workflow
+  still says `if: github.event_name == 'schedule'`, the device check for a
+  firewall that routes nothing must be present, and the two tickets must stay
+  distinct.
+
+### Added
+
 - **`./terraform/preflight.sh` — the account-move prerequisites, executed.**
   Three moves were derailed by five things that were written down and never
   checked: a firewall still registered in SCM, an unsubscribed Marketplace
