@@ -1148,3 +1148,42 @@ def test_the_demo_keeps_the_two_tickets_distinct():
     demo = _demo()
     assert "TICKET-A" in demo and "TICKET-B" in demo
     assert "must differ" in demo or "must be different" in demo
+
+
+def _demo_trailers():
+    """Every CONCRETE `Removes:` trailer in the demo, wherever it appears.
+
+    NOT line-anchored. The first version used `^Removes:` and the real trailer
+    lives inside `gh pr create --body "Removes: ..."`, so it matched only the
+    `<REQ id>` format template — which it then skipped as a placeholder. Both
+    tests below passed against a doc whose trailer had been deliberately
+    broken: a guarantee that guaranteed nothing.
+    """
+    import re as _re
+    return [t for t in _re.findall(r"Removes:\s*[^\n\"]+?\)", _demo())
+            if "<" not in t]
+
+
+def test_the_demo_cleanup_trailer_is_the_one_the_CODE_parses():
+    """The demo tells the presenter to type a `Removes:` line by hand. If its
+    shape drifts from the regex `apply` reads, the cleanup PR fails at the one
+    moment nobody is watching — after the audience has gone."""
+    from fwgitops.removal import REMOVES_TRAILER
+    shown = _demo_trailers()
+    assert shown, "demo-script.md must show a concrete Removes: trailer"
+    for line in shown:
+        m = REMOVES_TRAILER.search(line)
+        assert m, f"demo-script.md shows a trailer the code will not parse: {line!r}"
+        assert m.group("ticket"), line
+
+
+def test_the_demo_cleanup_uses_a_DIFFERENT_ticket_from_the_rule_it_removes():
+    """Reusing the creation ticket is rejected by classify. The demo is exactly
+    where someone copies the first value twice."""
+    import re as _re
+    created = _re.search(r"^\s+ticket: (\S+)", _demo(), _re.M)
+    assert created, "the demo's YAML must show metadata.ticket"
+    for line in _demo_trailers():
+        ticket = _re.search(r"\(([^)]+)\)", line).group(1)
+        assert ticket != created.group(1), (
+            f"the cleanup trailer reuses {ticket}, the ticket that created the rule")

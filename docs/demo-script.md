@@ -342,15 +342,41 @@ git commit -m "remove: REQ-2026-0930 — demo rule"
 git push -u origin remove/REQ-2026-0930
 ```
 
-Open the PR and put this **in the PR body** — a squash merge lands the body on
-`main`, and that is the text the apply reads:
-
-```
-Removes: REQ-2026-0930 (TICKET-B)
+```bash
+gh pr create --title "remove: REQ-2026-0930 — demo rule" --body "Removes: REQ-2026-0930 (JIRA-9900)"
 ```
 
-`TICKET-B`, not `TICKET-A`. Deleting the intent destroys the rule in SCM
-(ADR-0008).
+```bash
+gh pr merge --squash --delete-branch
+```
+
+Substitute your own ticket for `JIRA-9900`. Any string of letters, digits, dots,
+hyphens or underscores works — the platform cannot reach your tracker, so it
+checks the shape, not the value. **It must not be the ticket in the YAML's
+`metadata.ticket`** when the rule was created (`TICKET-A` in Act 1).
+
+The trailer's format is exactly:
+
+```
+Removes: <REQ id> (<ticket>)
+```
+
+One line per intent file deleted.
+
+**It goes in the PR BODY**, which is what `--body` above sets. A squash merge
+lands the body on `main`, and that is the text the apply reads. If you edit the
+body in the browser after pushing, push again — `pr-validate` reads it at push
+time and will keep failing on the version it first saw.
+
+Reusing the creation ticket is rejected, not tolerated:
+
+```
+REQ-2026-0930: deleted with no `Removes:` trailer / reuses the previous change
+ticket — a removal needs its OWN change ticket, otherwise the evidence bundle
+for this deletion names the request that asked for the object.
+```
+
+Deleting the intent destroys the rule in SCM (ADR-0008).
 
 ---
 
