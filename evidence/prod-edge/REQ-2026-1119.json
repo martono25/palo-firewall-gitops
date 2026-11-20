@@ -1,0 +1,142 @@
+{
+  "apply": {
+    "plan_sha256": null,
+    "run_url": "https://github.com/martono25/palo-firewall-gitops/actions/runs/44671734203"
+  },
+  "approval": {
+    "approvers": [],
+    "gate": null,
+    "merge_commit": "95c9c9936a402b3924612b01198b0d13afb3dee6",
+    "pr": "https://github.com/martono25/palo-firewall-gitops/pull/342"
+  },
+  "compiled": {
+    "compiler_version": "3.0.0",
+    "object": {
+      "address_objects": [
+        {
+          "name": "addr-10.20.19.0_24-73bff642",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.20.19.0/24"
+        },
+        {
+          "name": "addr-10.20.9.10_32-1df14313",
+          "tags": [
+            "gitops:managed"
+          ],
+          "type": "ip-netmask",
+          "value": "10.20.9.10/32"
+        }
+      ],
+      "rule": {
+        "action": "allow",
+        "application": [
+          "any"
+        ],
+        "category": [
+          "any"
+        ],
+        "description": null,
+        "destinations": [
+          "addr-10.20.9.10_32-1df14313"
+        ],
+        "disabled": false,
+        "from_zones": [
+          "local"
+        ],
+        "log_end": true,
+        "log_setting": "Cortex Data Lake",
+        "log_start": false,
+        "name": "REQ-2026-1119",
+        "negate_destination": false,
+        "negate_source": false,
+        "profile_group": null,
+        "relative_position": null,
+        "rulebase": "pre",
+        "services": [
+          "svc-tcp_443-fd64e1b8"
+        ],
+        "source_user": [
+          "any"
+        ],
+        "sources": [
+          "addr-10.20.19.0_24-73bff642"
+        ],
+        "tags": [
+          "gitops:managed",
+          "gitops:req:REQ-2026-1119",
+          "gitops:section:specific-allow",
+          "gitops:ticket:JIRA-5019"
+        ],
+        "target_rule": null,
+        "to_zones": [
+          "internet"
+        ]
+      },
+      "service_objects": [
+        {
+          "name": "svc-tcp_443-fd64e1b8",
+          "port": "443",
+          "protocol": "tcp",
+          "tags": [
+            "gitops:managed"
+          ]
+        }
+      ]
+    },
+    "object_sha256": "c923ea87f396ae2cb3b23d9d590cf1d5a01ec2af1f767c55023e331d19c31d95",
+    "scope": {
+      "kind": "folder",
+      "value": "prod-edge"
+    },
+    "tfvars_file": "rules.auto.tfvars.json",
+    "tfvars_sha256": "4b59d279f3edcb062d530fb98cb2ff954a9df760be529d34f240df659cdc96ce"
+  },
+  "controls": [
+    "AC-4",
+    "CM-3",
+    "AU-2",
+    "AU-12",
+    "SC-7"
+  ],
+  "controls_not_evidenced": [
+    {
+      "control": "CM-5",
+      "why": "no approver was recorded for this change. CM-5 is about WHO approved, and this run passed none \u2014 either the workflow did not collect them, or nothing required an approval."
+    }
+  ],
+  "generated_at": "2026-11-20T04:05:36Z",
+  "kind": "AccessRequest",
+  "push": {
+    "admin_count": 1,
+    "all_admins": false,
+    "folder": "prod-edge",
+    "job_id": "288",
+    "status": "success"
+  },
+  "req_id": "REQ-2026-1119",
+  "request": {
+    "intent_file": "intent/prod/payments/REQ-2026-1119.yaml",
+    "intent_sha256": "a75057bf9189de3b9f8c5c9210c29a7a1e1a4f858ad73544ab10139b23e3e0d6",
+    "justification": "Web tier needs to reach the payments API",
+    "requested": "2026-11-20",
+    "requester": "jane.doe@corp",
+    "ticket": "JIRA-5019"
+  },
+  "risk": {
+    "checks_fired": [
+      {
+        "check": "allow_without_inspection",
+        "reason": "allow rule has no security profile group \u2014 traffic is permitted without threat inspection",
+        "tier": "LOW"
+      }
+    ],
+    "classifier_version": "1.0",
+    "thresholds_version": "2026-07-26",
+    "tier": "LOW"
+  },
+  "schema": "fw-evidence/v2",
+  "status": "applied"
+}
